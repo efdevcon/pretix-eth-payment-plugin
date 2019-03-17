@@ -1,0 +1,9 @@
+{% load i18n %}
+<script type="text/javascript" src="/static/pretix_eth/jq.js"></script>
+<script type="text/javascript" src="/static/pretix_eth/check.js"></script>
+<p>{% blocktrans trimmed %}
+<p>Deposit {{ amount }} {{ coin }} into {{ payment_info }}</p>
+    We're waiting for a successful deposit to the address provided. Kindly deposit to the address and wait for confirmation. Please contact us if this
+    takes more than an hour after you've made a deposit.
+    {% endblocktrans %}</p>
+

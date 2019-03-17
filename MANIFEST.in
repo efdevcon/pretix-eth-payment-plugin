@@ -1,0 +1,3 @@
+recursive-include pretix_eth/static *
+recursive-include pretix_eth/templates *
+recursive-include pretix_eth/locale *

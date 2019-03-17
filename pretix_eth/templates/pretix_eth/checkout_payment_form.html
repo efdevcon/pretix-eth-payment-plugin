@@ -1,0 +1,22 @@
+{% load i18n %}
+{% load ibanformat %}
+
+<p>{% blocktrans trimmed %}
+    After completing your purchase, we will ask you to transfer the money to the following
+    bank account, using a personal reference code:
+{% endblocktrans %}</p>
+
+<address>
+    {% if settings.bank_details_type == "sepa" %}
+        {% trans "Account holder" %}: {{ settings.bank_details_sepa_name }}<br>
+        {% trans "IBAN" %}: {{ settings.bank_details_sepa_iban|ibanformat }}<br>
+        {% trans "BIC" %}: {{ settings.bank_details_sepa_bic }}<br>
+        {% trans "Bank" %}: {{ settings.bank_details_sepa_bank }}<br>
+    {% endif %}
+    {% if details %}
+        {{ details|linebreaksbr }}<br>
+    {% endif %}
+    <strong>
+        {% trans "We will assign you a personal reference code to use after you completed the order." %}
+    </strong>
+</address>
