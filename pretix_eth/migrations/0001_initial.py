@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
     initial = True
 
     dependencies = [
-        ('pretixbase', '0109_auto_20190215_1700'),
+        ('pretixbase', '0120_auto_20190509_0736'),
     ]
 
     operations = [
