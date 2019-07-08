@@ -162,7 +162,7 @@ class Ethereum(BasePaymentProvider):
                 rate = requests.get('https://api.bitfinex.com/v1/pubticker/' + currency + 'usd')
                 rate = rate.json()
                 final_price = float(total) / float(rate['last_price'])
-            else:
+            elif self.event.currency == 'DAI':
                 url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
                 parameters = {
                     'symbol': currency,
@@ -178,6 +178,9 @@ class Ethereum(BasePaymentProvider):
                 response = session.get(url, params=parameters)
                 data = json.loads(response.text)
                 final_price = float(total) / float(data['data'][currency]['quote'][self.event.currency]['price'])
+            else:
+                raise ImproperlyConfigured("Unrecognized currency: {0}".format(self.event.currency))
+
             return round(final_price, 2)
         except ConnectionError as e:
             logger.exception('Internal eror occured.')
