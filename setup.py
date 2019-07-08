@@ -25,7 +25,7 @@ cmdclass = {
 
 setup(
     name='pretix-eth-payment-plugin',
-    version='1.0.0',
+    version='1.0.1',
     description='An ethereum payment provider plugin for pretix software',
     long_description=long_description,
     url='https://github.com/vic-en/pretix-eth-payment-plugin',
