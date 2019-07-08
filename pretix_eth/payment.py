@@ -5,6 +5,7 @@ import json
 import logging
 import requests
 from django import forms
+from django.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template.loader import get_template
 from django.utils.translation import ugettext_lazy as _
@@ -61,6 +62,8 @@ class Ethereum(BasePaymentProvider):
             tup = (d,)
         elif self.settings.ETH:
             tup = (e,)
+        else:
+            raise ImproperlyConfigured("Must have one of `ETH` or `DAI` enabled for payments")
         form = OrderedDict(list(super().payment_form_fields.items()) + [
             ('currency_type', forms.ChoiceField(
                 label=_('Select the currency you want to pay in'),
