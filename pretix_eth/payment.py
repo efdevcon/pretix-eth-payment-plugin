@@ -5,7 +5,7 @@ import json
 import logging
 import requests
 from django import forms
-from django.exceptions import ImproperlyConfigured
+from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template.loader import get_template
 from django.utils.translation import ugettext_lazy as _
@@ -50,15 +50,17 @@ class Ethereum(BasePaymentProvider):
         d.move_to_end('DAI', last=True)
         return d
 
-    def is_allowed(self, request, total):
-        return self.settings.DAI or self.settings.ETH and super().is_allowed(request, total)
+    def is_allowed(self, request):
+        return bool(
+            (self.settings.DAI or self.settings.ETH) and super().is_allowed(request)
+        )
 
     @property
     def payment_form_fields(self):
         e = ('ETH', _('Ethereum'))
         d = ('DAI', _('DAI'))
         if self.settings.ETH and self.settings.DAI:
-            tup = (e, d)
+            tup = (d, e)
         elif self.settings.DAI:
             tup = (d,)
         elif self.settings.ETH:

@@ -23,7 +23,7 @@ cmdclass = {
 extras_require = {
     'test': [
         'pytest>=3.2.1,<4',
-        'tox>=1.8.0,<2',
+        'pytest-django>=3.5.1,<4',
     ],
     'lint': [
         'flake8>=3.5.0,<4',
