@@ -31,20 +31,21 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def settings_form_fields(self):
-        d = OrderedDict(list(super().settings_form_fields.items()) +
-                        [
-                            ('ETH', forms.CharField(
-                                label=_('Ethereum wallet address'),
-                                help_text=_('Leave empty if you do not want to accept ethereum.'),
-                                required=False
-                            )),
-                            ('DAI', forms.CharField(
-                                label=_('DAI wallet address'),
-                                help_text=_('Leave empty if you do not want to accept DAI.'),
-                                required=False
-                            ))
-                        ]
-                        )
+        d = OrderedDict(
+            list(super().settings_form_fields.items())
+            + [
+                ('ETH', forms.CharField(
+                    label=_('Ethereum wallet address'),
+                    help_text=_('Leave empty if you do not want to accept ethereum.'),
+                    required=False
+                )),
+                ('DAI', forms.CharField(
+                    label=_('DAI wallet address'),
+                    help_text=_('Leave empty if you do not want to accept DAI.'),
+                    required=False
+                ))
+            ]
+        )
         d.move_to_end('ETH', last=True)
         d.move_to_end('DAI', last=True)
         return d
@@ -64,20 +65,22 @@ class Ethereum(BasePaymentProvider):
             tup = (e,)
         else:
             raise ImproperlyConfigured("Must have one of `ETH` or `DAI` enabled for payments")
-        form = OrderedDict(list(super().payment_form_fields.items()) + [
-            ('currency_type', forms.ChoiceField(
-                label=_('Select the currency you want to pay in'),
-                widget=forms.Select,
-                choices=tup,
-                initial='ETH'
-            )),
-            ('address', forms.CharField(
-                label=_('Wallet address'),
-                help_text=_('Enter the wallet address you will deposit from here.'),
-                required=True,
-            )),
-        ]
-                           )
+        form = OrderedDict(
+            list(super().payment_form_fields.items())
+            + [
+                ('currency_type', forms.ChoiceField(
+                    label=_('Select the currency you want to pay in'),
+                    widget=forms.Select,
+                    choices=tup,
+                    initial='ETH'
+                )),
+                ('address', forms.CharField(
+                    label=_('Wallet address'),
+                    help_text=_('Enter the wallet address you will deposit from here.'),
+                    required=True,
+                )),
+            ]
+        )
         return form
 
     def checkout_confirm_render(self, request):
@@ -106,11 +109,11 @@ class Ethereum(BasePaymentProvider):
         return False
 
     def payment_is_valid_session(self, request):
-        return (
-                'payment_ethereum_fm_address' in request.session and
-                'payment_ethereum_fm_currency' in request.session and
-                'payment_ethereum_time' in request.session and
-                'payment_ethereum_amount' in request.session
+        return all(
+            'payment_ethereum_fm_address' in request.session,
+            'payment_ethereum_fm_currency' in request.session,
+            'payment_ethereum_time' in request.session,
+            'payment_ethereum_amount' in request.session,
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
@@ -124,25 +127,24 @@ class Ethereum(BasePaymentProvider):
         try:
             if request.session['payment_ethereum_fm_currency'] == 'ETH':
                 response = requests.get(
-                    'https://api.ethplorer.io/getAddressTransactions/' + self.settings.ETH + '?apiKey=freekey')
+                    f'https://api.ethplorer.io/getAddressTransactions/{self.settings.ETH}?apiKey=freekey'  # noqa: E501
+                )
                 deca = response.json()
                 if len(deca) > 0:
                     for decc in deca:
-                        if decc['success'] == True and decc['from'] == request.session['payment_ethereum_fm_address']:
-                            if decc['timestamp'] > request.session['payment_ethereum_time'] and decc['value'] >= \
-                                    request.session['payment_ethereum_amount']:
+                        if decc['success'] == True and decc['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
+                            if decc['timestamp'] > request.session['payment_ethereum_time'] and decc['value'] >= request.session['payment_ethereum_amount']:  # noqa: E501
                                 try:
                                     payment.confirm()
                                 except Quota.QuotaExceededException as e:
                                     raise PaymentException(str(e))
             else:
                 dec = requests.get(
-                    'https://blockscout.com/poa/dai/api?module=account&action=txlist&address=' + self.settings.DAI)
+                    'https://blockscout.com/poa/dai/api?module=account&action=txlist&address=' + self.settings.DAI)  # noqa: E501
                 deca = dec.json()
                 for decc in deca['result']:
-                    if decc['txreceipt_status'] == '1' and decc['from'] == request.session[
-                        'payment_ethereum_fm_address']:
-                        #           if (decc['timestamp'] > request.session['payment_ethereum_time'] and decc[
+                    if decc['txreceipt_status'] == '1' and decc['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
+                        #           if (decc['timestamp'] > request.session['payment_ethereum_time'] and decc[  # noqa: E501
                         # 'value'] >= request.session['payment_ethereum_amount']):
                         try:
                             payment.confirm()
@@ -177,23 +179,24 @@ class Ethereum(BasePaymentProvider):
 
                 response = session.get(url, params=parameters)
                 data = json.loads(response.text)
-                final_price = float(total) / float(data['data'][currency]['quote'][self.event.currency]['price'])
+                final_price = float(total) / float(data['data'][currency]['quote'][self.event.currency]['price'])  # noqa: E501
             else:
                 raise ImproperlyConfigured("Unrecognized currency: {0}".format(self.event.currency))
 
             return round(final_price, 2)
-        except ConnectionError as e:
+        except ConnectionError:
             logger.exception('Internal eror occured.')
-            raise PaymentException(_('Please try again and get in touch '
-                                     'with us if this problem persists.'))
+            raise PaymentException(
+                _('Please try again and get in touch with us if this problem persists.')
+            )
 
     def _get_rates_checkout(self, request: HttpRequest, total):
-        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_fm_currency'])
+        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_fm_currency'])  # noqa: E501
         request.session['payment_ethereum_amount'] = round(final_price, 2)
         request.session['payment_ethereum_time'] = int(time.time())
 
     def _get_rates(self, request: HttpRequest, payment: OrderPayment):
-        final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_fm_currency'])
+        final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_fm_currency'])  # noqa: E501
         request.session['payment_ethereum_amount'] = round(final_price, 2)
         request.session['payment_ethereum_time'] = int(time.time())
 
@@ -215,7 +218,7 @@ class Ethereum(BasePaymentProvider):
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/control.html')
         ctx = {'request': request, 'event': self.event, 'settings': self.settings,
-               'payment_info': payment.info_data, 'order': payment.order, 'provname': self.verbose_name,
+               'payment_info': payment.info_data, 'order': payment.order, 'provname': self.verbose_name,  # noqa: E501
                'coin': request.session['payment_ethereum_fm_currency']}
         r = template.render(ctx)
         r._csp_ignore = True
