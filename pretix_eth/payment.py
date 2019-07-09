@@ -8,20 +8,47 @@ from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template.loader import get_template
+from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
 from requests import Session
 from requests.exceptions import ConnectionError
+from eth_utils import import_string
 
 from pretix.base.models import OrderPayment, Quota
 from pretix.base.payment import BasePaymentProvider, PaymentException
 
+from .providers import (
+    TransactionProviderAPI,
+    TokenProviderAPI,
+)
+
 logger = logging.getLogger(__name__)
+
+
+DEFAULT_TRANSACTION_PROVIDER = 'pretix_eth.providers.BlockscoutTransactionProvider'
+DEFAULT_TOKEN_PROVIDER = 'pretix_eth.providers.BlockscoutTokenProvider'
 
 
 class Ethereum(BasePaymentProvider):
     identifier = 'ethereum'
     verbose_name = _('Ethereum')
     public_name = _('Ethereum')
+
+    @cached_property
+    def transaction_provider(self) -> TransactionProviderAPI:
+        transaction_provider_class = import_string(self.settings.get(
+            'TRANSACTION_PROVIDER',
+            'pretix_eth.providers.BlockscoutTransactionProvider',
+        ))
+        return transaction_provider_class()
+
+    @cached_property
+    def token_provider(self) -> TokenProviderAPI:
+        token_provider_class = import_string(self.settings.get(
+            'TOKEN_PROVIDER',
+            'pretix_eth.providers.BlockscoutTokenProvider',
+        ))
+        return token_provider_class()
 
     def settings_content_render(self, request):
         if not self.settings.token:
@@ -43,11 +70,31 @@ class Ethereum(BasePaymentProvider):
                     label=_('DAI wallet address'),
                     help_text=_('Leave empty if you do not want to accept DAI.'),
                     required=False
-                ))
+                )),
+                ('TRANSACTION_PROVIDER', forms.CharField(
+                    label=_('Transaction Provider'),
+                    help_text=_(
+                        f'This determines how the application looks up '
+                        f'transfers of Ether.  Leave empty to use the default '
+                        f'provider: {DEFAULT_TRANSACTION_PROVIDER}'
+                    ),
+                    required=False
+                )),
+                ('TOKEN_PROVIDER', forms.CharField(
+                    label=_('Token Provider'),
+                    help_text=_(
+                        f'This determines how the application looks up token '
+                        f'transfers.  Leave empty to use the default provider: '
+                        f'{DEFAULT_TOKEN_PROVIDER}'
+                    ),
+                    required=False
+                )),
             ]
         )
         d.move_to_end('ETH', last=True)
         d.move_to_end('DAI', last=True)
+        d.move_to_end('TRANSACTION_PROVIDER', last=True)
+        d.move_to_end('TOKEN_PROVIDER', last=True)
         return d
 
     def is_allowed(self, request):
@@ -119,45 +166,54 @@ class Ethereum(BasePaymentProvider):
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
+        sender = request.session['payment_ethereum_fm_address']
+        payment_currency = request.session['payment_ethereum_fm_currency']
+        payment_timestamp = request.session['payment_ethereum_time']
+        payment_amount = request.session['payment_ethereum_amount']
+
         payment.info_data = {
-            'sender_address': request.session['payment_ethereum_fm_address'],
-            'currency': request.session['payment_ethereum_fm_currency'],
-            'time': request.session['payment_ethereum_time'],
-            'amount': request.session['payment_ethereum_amount'],
+            'sender_address': sender,
+            'currency': payment_currency,
+            'time': payment_timestamp,
+            'amount': payment_amount,
         }
         payment.save(update_fields=['info'])
-        try:
-            if request.session['payment_ethereum_fm_currency'] == 'ETH':
-                response = requests.get(
-                    f'https://api.ethplorer.io/getAddressTransactions/{self.settings.ETH}?apiKey=freekey'  # noqa: E501
-                )
-                deca = response.json()
-                if len(deca) > 0:
-                    for decc in deca:
-                        if decc['success'] == True and decc['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
-                            if decc['timestamp'] > request.session['payment_ethereum_time'] and decc['value'] >= request.session['payment_ethereum_amount']:  # noqa: E501
-                                try:
-                                    payment.confirm()
-                                except Quota.QuotaExceededException as e:
-                                    raise PaymentException(str(e))
-            else:
-                dec = requests.get(
-                    'https://blockscout.com/poa/dai/api?module=account&action=txlist&address=' + self.settings.DAI)  # noqa: E501
-                deca = dec.json()
-                for decc in deca['result']:
-                    if decc['txreceipt_status'] == '1' and decc['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
-                        #           if (decc['timestamp'] > request.session['payment_ethereum_time'] and decc[  # noqa: E501
-                        # 'value'] >= request.session['payment_ethereum_amount']):
-                        try:
-                            payment.confirm()
-                        except Quota.QuotaExceededException as e:
-                            raise PaymentException(str(e))
-        except NameError:
-            pass
-        except TypeError:
-            pass
-        except AttributeError:
-            pass
+        if payment_currency == 'ETH':
+            transactions_by_sender = self.transaction_provider.get_transactions(sender)
+            for tx in transactions_by_sender:
+                is_valid_payment_tx = all((
+                    tx.success,
+                    tx.to == self.settings.ETH,
+                    tx.value >= payment_amount,
+                    tx.timestamp >= payment_timestamp,
+                ))
+                if is_valid_payment_tx:
+                    try:
+                        payment.confirm()
+                    except Quota.QuotaExceededException as e:
+                        raise PaymentException(str(e))
+                    else:
+                        break
+        elif payment_currency == 'DAI':
+            transfers_by_sender = self.token_provider.get_ERC20_transfers(sender)
+            for transfer in transfers_by_sender:
+                is_valid_payment_transfer = all((
+                    transfer.success,
+                    transfer.to == self.settings.DAI,
+                    transfer.value >= payment_amount,
+                    transfer.timestamp >= payment_timestamp,
+                ))
+                if is_valid_payment_transfer:
+                    try:
+                        payment.confirm()
+                    except Quota.QuotaExceededException as e:
+                        raise PaymentException(str(e))
+                    else:
+                        break
+        else:
+            # unkown currency
+            raise ImproperlyConfigured(f"Unknown currency: {payment_currency}")
+
         return None
 
     def _get_rates_from_api(self, total, currency):
