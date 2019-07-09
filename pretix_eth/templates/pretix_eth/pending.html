@@ -41,6 +41,10 @@
   div#connect-container button#connect-walletconnect {
     background: rgb(64, 153, 255);
   }
+
+  div#connect-error-message {
+    color: rgb(255, 22, 22);
+  }
 </style>
 <script
   src="https://cdn.jsdelivr.net/npm/web3@1.0.0-beta.55/dist/web3.umd.js"
@@ -84,5 +88,6 @@
       WalletConnect
     </button>
   </div>
+  <div id="connect-error-message"></div>
   <p>{% endblocktrans %}</p>
 </div>

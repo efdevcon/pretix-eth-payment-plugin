@@ -5,8 +5,14 @@ const qrcode = window.WalletConnectQRCodeModal.default;
 const Web3 = window.Web3;
 
 async function onMetaMask() {
+  clearError();
   const provider = await initMetaMask();
   const web3 = new Web3(provider);
+  const networkId = await web3.eth.getNetwork();
+  if (networkId !== 1) {
+    displayError("Please switch to Ethereum Mainnet");
+    return;
+  }
   const accounts = await web3.eth.getAccounts();
   const from = accounts[0];
   const tx = formatTransaction(from, to, amount, asset);
@@ -15,7 +21,13 @@ async function onMetaMask() {
 }
 
 async function onWalletConnect() {
+  clearError();
   const wc = await initWalletConnect();
+  const chainId = wc.chainId;
+  if (chainId !== 1) {
+    displayError("Please switch to Ethereum Mainnet");
+    return;
+  }
   const accounts = wc.accounts;
   const from = accounts[0];
   const tx = formatTransaction(from, to, amount, asset);
@@ -68,4 +80,17 @@ function initWalletConnect() {
       resolve(wc);
     });
   });
+}
+
+const ERROR_ELM_ID = "connect-error-message";
+
+function clearError() {
+  const el = document.getElementById(ERROR_ELM_ID);
+  el.innerHTML = "";
+}
+
+function displayError(message) {
+  const el = document.getElementById(ERROR_ELM_ID);
+  el.innerHTML = message;
+  console.error(message);
 }
