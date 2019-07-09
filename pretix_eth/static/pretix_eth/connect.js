@@ -15,7 +15,7 @@ async function onMetaMask() {
   }
   const accounts = await web3.eth.getAccounts();
   const from = accounts[0];
-  const tx = formatTransaction(from, to, amount, asset);
+  const tx = await formatTransaction(from, to, amount, asset);
   const txhash = await web3.eth.sendTransaction(tx);
   return txhash;
 }
@@ -30,7 +30,7 @@ async function onWalletConnect() {
   }
   const accounts = wc.accounts;
   const from = accounts[0];
-  const tx = formatTransaction(from, to, amount, asset);
+  const tx = await formatTransaction(from, to, amount, asset);
   const txhash = await wc.sendTransaction(tx);
   return txhash;
 }
