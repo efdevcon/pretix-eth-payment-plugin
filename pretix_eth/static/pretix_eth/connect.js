@@ -53,18 +53,15 @@ async function initMetaMask() {
 }
 
 function initWalletConnect() {
-  return new Promise((resolve, reject) => {
+  return new Promise(async (resolve, reject) => {
     const wc = new WalletConnect({
       bridge: "https://bridge.walletconnect.org"
     });
 
     if (!wc.connected) {
-      wc.createSession().then(() => {
-        const uri = wc.uri;
-
-        qrcode.open(uri, () => {
-          console.log("QR Code Modal closed");
-        });
+      await wc.createSession();
+      qrcode.open(wc.uri, () => {
+        console.log("QR Code Modal closed");
       });
     } else {
       resolve(wc);
