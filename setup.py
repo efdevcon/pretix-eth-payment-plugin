@@ -33,7 +33,10 @@ setup(
     author_email='victoreni14@gmail.com',
     license='Apache Software License',
 
-    install_requires=[],
+    install_requires=[
+        "Django==2.2.2",
+        "pretix==2.8.2",
+    ],
     packages=find_packages(exclude=['tests', 'tests.*']),
     include_package_data=True,
     cmdclass=cmdclass,
