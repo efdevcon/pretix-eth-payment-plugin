@@ -1,9 +1,88 @@
 {% load i18n %}
-<script type="text/javascript" src="/static/pretix_eth/jq.js"></script>
-<script type="text/javascript" src="/static/pretix_eth/check.js"></script>
-<p>{% blocktrans trimmed %}
-<p>Deposit {{ amount }} {{ coin }} into {{ payment_info }}</p>
-    We're waiting for a successful deposit to the address provided. Kindly deposit to the address and wait for confirmation. Please contact us if this
-    takes more than an hour after you've made a deposit.
-    {% endblocktrans %}</p>
+<style>
+  div#connect-container {
+    padding: 10px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
 
+  div#connect-container button {
+    transition: all 0.2s ease-in-out;
+    position: relative;
+    border: none;
+    border-style: none;
+    box-sizing: border-box;
+    outline: none;
+    font-size: 16px;
+    font-weight: 500;
+    font-stretch: normal;
+    line-height: normal;
+    letter-spacing: normal;
+    background: none;
+    border-radius: 6px;
+    padding: 8px 12px;
+    width: 100%;
+    max-width: 160px;
+    background: rgb(12, 13, 12);
+    color: white;
+    margin: 0 12px;
+    cursor: pointer;
+  }
+
+  div#connect-container button:hover {
+    opacity: 0.7;
+  }
+
+  div#connect-container button#connect-metamask {
+    background: rgb(246, 133, 27);
+  }
+
+  div#connect-container button#connect-walletconnect {
+    background: rgb(64, 153, 255);
+  }
+</style>
+<script
+  src="https://cdn.jsdelivr.net/npm/web3@1.0.0-beta.55/dist/web3.umd.js"
+  integrity="sha256-jEQDRxQLUdYepcb+msxp720sp4MOa1wAUvm9l4jAWSs="
+  crossorigin="anonymous"
+></script>
+<script type="text/javascript">
+  const from = "{{ from }}";
+  const amount = "{{ amount }}";
+  const asset = "{{ asset }}";
+</script>
+<script
+  type="text/javascript"
+  src="/static/pretix_eth/bignumber.min.js"
+></script>
+<script type="text/javascript" src="/static/pretix_eth/transaction.js"></script>
+<script
+  type="text/javascript"
+  src="/static/pretix_eth/walletconnect/browser/index.js"
+></script>
+<script
+  type="text/javascript"
+  src="/static/pretix_eth/walletconnect/qrcode-modal/index.js"
+></script>
+<div>
+  <p>{% blocktrans trimmed %}</p>
+  <p>
+    You're almost done, we just need you to send a transaction for {{ amount }}
+    {{ asset }}
+    Please choose how you would like to pay for it bellow.
+  </p>
+  <div id="connect-container">
+    <button id="connect-metamask" type="button" onclick="onMetaMask()">
+      Metamask
+    </button>
+    <button
+      id="connect-walletconnect"
+      type="button"
+      onclick="onWalletConnect()"
+    >
+      WalletConnect
+    </button>
+  </div>
+  <p>{% endblocktrans %}</p>
+</div>
