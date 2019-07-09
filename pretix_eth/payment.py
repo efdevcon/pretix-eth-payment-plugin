@@ -123,9 +123,9 @@ class Ethereum(BasePaymentProvider):
         payment.save(update_fields=['info'])
         try:
             if request.session['payment_ethereum_fm_currency'] == 'ETH':
-                dec = requests.get(
+                response = requests.get(
                     'https://api.ethplorer.io/getAddressTransactions/' + self.settings.ETH + '?apiKey=freekey')
-                deca = dec.json()
+                deca = response.json()
                 if len(deca) > 0:
                     for decc in deca:
                         if decc['success'] == True and decc['from'] == request.session['payment_ethereum_fm_address']:
