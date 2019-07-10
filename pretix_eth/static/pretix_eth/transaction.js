@@ -17,7 +17,7 @@ function convertUtf8ToNumber(utf8) {
 }
 
 function convertNumberToHex(num, noPrefix) {
-  let hex = new BigNumber(num).toString(16);
+  let hex = new BigNumber(`${num}`).toString(16);
   hex = sanitizeHex(hex);
   if (noPrefix) {
     hex = removeHexPrefix(hex);
@@ -34,19 +34,19 @@ async function ethApi(endpoint) {
 
 async function apiGetAccountNonce(address) {
   const chainId = 1;
-  const result = await ethApi(
+  const { result } = await ethApi(
     `/account-nonce?address=${address}&chainId=${chainId}`
   );
   return result;
 }
 
 async function apiGetGasPrices() {
-  const result = await ethApi(`/gas-prices`);
+  const { result } = await ethApi(`/gas-prices`);
   return result;
 }
 
 function addHexPrefix(hex) {
-  if (hex.toLowerCase().s(0, 2) === "0x") {
+  if (hex.toLowerCase().substring(0, 2) === "0x") {
     return hex;
   }
   return "0x" + hex;
@@ -88,11 +88,13 @@ async function formatTransaction(from, to, amount, currency) {
   let data = "";
   let gasLimit = "";
 
-  if (currency.toUpperCase() === "ETH") {
+  amount = convertAmountToRawNumber(amount);
+
+  if (currency && currency.toUpperCase() === "ETH") {
     value = amount;
     data = "0x";
     gasLimit = 21000;
-  } else if (currency.toUpperCase() === "DAI") {
+  } else if (currency && currency.toUpperCase() === "DAI") {
     const tokenAddress = DAI_TOKEN_ADDRESS;
     value = "0x00";
     data = getDataString(TOKEN_TRANSFER, [
@@ -111,14 +113,13 @@ async function formatTransaction(from, to, amount, currency) {
   const gasPrice = convertUtf8ToNumber(
     convertAmountToRawNumber(gasPrices.average.price, 9)
   );
-
   const tx = {
-    from: sanitizeHex(from),
-    to: sanitizeHex(to),
-    nonce: nonce || "",
-    gasPrice: gasPrice || "",
-    gasLimit: gasLimit || "",
-    value: value || "",
+    from: from,
+    to: to,
+    nonce: nonce ? convertNumberToHex(nonce) : "",
+    gasPrice: gasPrice ? convertNumberToHex(gasPrice) : "",
+    gasLimit: gasLimit ? convertNumberToHex(gasLimit) : "",
+    value: value ? convertNumberToHex(value) : "",
     data: data || "0x"
   };
 

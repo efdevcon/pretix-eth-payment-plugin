@@ -86,7 +86,7 @@ class Ethereum(BasePaymentProvider):
         currency = request.session['payment_ethereum_fm_currency']
         ctx = {
             'request': request, 'event': self.event, 'settings': self.settings, 'provider': self,
-            'from': self.settings.ETH if (currency == 'ETH') else self.settings.DAI,
+            'to': self.settings.ETH if (currency == 'ETH') else self.settings.DAI,
             'amount': request.session['payment_ethereum_amount'],
             'currency': currency
         }

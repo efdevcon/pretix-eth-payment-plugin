@@ -7,11 +7,11 @@ document.addEventListener("DOMContentLoaded", function() {
     e.preventDefault();
     clearError();
 
-    const web3Connect = new Web3Connect.Core({});
+    const web3Connect = new Web3Connect.Core();
 
     web3Connect.on("connect", async provider => {
       const web3 = new Web3(provider);
-      const networkId = await web3.eth.getNetwork();
+      const networkId = await web3.eth.net.getId();
       if (networkId !== 1) {
         displayError("Please switch to Ethereum Mainnet");
         return;
