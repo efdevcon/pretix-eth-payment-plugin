@@ -26,6 +26,7 @@ from pretix.control.permissions import event_permission_required
 from pretix.multidomain.urlreverse import eventreverse
 from .models import ReferencedEthereumObject
 from .payment import Ethereum
+from .txn_check import check_txn_confirmation
 
 logger = logging.getLogger(__name__)
 
@@ -82,24 +83,20 @@ def process_invoice(order, payment, invoice_id, request, *args, **kwargs):
             pass
         elif src['status'] in ('paid', 'confirmed', 'complete'):
             if payment.state in (OrderPayment.PAYMENT_STATE_CREATED, OrderPayment.PAYMENT_STATE_PENDING):   
-                address = request.GET.get('address', '')
-         #       dec = json.loads(requests.get('https://api.ethplorer.io/getAddressTransactions/' + address + '?apiKey=freekey'))
-                dec = requests.get('https://api.ethplorer.io/getAddressTransactions/' + address + '?apiKey=freekey')
-                deca = dec.json()
-                for decc in deca.itervalues():
-                    if (decc['success'] == True and decc['value'] == payment.amount and decc['from'] == payment.from_address):
-                        try:
-                            payment.confirm()
-                        except LockTimeoutException:
-                            return HttpResponse("Lock timeout, please try again.", status=503)
-                        except Quota.QuotaExceededException:
-                            return HttpResponse("Quota exceeded.", status=200)
-                    else:
-                        r = render(request, 'pretix_eth/pending.html', {
-                        'address': address,
-                        })
-                        return r
-
+                txn_hash = request.session['fm_txn_hash']
+                from_address = request.session['fm_address']
+                currency = request.session['fm_currency']
+                amount = request.session['amount']
+                to_address = self.settings.ETH if (currency == 'ETH') else self.settings.DAI
+                if check_txn_confirmation(txn_hash, from_address, to_address, currency, amount):
+                    try:
+                         payment.confirm()
+                    except LockTimeoutException:
+                        return HttpResponse("Lock timeout, please try again.", status=503)
+                    except Quota.QuotaExceededException:
+                        return HttpResponse("Quota exceeded.", status=200)
+                r = render(request, 'pretix_eth/pending.html')
+                return r
         elif src['status'] == ('expired', 'invalid'):
             if payment.state in (OrderPayment.PAYMENT_STATE_CREATED, OrderPayment.PAYMENT_STATE_PENDING):
                 payment.state = OrderPayment.PAYMENT_STATE_FAILED
