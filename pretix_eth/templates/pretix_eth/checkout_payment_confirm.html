@@ -1,47 +1,4 @@
-{% load i18n %} {% block content %}
-<style>
-  div#connect-container {
-    padding: 10px;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-  }
-
-  div#connect-container button {
-    transition: all 0.2s ease-in-out;
-    position: relative;
-    border: none;
-    border-style: none;
-    box-sizing: border-box;
-    outline: none;
-    font-size: 16px;
-    font-weight: 500;
-    font-stretch: normal;
-    line-height: normal;
-    letter-spacing: normal;
-    background: none;
-    border-radius: 6px;
-    padding: 8px 12px;
-    width: 100%;
-    max-width: 160px;
-    background: rgb(12, 13, 12);
-    color: white;
-    margin: 0 12px;
-    cursor: pointer;
-  }
-
-  div#connect-container button:hover {
-    opacity: 0.7;
-  }
-
-  div#connect-container button#connect-button {
-    background: rgb(64, 153, 255);
-  }
-
-  div#connect-error-message {
-    color: rgb(255, 22, 22);
-  }
-</style>
+{% load i18n %}
 <script type="application/javascript">
   const to = "{{ to }}";
   const amount = "{{ amount }}";
@@ -67,7 +24,6 @@
   type="application/javascript"
   src="/static/pretix_eth/connect.js"
 ></script>
-{% endblock %}
 <p>{% blocktrans trimmed %}</p>
 <p>
   You're almost done, we just need you to send a transaction for {{ amount }}
@@ -75,9 +31,8 @@
   Please choose how you would like to pay for it bellow.
 </p>
 <div id="connect-container">
-  <button id="connect-button">
-    Connect
-  </button>
+  <button id="connect-metamask">MetaMask</button>
+  <button id="connect-walletconnect">WalletConnect</button>
 </div>
 <div id="connect-error-message"></div>
 <p>{% endblocktrans %}</p>
