@@ -126,12 +126,14 @@ class Ethereum(BasePaymentProvider):
             'amount': request.session['payment_ethereum_amount'],
         }
         payment.save(update_fields=['info'])
+
         try:
             if request.session['payment_ethereum_fm_currency'] == 'ETH':
                 response = requests.get(
                     f'https://api.ethplorer.io/getAddressTransactions/{self.settings.ETH}?apiKey=freekey'  # noqa: E501
                 )
                 results = response.json()
+
                 if len(results) > 0:
                     for result in results:
                         if result['success'] == True and result['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
@@ -156,6 +158,7 @@ class Ethereum(BasePaymentProvider):
                             raise PaymentException(str(e))
         except (NameError, TypeError, AttributeError):
             pass
+
         return None
 
     def _get_rates_from_api(self, total, currency):
