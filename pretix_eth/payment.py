@@ -179,7 +179,7 @@ class Ethereum(BasePaymentProvider):
                 'request': request, 'event': self.event, 'settings': self.settings,
                 'payment_info': cur,
                 'order': payment.order, 'provname': self.verbose_name,
-                'asset': request.session['payment_ethereum_fm_currency'],
+                'currency': request.session['payment_ethereum_fm_currency'],
                 'amount': request.session['payment_ethereum_amount']
             }
         return template.render(ctx)
@@ -190,7 +190,7 @@ class Ethereum(BasePaymentProvider):
             'request': request, 'event': self.event, 'settings': self.settings,
             'order': payment.order,
             'provname': self.verbose_name,
-            'asset': request.session['payment_ethereum_fm_currency'],
+            'currency': request.session['payment_ethereum_fm_currency'],
             'amount': request.session['payment_ethereum_amount']
         }
         r = template.render(ctx)

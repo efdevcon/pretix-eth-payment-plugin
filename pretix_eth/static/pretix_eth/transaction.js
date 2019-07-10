@@ -83,23 +83,16 @@ function getDataString(func, arrVals) {
   return data;
 }
 
-async function formatTransaction(from, to, amount, asset) {
-  amount = convertUtf8ToNumber(
-    convertAmountToRawNumber(
-      price ? amount * (1 / price) : amount,
-      asset ? asset.decimals : 18
-    )
-  );
-
+async function formatTransaction(from, to, amount, currency) {
   let value = "";
   let data = "";
   let gasLimit = "";
 
-  if (asset.toUpperCase() === "ETH") {
+  if (currency.toUpperCase() === "ETH") {
     value = amount;
     data = "0x";
     gasLimit = 21000;
-  } else if (asset.toUpperCase() === "DAI") {
+  } else if (currency.toUpperCase() === "DAI") {
     const tokenAddress = DAI_TOKEN_ADDRESS;
     value = "0x00";
     data = getDataString(TOKEN_TRANSFER, [
@@ -109,7 +102,7 @@ async function formatTransaction(from, to, amount, asset) {
     gasLimit = 40000;
     to = tokenAddress;
   } else {
-    throw new Error(`Asset ${asset} not supported!`);
+    throw new Error(`Asset ${currency} not supported!`);
   }
 
   const nonce = await apiGetAccountNonce(from);

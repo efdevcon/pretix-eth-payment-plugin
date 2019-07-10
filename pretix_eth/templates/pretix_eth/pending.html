@@ -54,7 +54,7 @@
 <script type="text/javascript">
   const from = "{{ from }}";
   const amount = "{{ amount }}";
-  const asset = "{{ asset }}";
+  const currency = "{{ currency }}";
 </script>
 <script
   type="text/javascript"
@@ -73,7 +73,7 @@
   <p>{% blocktrans trimmed %}</p>
   <p>
     You're almost done, we just need you to send a transaction for {{ amount }}
-    {{ asset }}
+    {{ currency }}
     Please choose how you would like to pay for it bellow.
   </p>
   <div id="connect-container">
