@@ -22,6 +22,8 @@ from pretix.base.models import OrderPayment, OrderRefund
 from pretix.base.payment import BasePaymentProvider, PaymentException
 from pretix.multidomain.urlreverse import build_absolute_uri
 from .models import ReferencedEthereumObject
+from .txn_check import check_txn_confirmation
+
 logger = logging.getLogger(__name__)
 
 
@@ -42,7 +44,7 @@ class Ethereum(BasePaymentProvider):
          [
                 ('ETH', forms.CharField(
                      label=_('Ethereum wallet address'),
-                     help_text=_('Leave empty if you do not want to accept ethereum.'),
+                     help_text=_('Leave empty if you do not want to accept ETH.'),
                      required=False
                  )),
                 ('DAI', forms.CharField(
@@ -67,7 +69,7 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def payment_form_fields(self):
-        e = ('ETH', _('Ethereum'))
+        e = ('ETH', _('ETH'))
         d = ('DAI', _('DAI'))
         if len(self.settings.ETH) > 0 and len(self.settings.DAI) > 0:
             tup = (e, d)
@@ -86,24 +88,18 @@ class Ethereum(BasePaymentProvider):
                 choices=tup,
                 initial='ETH'
                 )),
-                ('address', forms.CharField(
-                     label=_('Wallet address'),
-                     help_text=_('Enter the wallet address you will deposit from here.'),
-                     required=True,
-                 )),
             ]
         )
         return form
 
     def checkout_confirm_render(self, request): 
         template = get_template('pretix_eth/checkout_payment_confirm.html')
-        ctx = {'request': request, 'event': self.event, 'settings': self.settings, 'provider': self, 'from': request.session['fm_address'], 'currency': request.session['fm_currency'] }
+        ctx = {'request': request, 'event': self.event, 'settings': self.settings, 'provider': self, 'currency': request.session['fm_currency'] }
         return template.render(ctx)
 
     def checkout_prepare(self, request, total):
         form = self.payment_form(request)
         if form.is_valid():
-          request.session['fm_address'] = form.cleaned_data['address']
           request.session['fm_currency'] = form.cleaned_data['currency_type']
           self.exe_checkout(request, total['total'])
           return True
@@ -112,7 +108,6 @@ class Ethereum(BasePaymentProvider):
     def payment_prepare(self, request: HttpRequest, payment: OrderPayment):
         form = self.payment_form(request)
         if form.is_valid():
-          request.session['fm_address'] = form.cleaned_data['address']
           request.session['fm_currency'] = form.cleaned_data['currency_type']
           self.exe(request, payment)
           return True
@@ -123,34 +118,16 @@ class Ethereum(BasePaymentProvider):
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         payment.refresh_from_db()
-        try:
-            if (request.session['fm_currency'] == 'ETH'):
-                 dec = requests.get('https://api.ethplorer.io/getAddressTransactions/' + self.settings.ETH + '?apiKey=freekey')
-                 deca = dec.json()
-                 if len(deca) > 0:
-                    for decc in deca:
-                        if (decc['success'] == True and decc['from'] == request.session['fm_address']):
-                            if (decc['timestamp'] > request.session['time'] and decc['value'] >= request.session['amount']):
-                                try:
-                                     payment.confirm()
-                                except Quota.QuotaExceededException:
-                                    raise PaymentException(str(e))
-            else:
-                dec = requests.get('https://blockscout.com/poa/dai/api?module=account&action=txlist&address=' + self.settings.DAI)
-                deca = dec.json()
-                for decc in deca['result']:
-                    if (decc['txreceipt_status'] == '1' and decc['from'] == request.session['fm_address']):
-                 #           if (decc['timestamp'] > request.session['time'] and decc['value'] >= request.session['amount']):
-                        try:
-                             payment.confirm()
-                        except Quota.QuotaExceededException:
-                            raise PaymentException(str(e))
-        except NameError:
-            pass
-        except TypeError:
-            pass
-        except AttributeError:
-            pass
+        txn_hash = request.session['fm_txn_hash']
+        from_address = request.session['fm_address']
+        currency = request.session['fm_currency']
+        amount = request.session['amount']
+        to_address = self.settings.ETH if (currency == 'ETH') else self.settings.DAI
+        if check_txn_confirmation(txn_hash, from_address, to_address, currency, amount):
+            try:
+                 payment.confirm()
+            except Quota.QuotaExceededException:
+                raise PaymentException(str(e))
         return None
 
     def exe_checkout(self, request: HttpRequest, payment):
@@ -177,7 +154,7 @@ class Ethereum(BasePaymentProvider):
                   final_price = float(payment) / float(data['data'][request.session['fm_currency']]['quote'][self.event.currency]['price'])
                 except (ConnectionError, Timeout, TooManyRedirects) as e:
                   pass
-            request.session['amount'] = round(final_price, 2)
+            request.session['amount'] = str(final_price)
             request.session['time'] = int(time.time())
         except (ConnectionError) as e:
             pass
@@ -208,7 +185,7 @@ class Ethereum(BasePaymentProvider):
                   final_price = float(payment.amount) / float(data['data'][request.session['fm_currency']]['quote'][self.event.currency]['price'])
                 except (ConnectionError, Timeout, TooManyRedirects) as e:
                   pass
-            request.session['amount'] = round(final_price, 2)
+            request.session['amount'] = str(final_price)
             request.session['time'] = int(time.time())
         except (ConnectionError) as e:
             logger.exception('Internal eror occured.')
@@ -235,13 +212,13 @@ class Ethereum(BasePaymentProvider):
         else:
             cur = self.settings.DAI
         ctx = {'request': request, 'event': self.event, 'settings': self.settings,
-                'payment_info' : cur, 'order': payment.order, 'provname': self.verbose_name, 'coin': request.session['fm_currency'], 'amount': request.session['amount']}
+                'payment_info' : cur, 'order': payment.order, 'provname': self.verbose_name, 'asset': request.session['fm_currency'], 'amount': request.session['amount']}
         return template.render(ctx)
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/control.html')
         ctx = {'request': request, 'event': self.event, 'settings': self.settings,
-               'payment_info': payment.info_data, 'order': payment.order, 'provname': self.verbose_name, 'coin': request.session['fm_currency']}
+               'payment_info': payment.info_data, 'order': payment.order, 'provname': self.verbose_name, 'asset': request.session['fm_currency']}
         r = template.render(ctx)
         r._csp_ignore = True
         return r
