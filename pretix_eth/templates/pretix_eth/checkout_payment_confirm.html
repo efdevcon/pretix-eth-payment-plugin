@@ -1,5 +1,4 @@
-{% load i18n %}
-{% block content %}
+{% load i18n %} {% block content %}
 <style>
   div#connect-container {
     padding: 10px;
@@ -66,10 +65,7 @@
   type="text/javascript"
   src="/static/pretix_eth/walletconnect/qrcode-modal/index.js"
 ></script>
-<script
-  type="text/javascript"
-  src="/static/pretix_eth/connect.js"
-></script>
+<script type="text/javascript" src="/static/pretix_eth/connect.js"></script>
 {% endblock %}
 <p>{% blocktrans trimmed %}</p>
 <p>
@@ -78,14 +74,10 @@
   Please choose how you would like to pay for it bellow.
 </p>
 <div id="connect-container">
-  <button id="connect-metamask" type="button" onclick="onMetaMask()">
+  <button id="connect-metamask">
     Metamask
   </button>
-  <button
-    id="connect-walletconnect"
-    type="button"
-    onclick="onWalletConnect()"
-  >
+  <button id="connect-walletconnect">
     WalletConnect
   </button>
 </div>
