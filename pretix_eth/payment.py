@@ -152,11 +152,7 @@ class Ethereum(BasePaymentProvider):
                             payment.confirm()
                         except Quota.QuotaExceededException as e:
                             raise PaymentException(str(e))
-        except NameError:
-            pass
-        except TypeError:
-            pass
-        except AttributeError:
+        except (NameError, TypeError, AttributeError):
             pass
         return None
 
