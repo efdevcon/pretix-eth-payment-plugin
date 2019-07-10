@@ -119,16 +119,18 @@ class Ethereum(BasePaymentProvider):
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
+        currency = request.session['payment_ethereum_fm_currency']
+
         payment.info_data = {
             'sender_address': request.session['payment_ethereum_fm_address'],
-            'currency': request.session['payment_ethereum_fm_currency'],
+            'currency': currency,
             'time': request.session['payment_ethereum_time'],
             'amount': request.session['payment_ethereum_amount'],
         }
         payment.save(update_fields=['info'])
 
         try:
-            if request.session['payment_ethereum_fm_currency'] == 'ETH':
+            if currency == 'ETH':
                 response = requests.get(
                     f'https://api.ethplorer.io/getAddressTransactions/{self.settings.ETH}?apiKey=freekey'  # noqa: E501
                 )
@@ -141,7 +143,7 @@ class Ethereum(BasePaymentProvider):
                                 payment.confirm()
                             except Quota.QuotaExceededException as e:
                                 raise PaymentException(str(e))
-            else:
+            elif currency == 'DAI':
                 response = requests.get(
                     f'https://blockscout.com/poa/dai/api?module=account&action=txlist&address={self.settings.DAI}'  # noqa: E501
                 )
@@ -155,6 +157,8 @@ class Ethereum(BasePaymentProvider):
                             payment.confirm()
                         except Quota.QuotaExceededException as e:
                             raise PaymentException(str(e))
+            else:
+                raise ImproperlyConfigured(f'Unrecognized currency: {currency}')
         except (NameError, TypeError, AttributeError):
             pass
 
