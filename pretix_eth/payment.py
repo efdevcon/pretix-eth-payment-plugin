@@ -36,8 +36,8 @@ class Ethereum(BasePaymentProvider):
             list(super().settings_form_fields.items())
             + [
                 ('ETH', forms.CharField(
-                    label=_('Ethereum wallet address'),
-                    help_text=_('Leave empty if you do not want to accept ethereum.'),
+                    label=_('ETH wallet address'),
+                    help_text=_('Leave empty if you do not want to accept ETH.'),
                     required=False
                 )),
                 ('DAI', forms.CharField(
