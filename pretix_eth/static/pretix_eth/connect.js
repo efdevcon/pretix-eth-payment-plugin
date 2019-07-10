@@ -7,7 +7,7 @@ document.addEventListener("DOMContentLoaded", function() {
     e.preventDefault();
     clearError();
 
-    const web3Connect = new Web3Connect.Core();
+    const web3Connect = new Web3Connect.Core({});
 
     web3Connect.on("connect", async provider => {
       const web3 = new Web3(provider);
@@ -32,8 +32,7 @@ document.addEventListener("DOMContentLoaded", function() {
   }
 
   const ERROR_ELM_ID = "connect-error-message";
-  const METAMASK_ID = "connect-metamask";
-  const WALLETCONNECT_ID = "connect-walletconnect";
+  const BUTTON_ID = "connect-button";
 
   function clearError() {
     const el = document.getElementById(ERROR_ELM_ID);
@@ -46,8 +45,5 @@ document.addEventListener("DOMContentLoaded", function() {
     console.error(message);
   }
 
-  document.getElementById(METAMASK_ID).addEventListener("click", onConnect);
-  document
-    .getElementById(WALLETCONNECT_ID)
-    .addEventListener("click", onConnect);
+  document.getElementById(BUTTON_ID).addEventListener("click", onConnect);
 });
