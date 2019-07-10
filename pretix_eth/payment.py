@@ -51,10 +51,10 @@ class Ethereum(BasePaymentProvider):
         d.move_to_end('DAI', last=True)
         return d
 
-    def is_allowed(self, request):
-    return bool(
-        (self.settings.DAI or self.settings.ETH) and super().is_allowed(request)
-    )
+    ##def is_allowed(self, request):
+    #    return bool(
+    #        (self.settings.DAI or self.settings.ETH) and super().is_allowed(request)
+    #    )
 
     @property
     def payment_form_fields(self):
@@ -106,11 +106,11 @@ class Ethereum(BasePaymentProvider):
         return False
 
     def payment_is_valid_session(self, request):
-        return all(
+        return all([
             'payment_ethereum_fm_currency' in request.session,
             'payment_ethereum_time' in request.session,
             'payment_ethereum_amount' in request.session,
-        )
+       ])
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         payment.refresh_from_db()
