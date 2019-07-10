@@ -142,8 +142,10 @@ class Ethereum(BasePaymentProvider):
                                     raise PaymentException(str(e))
             else:
                 response = requests.get(
-                    'https://blockscout.com/poa/dai/api?module=account&action=txlist&address=' + self.settings.DAI)  # noqa: E501
+                    f'https://blockscout.com/poa/dai/api?module=account&action=txlist&address={self.settings.DAI}'  # noqa: E501
+                )
                 results = response.json()
+
                 for result in results['result']:
                     if result['txreceipt_status'] == '1' and result['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
                         #           if (result['timestamp'] > request.session['payment_ethereum_time'] and result[  # noqa: E501
