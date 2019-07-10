@@ -1,11 +1,12 @@
 import codecs
+import requests
 
 def json_rpc_request(method, params):
     try:
         payload = { "id": 1337, "jsonrpc": "2.0", "method": method, "params": params }
         result = requests.post('https://api.myetherwallet.com/eth', data=payload)
         json_result = result.json()
-        txn_receipt = json_result['result']
+        return json_result['result']
     except NameError:
         return None
     except TypeError:
