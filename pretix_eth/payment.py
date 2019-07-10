@@ -134,14 +134,13 @@ class Ethereum(BasePaymentProvider):
                 )
                 results = response.json()
 
-                if len(results) > 0:
-                    for result in results:
-                        if result['success'] == True and result['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
-                            if result['timestamp'] > request.session['payment_ethereum_time'] and result['value'] >= request.session['payment_ethereum_amount']:  # noqa: E501
-                                try:
-                                    payment.confirm()
-                                except Quota.QuotaExceededException as e:
-                                    raise PaymentException(str(e))
+                for result in results:
+                    if result['success'] == True and result['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
+                        if result['timestamp'] > request.session['payment_ethereum_time'] and result['value'] >= request.session['payment_ethereum_amount']:  # noqa: E501
+                            try:
+                                payment.confirm()
+                            except Quota.QuotaExceededException as e:
+                                raise PaymentException(str(e))
             else:
                 response = requests.get(
                     f'https://blockscout.com/poa/dai/api?module=account&action=txlist&address={self.settings.DAI}'  # noqa: E501
