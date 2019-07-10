@@ -1,4 +1,5 @@
 {% load i18n %}
+{% block content %}
 <style>
   div#connect-container {
     padding: 10px;
@@ -65,25 +66,28 @@
   type="text/javascript"
   src="/static/pretix_eth/walletconnect/qrcode-modal/index.js"
 ></script>
-<div>
-  <p>{% blocktrans trimmed %}</p>
-  <p>
-    You're almost done, we just need you to send a transaction for {{ amount }}
-    {{ currency }}
-    Please choose how you would like to pay for it bellow.
-  </p>
-  <div id="connect-container">
-    <button id="connect-metamask" type="button" onclick="onMetaMask()">
-      Metamask
-    </button>
-    <button
-      id="connect-walletconnect"
-      type="button"
-      onclick="onWalletConnect()"
-    >
-      WalletConnect
-    </button>
-  </div>
-  <div id="connect-error-message"></div>
-  <p>{% endblocktrans %}</p>
+<script
+  type="text/javascript"
+  src="/static/pretix_eth/connect.js"
+></script>
+{% endblock %}
+<p>{% blocktrans trimmed %}</p>
+<p>
+  You're almost done, we just need you to send a transaction for {{ amount }}
+  {{ currency }}
+  Please choose how you would like to pay for it bellow.
+</p>
+<div id="connect-container">
+  <button id="connect-metamask" type="button" onclick="onMetaMask()">
+    Metamask
+  </button>
+  <button
+    id="connect-walletconnect"
+    type="button"
+    onclick="onWalletConnect()"
+  >
+    WalletConnect
+  </button>
 </div>
+<div id="connect-error-message"></div>
+<p>{% endblocktrans %}</p>

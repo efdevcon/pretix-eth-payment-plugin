@@ -83,11 +83,12 @@ class Ethereum(BasePaymentProvider):
 
     def checkout_confirm_render(self, request): 
         template = get_template('pretix_eth/checkout_payment_confirm.html')
+        currency = request.session['payment_ethereum_fm_currency']
         ctx = {
             'request': request, 'event': self.event, 'settings': self.settings, 'provider': self,
             'from': self.settings.ETH if (currency == 'ETH') else self.settings.DAI,
             'amount': request.session['payment_ethereum_amount'],
-            'currency': request.session['payment_ethereum_fm_currency']
+            'currency': currency
         }
         return template.render(ctx)
 
