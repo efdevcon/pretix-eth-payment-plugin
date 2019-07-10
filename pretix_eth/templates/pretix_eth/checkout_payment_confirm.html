@@ -1,38 +1,8 @@
 {% load i18n %}
-<script type="application/javascript">
-  const to = "{{ to }}";
-  const amount = "{{ amount }}";
-  const currency = "{{ currency }}";
-</script>
-<script
-  type="application/javascript"
-  src="/static/pretix_eth/web3.min.js"
-></script>
-<script
-  type="application/javascript"
-  src="/static/pretix_eth/web3connect.min.js"
-></script>
-<script
-  type="application/javascript"
-  src="/static/pretix_eth/bignumber.min.js"
-></script>
-<script
-  type="application/javascript"
-  src="/static/pretix_eth/transaction.js"
-></script>
-<script
-  type="application/javascript"
-  src="/static/pretix_eth/connect.js"
-></script>
 <p>{% blocktrans trimmed %}</p>
 <p>
   You're almost done, we just need you to send a transaction for {{ amount }}
-  {{ currency }}
-  Please choose how you would like to pay for it bellow.
+  {{ currency }} to the {{ to }}
+  Please insert the transaction hash for the payment below
 </p>
-<div id="connect-container">
-  <button id="connect-metamask">MetaMask</button>
-  <button id="connect-walletconnect">WalletConnect</button>
-</div>
-<div id="connect-error-message"></div>
 <p>{% endblocktrans %}</p>
