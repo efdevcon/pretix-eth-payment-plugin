@@ -34,7 +34,7 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def settings_form_fields(self):
-        d = OrderedDict(
+        form_fields = OrderedDict(
             list(super().settings_form_fields.items())
             + [
                 ('ETH', forms.CharField(
@@ -49,9 +49,11 @@ class Ethereum(BasePaymentProvider):
                 ))
             ]
         )
-        d.move_to_end('ETH', last=True)
-        d.move_to_end('DAI', last=True)
-        return d
+
+        form_fields.move_to_end('ETH', last=True)
+        form_fields.move_to_end('DAI', last=True)
+
+        return form_fields
 
     def is_allowed(self, request):
         return bool(
