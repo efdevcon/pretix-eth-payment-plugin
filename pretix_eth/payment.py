@@ -98,7 +98,7 @@ class Ethereum(BasePaymentProvider):
             'event': self.event,
             'settings': self.settings,
             'provider': self,
-            'from': request.session['payment_ethereum_fm_address'],
+            'txn_hash': request.session['payment_ethereum_fm_txn_hash'],
             'currency': request.session['payment_ethereum_fm_currency'],
         }
 
@@ -108,7 +108,7 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_fm_address'] = form.cleaned_data['address']
+            request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
             request.session['payment_ethereum_fm_currency'] = form.cleaned_data['currency_type']
             self._get_rates_checkout(request, total['total'])
             return True
@@ -119,7 +119,7 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_fm_address'] = form.cleaned_data['address']
+            request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
             request.session['payment_ethereum_fm_currency'] = form.cleaned_data['currency_type']
             self._get_rates(request, payment)
             return True
@@ -128,7 +128,7 @@ class Ethereum(BasePaymentProvider):
 
     def payment_is_valid_session(self, request):
         return all(
-            'payment_ethereum_fm_address' in request.session,
+            'payment_ethereum_fm_txn_hash' in request.session,
             'payment_ethereum_fm_currency' in request.session,
             'payment_ethereum_time' in request.session,
             'payment_ethereum_amount' in request.session,
@@ -136,7 +136,7 @@ class Ethereum(BasePaymentProvider):
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         payment.info_data = {
-            'sender_address': request.session['payment_ethereum_fm_address'],
+            'txn_hash': request.session['payment_ethereum_fm_txn_hash'],
             'currency': request.session['payment_ethereum_fm_currency'],
             'time': request.session['payment_ethereum_time'],
             'amount': request.session['payment_ethereum_amount'],
