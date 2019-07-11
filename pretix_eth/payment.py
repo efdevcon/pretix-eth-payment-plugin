@@ -126,38 +126,39 @@ class Ethereum(BasePaymentProvider):
             'amount': request.session['payment_ethereum_amount'],
         }
         payment.save(update_fields=['info'])
+
         try:
             if request.session['payment_ethereum_fm_currency'] == 'ETH':
                 response = requests.get(
                     f'https://api.ethplorer.io/getAddressTransactions/{self.settings.ETH}?apiKey=freekey'  # noqa: E501
                 )
-                deca = response.json()
-                if len(deca) > 0:
-                    for decc in deca:
-                        if decc['success'] == True and decc['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
-                            if decc['timestamp'] > request.session['payment_ethereum_time'] and decc['value'] >= request.session['payment_ethereum_amount']:  # noqa: E501
+                results = response.json()
+
+                if len(results) > 0:
+                    for result in results:
+                        if result['success'] == True and result['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
+                            if result['timestamp'] > request.session['payment_ethereum_time'] and result['value'] >= request.session['payment_ethereum_amount']:  # noqa: E501
                                 try:
                                     payment.confirm()
                                 except Quota.QuotaExceededException as e:
                                     raise PaymentException(str(e))
             else:
-                dec = requests.get(
-                    'https://blockscout.com/poa/dai/api?module=account&action=txlist&address=' + self.settings.DAI)  # noqa: E501
-                deca = dec.json()
-                for decc in deca['result']:
-                    if decc['txreceipt_status'] == '1' and decc['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
-                        #           if (decc['timestamp'] > request.session['payment_ethereum_time'] and decc[  # noqa: E501
+                response = requests.get(
+                    f'https://blockscout.com/poa/dai/api?module=account&action=txlist&address={self.settings.DAI}'  # noqa: E501
+                )
+                results = response.json()
+
+                for result in results['result']:
+                    if result['txreceipt_status'] == '1' and result['from'] == request.session['payment_ethereum_fm_address']:  # noqa: E501
+                        #           if (result['timestamp'] > request.session['payment_ethereum_time'] and result[  # noqa: E501
                         # 'value'] >= request.session['payment_ethereum_amount']):
                         try:
                             payment.confirm()
                         except Quota.QuotaExceededException as e:
                             raise PaymentException(str(e))
-        except NameError:
+        except (NameError, TypeError, AttributeError):
             pass
-        except TypeError:
-            pass
-        except AttributeError:
-            pass
+
         return None
 
     def _get_rates_from_api(self, total, currency):
