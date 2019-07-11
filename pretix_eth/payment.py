@@ -100,7 +100,7 @@ class Ethereum(BasePaymentProvider):
             'settings': self.settings,
             'provider': self,
             'txn_hash': request.session['payment_ethereum_fm_txn_hash'],
-            'currency': request.session['payment_ethereum_fm_currency_type'],
+            'currency_type': request.session['payment_ethereum_fm_currency_type'],
         }
 
         return template.render(ctx)
