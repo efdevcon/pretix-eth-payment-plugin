@@ -17,6 +17,9 @@ from pretix.base.payment import BasePaymentProvider, PaymentException
 
 logger = logging.getLogger(__name__)
 
+ETH_CHOICE = ('ETH', _('Ethereum'))
+DAI_CHOICE = ('DAI', _('DAI'))
+
 
 class Ethereum(BasePaymentProvider):
     identifier = 'ethereum'
@@ -57,23 +60,22 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def payment_form_fields(self):
-        e = ('ETH', _('Ethereum'))
-        d = ('DAI', _('DAI'))
         if self.settings.ETH and self.settings.DAI:
-            tup = (d, e)
+            currency_type_choices = (DAI_CHOICE, ETH_CHOICE)
         elif self.settings.DAI:
-            tup = (d,)
+            currency_type_choices = (DAI_CHOICE,)
         elif self.settings.ETH:
-            tup = (e,)
+            currency_type_choices = (ETH_CHOICE,)
         else:
             raise ImproperlyConfigured("Must have one of `ETH` or `DAI` enabled for payments")
-        form = OrderedDict(
+
+        form_fields = OrderedDict(
             list(super().payment_form_fields.items())
             + [
                 ('currency_type', forms.ChoiceField(
                     label=_('Select the currency you want to pay in'),
                     widget=forms.Select,
-                    choices=tup,
+                    choices=currency_type_choices,
                     initial='ETH'
                 )),
                 ('address', forms.CharField(
@@ -83,7 +85,8 @@ class Ethereum(BasePaymentProvider):
                 )),
             ]
         )
-        return form
+
+        return form_fields
 
     def checkout_confirm_render(self, request):
         template = get_template('pretix_eth/checkout_payment_confirm.html')
