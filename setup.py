@@ -22,11 +22,12 @@ cmdclass = {
 
 extras_require = {
     'test': [
-        'pytest>=3.2.1,<4',
+        'pytest>=5.0.1,<6',
         'pytest-django>=3.5.1,<4',
     ],
     'lint': [
         'flake8>=3.5.0,<4',
+        "mypy==0.701",
     ],
     'dev': [
         'tox>=1.8.0,<2',
@@ -52,6 +53,9 @@ setup(
     install_requires=[
         "Django==2.2.2",
         "pretix==2.8.2",
+        "eth-typing>=2.1.0,<3",
+        "eth-utils>=1.6.1,<2",
+        "eth-hash[pycryptodome]>=0.2.0,<0.3",
     ],
     python_requires='>=3.7, <4',
     extras_require=extras_require,
