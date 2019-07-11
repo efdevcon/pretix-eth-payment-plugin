@@ -80,9 +80,9 @@ class Ethereum(BasePaymentProvider):
                     choices=currency_type_choices,
                     initial='ETH'
                 )),
-                ('address', forms.CharField(
-                    label=_('Wallet address'),
-                    help_text=_('Enter the wallet address you will deposit from here.'),
+                ('txn_hash', forms.CharField(
+                    label=_('Transaction hash'),
+                    help_text=_('Enter the hash of the transaction in which you paid with the selected currency'),
                     required=True,
                 )),
             ]
