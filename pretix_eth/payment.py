@@ -55,7 +55,7 @@ class Ethereum(BasePaymentProvider):
 
         return form_fields
 
-    def is_allowed(self, request):
+    def is_allowed(self, request, **kwargs):
         return bool(
             (self.settings.DAI or self.settings.ETH) and super().is_allowed(request)
         )
