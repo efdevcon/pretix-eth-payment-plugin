@@ -75,14 +75,15 @@ class Ethereum(BasePaymentProvider):
             list(super().payment_form_fields.items())
             + [
                 ('currency_type', forms.ChoiceField(
-                    label=_('Select the currency you want to pay in'),
+                    label=_('Payment currency'),
+                    help_text=_('Select the currency you used for payment.'),
                     widget=forms.Select,
                     choices=currency_type_choices,
                     initial='ETH'
                 )),
                 ('txn_hash', forms.CharField(
                     label=_('Transaction hash'),
-                    help_text=_('Enter the hash of the transaction in which you paid with the selected currency'),
+                    help_text=_('Enter the hash of the transaction in which you paid with the selected currency.'),
                     required=True,
                 )),
             ]
