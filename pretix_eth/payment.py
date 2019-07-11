@@ -128,12 +128,12 @@ class Ethereum(BasePaymentProvider):
         return False
 
     def payment_is_valid_session(self, request):
-        return all(
+        return all((
             'payment_ethereum_fm_txn_hash' in request.session,
             'payment_ethereum_fm_currency_type' in request.session,
             'payment_ethereum_time' in request.session,
             'payment_ethereum_amount' in request.session,
-        )
+        ))
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         payment.info_data = {
