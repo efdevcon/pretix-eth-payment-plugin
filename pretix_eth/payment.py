@@ -99,7 +99,7 @@ class Ethereum(BasePaymentProvider):
             'settings': self.settings,
             'provider': self,
             'txn_hash': request.session['payment_ethereum_fm_txn_hash'],
-            'currency': request.session['payment_ethereum_fm_currency'],
+            'currency': request.session['payment_ethereum_fm_currency_type'],
         }
 
         return template.render(ctx)
@@ -109,7 +109,7 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
-            request.session['payment_ethereum_fm_currency'] = form.cleaned_data['currency_type']
+            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']
             self._get_rates_checkout(request, total['total'])
             return True
 
@@ -120,7 +120,7 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
-            request.session['payment_ethereum_fm_currency'] = form.cleaned_data['currency_type']
+            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']
             self._get_rates(request, payment)
             return True
 
@@ -129,7 +129,7 @@ class Ethereum(BasePaymentProvider):
     def payment_is_valid_session(self, request):
         return all(
             'payment_ethereum_fm_txn_hash' in request.session,
-            'payment_ethereum_fm_currency' in request.session,
+            'payment_ethereum_fm_currency_type' in request.session,
             'payment_ethereum_time' in request.session,
             'payment_ethereum_amount' in request.session,
         )
@@ -137,14 +137,14 @@ class Ethereum(BasePaymentProvider):
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         payment.info_data = {
             'txn_hash': request.session['payment_ethereum_fm_txn_hash'],
-            'currency': request.session['payment_ethereum_fm_currency'],
+            'currency_type': request.session['payment_ethereum_fm_currency_type'],
             'time': request.session['payment_ethereum_time'],
             'amount': request.session['payment_ethereum_amount'],
         }
         payment.save(update_fields=['info'])
 
         try:
-            if request.session['payment_ethereum_fm_currency'] == 'ETH':
+            if request.session['payment_ethereum_fm_currency_type'] == 'ETH':
                 response = requests.get(
                     f'https://api.ethplorer.io/getAddressTransactions/{self.settings.ETH}?apiKey=freekey'  # noqa: E501
                 )
@@ -209,13 +209,13 @@ class Ethereum(BasePaymentProvider):
             )
 
     def _get_rates_checkout(self, request: HttpRequest, total):
-        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_fm_currency'])  # noqa: E501
+        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_fm_currency_type'])  # noqa: E501
 
         request.session['payment_ethereum_amount'] = round(final_price, 2)
         request.session['payment_ethereum_time'] = int(time.time())
 
     def _get_rates(self, request: HttpRequest, payment: OrderPayment):
-        final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_fm_currency'])  # noqa: E501
+        final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_fm_currency_type'])  # noqa: E501
 
         request.session['payment_ethereum_amount'] = round(final_price, 2)
         request.session['payment_ethereum_time'] = int(time.time())
@@ -223,7 +223,7 @@ class Ethereum(BasePaymentProvider):
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
 
-        if request.session['payment_ethereum_fm_currency'] == 'ETH':
+        if request.session['payment_ethereum_fm_currency_type'] == 'ETH':
             cur = self.settings.ETH
         else:
             cur = self.settings.DAI
@@ -235,7 +235,7 @@ class Ethereum(BasePaymentProvider):
             'payment_info': cur,
             'order': payment.order,
             'provname': self.verbose_name,
-            'coin': payment.info_data['currency'],
+            'coin': payment.info_data['currency_type'],
             'amount': payment.info_data['amount'],
         }
 
@@ -251,7 +251,7 @@ class Ethereum(BasePaymentProvider):
             'payment_info': payment.info_data,
             'order': payment.order,
             'provname': self.verbose_name,
-            'coin': request.session['payment_ethereum_fm_currency'],
+            'coin': request.session['payment_ethereum_fm_currency_type'],
         }
 
         r = template.render(ctx)
