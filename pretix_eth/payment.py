@@ -92,27 +92,33 @@ class Ethereum(BasePaymentProvider):
 
     def checkout_confirm_render(self, request):
         template = get_template('pretix_eth/checkout_payment_confirm.html')
+
         ctx = {'request': request, 'event': self.event, 'settings': self.settings, 'provider': self,
                'from': request.session['payment_ethereum_fm_address'],
                'currency': request.session['payment_ethereum_fm_currency']}
+
         return template.render(ctx)
 
     def checkout_prepare(self, request, total):
         form = self.payment_form(request)
+
         if form.is_valid():
             request.session['payment_ethereum_fm_address'] = form.cleaned_data['address']
             request.session['payment_ethereum_fm_currency'] = form.cleaned_data['currency_type']
             self._get_rates_checkout(request, total['total'])
             return True
+
         return False
 
     def payment_prepare(self, request: HttpRequest, payment: OrderPayment):
         form = self.payment_form(request)
+
         if form.is_valid():
             request.session['payment_ethereum_fm_address'] = form.cleaned_data['address']
             request.session['payment_ethereum_fm_currency'] = form.cleaned_data['currency_type']
             self._get_rates(request, payment)
             return True
+
         return False
 
     def payment_is_valid_session(self, request):
@@ -199,20 +205,24 @@ class Ethereum(BasePaymentProvider):
 
     def _get_rates_checkout(self, request: HttpRequest, total):
         final_price = self._get_rates_from_api(total, request.session['payment_ethereum_fm_currency'])  # noqa: E501
+
         request.session['payment_ethereum_amount'] = round(final_price, 2)
         request.session['payment_ethereum_time'] = int(time.time())
 
     def _get_rates(self, request: HttpRequest, payment: OrderPayment):
         final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_fm_currency'])  # noqa: E501
+
         request.session['payment_ethereum_amount'] = round(final_price, 2)
         request.session['payment_ethereum_time'] = int(time.time())
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
+
         if (request.session['payment_ethereum_fm_currency'] == 'ETH'):
             cur = self.settings.ETH
         else:
             cur = self.settings.DAI
+
         ctx = {
             'request': request, 'event': self.event, 'settings': self.settings,
             'payment_info': cur,
@@ -220,15 +230,19 @@ class Ethereum(BasePaymentProvider):
             'coin': payment.info_data['currency'],
             'amount': payment.info_data['amount']
         }
+
         return template.render(ctx)
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/control.html')
+
         ctx = {'request': request, 'event': self.event, 'settings': self.settings,
                'payment_info': payment.info_data, 'order': payment.order, 'provname': self.verbose_name,  # noqa: E501
                'coin': request.session['payment_ethereum_fm_currency']}
+
         r = template.render(ctx)
         r._csp_ignore = True
+
         return r
 
     abort_pending_allowed = True
