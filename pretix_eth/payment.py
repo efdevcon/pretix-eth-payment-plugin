@@ -17,7 +17,7 @@ from pretix.base.payment import BasePaymentProvider, PaymentException
 
 logger = logging.getLogger(__name__)
 
-ETH_CHOICE = ('ETH', _('Ethereum'))
+ETH_CHOICE = ('ETH', _('ETH'))
 DAI_CHOICE = ('DAI', _('DAI'))
 
 
