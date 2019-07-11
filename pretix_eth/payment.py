@@ -218,7 +218,7 @@ class Ethereum(BasePaymentProvider):
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
 
-        if (request.session['payment_ethereum_fm_currency'] == 'ETH'):
+        if request.session['payment_ethereum_fm_currency'] == 'ETH':
             cur = self.settings.ETH
         else:
             cur = self.settings.DAI
