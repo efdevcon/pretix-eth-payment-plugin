@@ -93,9 +93,14 @@ class Ethereum(BasePaymentProvider):
     def checkout_confirm_render(self, request):
         template = get_template('pretix_eth/checkout_payment_confirm.html')
 
-        ctx = {'request': request, 'event': self.event, 'settings': self.settings, 'provider': self,
-               'from': request.session['payment_ethereum_fm_address'],
-               'currency': request.session['payment_ethereum_fm_currency']}
+        ctx = {
+            'request': request,
+            'event': self.event,
+            'settings': self.settings,
+            'provider': self,
+            'from': request.session['payment_ethereum_fm_address'],
+            'currency': request.session['payment_ethereum_fm_currency'],
+        }
 
         return template.render(ctx)
 
@@ -224,11 +229,14 @@ class Ethereum(BasePaymentProvider):
             cur = self.settings.DAI
 
         ctx = {
-            'request': request, 'event': self.event, 'settings': self.settings,
+            'request': request,
+            'event': self.event,
+            'settings': self.settings,
             'payment_info': cur,
-            'order': payment.order, 'provname': self.verbose_name,
+            'order': payment.order,
+            'provname': self.verbose_name,
             'coin': payment.info_data['currency'],
-            'amount': payment.info_data['amount']
+            'amount': payment.info_data['amount'],
         }
 
         return template.render(ctx)
@@ -236,9 +244,15 @@ class Ethereum(BasePaymentProvider):
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/control.html')
 
-        ctx = {'request': request, 'event': self.event, 'settings': self.settings,
-               'payment_info': payment.info_data, 'order': payment.order, 'provname': self.verbose_name,  # noqa: E501
-               'coin': request.session['payment_ethereum_fm_currency']}
+        ctx = {
+            'request': request,
+            'event': self.event,
+            'settings': self.settings,
+            'payment_info': payment.info_data,
+            'order': payment.order,
+            'provname': self.verbose_name,
+            'coin': request.session['payment_ethereum_fm_currency'],
+        }
 
         r = template.render(ctx)
         r._csp_ignore = True
