@@ -6,6 +6,7 @@ import pytest
 from django.test import RequestFactory
 from django.utils import timezone
 from django.contrib.sessions.backends.db import SessionStore
+from eth_utils import to_hex
 
 from pretix.base.models import Order, OrderPayment
 
@@ -24,19 +25,19 @@ DAI_ADDRESS = '0xda10123400000000000000000000000000000000'
 
 
 class FixtureTransactionProvider(TransactionProviderAPI):
-    def __init__(self, transactions):
-        self._transactions = transactions
+    def __init__(self, transaction):
+        self._transaction = transaction
 
-    def get_transactions(self, from_address):
-        return self._transactions
+    def get_transaction(self, from_address):
+        return self._transaction
 
 
 class FixtureTokenProvider(TokenProviderAPI):
-    def __init__(self, transfers):
-        self._transfers = transfers
+    def __init__(self, transfer):
+        self._transfer = transfer
 
-    def get_ERC20_transfers(self, from_address):
-        return self._transfers
+    def get_ERC20_transfer(self, from_address):
+        return self._transfer
 
 
 @pytest.fixture
@@ -61,19 +62,17 @@ def order_and_payment(transactional_db, event):
 def test_provider_execute_successful_payment_in_ETH(provider, order_and_payment):
     order, payment = order_and_payment
 
-    # setup a transaction provider which returns a fixed list of transactions
-    # which will satisfy our order conditions
-    transactions = (
-        Transaction(
-            hash=ZERO_HASH,
-            sender=ZERO_ADDRESS,
-            success=True,
-            to=ETH_ADDRESS,
-            timestamp=int(time.time()),
-            value=100,
-        ),
+    # setup a transaction provider which returns a fixed transaction
+    transaction = Transaction(
+        hash=ZERO_HASH,
+        sender=ZERO_ADDRESS,
+        success=True,
+        to=ETH_ADDRESS,
+        timestamp=int(time.time()),
+        value=100,
     )
-    tx_provider = FixtureTransactionProvider(transactions)
+
+    tx_provider = FixtureTransactionProvider(transaction)
     provider.transaction_provider = tx_provider
     assert provider.transaction_provider is tx_provider
 
@@ -87,8 +86,8 @@ def test_provider_execute_successful_payment_in_ETH(provider, order_and_payment)
     session.create()
 
     # setup all the necessary session data for the payment to be valid
-    session['payment_ethereum_fm_address'] = ZERO_ADDRESS
-    session['payment_ethereum_fm_currency'] = 'ETH'
+    session['payment_ethereum_fm_txn_hash'] = to_hex(ZERO_HASH)
+    session['payment_ethereum_fm_currency_type'] = 'ETH'
     session['payment_ethereum_time'] = int(time.time()) - 10
     session['payment_ethereum_amount'] = 100
 
@@ -109,19 +108,17 @@ def test_provider_execute_successful_payment_in_ETH(provider, order_and_payment)
 def test_provider_execute_successful_payment_in_DAI(provider, order_and_payment):
     order, payment = order_and_payment
 
-    # setup a transaction provider which returns a fixed list of transactions
-    # which will satisfy our order conditions
-    transfers = (
-        Transfer(
-            hash=ZERO_HASH,
-            sender=ZERO_ADDRESS,
-            success=True,
-            to=DAI_ADDRESS,
-            timestamp=int(time.time()),
-            value=100,
-        ),
+    # setup a transfer provider which returns a fixed transfer
+    transfer = Transfer(
+        hash=ZERO_HASH,
+        sender=ZERO_ADDRESS,
+        success=True,
+        to=DAI_ADDRESS,
+        timestamp=int(time.time()),
+        value=100,
     )
-    token_provider = FixtureTokenProvider(transfers)
+
+    token_provider = FixtureTokenProvider(transfer)
     provider.token_provider = token_provider
     assert provider.token_provider is token_provider
 
@@ -135,8 +132,8 @@ def test_provider_execute_successful_payment_in_DAI(provider, order_and_payment)
     session.create()
 
     # setup all the necessary session data for the payment to be valid
-    session['payment_ethereum_fm_address'] = ZERO_ADDRESS
-    session['payment_ethereum_fm_currency'] = 'DAI'
+    session['payment_ethereum_fm_txn_hash'] = to_hex(ZERO_HASH)
+    session['payment_ethereum_fm_currency_type'] = 'DAI'
     session['payment_ethereum_time'] = int(time.time()) - 10
     session['payment_ethereum_amount'] = 100
 
