@@ -69,24 +69,26 @@ class Transfer(NamedTuple):
 
 class TokenProviderAPI(ABC):
     @abstractmethod
-    def get_ERC20_transfers(self, to_address: ChecksumAddress) -> Tuple[Transfer, ...]:
+    def get_ERC20_transfer(self, txn_hash: str) -> Transfer:
         ...
 
 
 class BlockscoutTokenProvider(TokenProviderAPI):
-    def get_ERC20_transfers(self, from_address: ChecksumAddress) -> Tuple[Transfer, ...]:
+    def get_ERC20_transfer(self, txn_hash: str) -> Transfer:
         response = requests.get(
-            f'https://blockscout.com/poa/dai/api?module=account&action=txlist&address={from_address}',  # noqa: E501
+            f'http://blockscout.com/poa/dai/api?module=transaction&action=gettxinfo&txhash={txn_hash}',  # noqa: E501
         )
+
         response.raise_for_status()
         transfer_data = response.json()
-        return tuple(
-            Transfer(
-                hash=to_bytes(hexstr=raw_transfer['hash']),
-                sender=to_checksum_address(raw_transfer['from']),
-                success=(raw_transfer['txreceipt_status'] == 1),
-                timestamp=int(raw_transfer['timeStamp']),
-                to=to_checksum_address(raw_transfer['to']),
-                value=int(raw_transfer['value']),
-            ) for raw_transfer in transfer_data['result']
+
+        raw_transfer = transfer_data['result']
+
+        return Transfer(
+            hash=to_bytes(hexstr=raw_transfer['hash']),
+            sender=to_checksum_address(raw_transfer['from']),
+            success=raw_transfer['success'],
+            timestamp=int(raw_transfer['timeStamp']),
+            to=to_checksum_address(raw_transfer['to']),
+            value=int(raw_transfer['value']),
         )

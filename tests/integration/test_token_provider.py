@@ -8,34 +8,17 @@ from eth_utils import (
 )
 
 
-META_CARTEL_ADDRESS = '0xa1c3Eb21cD44F0433c6be936AD84D20b70B564D3'
+POA_DAI_TXN_HASH = '0x67c4d34ff58351d196bdd74160b3a93d4e3298c5dd8423aa954f268f3f54d610'
 
 
 def test_blockscout_transaction_provider():
     provider = BlockscoutTokenProvider()
-    transfers = provider.get_ERC20_transfers(META_CARTEL_ADDRESS)
-    assert len(transfers) > 0
-    assert all(
-        is_bytes(tx.hash) and len(tx.hash) == 32
-        for tx in transfers
-    )
-    assert all(
-        is_checksum_address(tx.sender)
-        for tx in transfers
-    )
-    assert all(
-        is_checksum_address(tx.to)
-        for tx in transfers
-    )
-    assert all(tuple(
-        is_integer(tx.value)
-        for tx in transfers
-    ))
-    assert all(
-        is_integer(tx.timestamp)
-        for tx in transfers
-    )
-    assert all(
-        is_boolean(tx.success)
-        for tx in transfers
-    )
+
+    tx = provider.get_ERC20_transfer(POA_DAI_TXN_HASH)
+
+    assert is_bytes(tx.hash) and len(tx.hash)
+    assert is_checksum_address(tx.sender)
+    assert is_checksum_address(tx.to)
+    assert is_integer(tx.value)
+    assert is_integer(tx.timestamp)
+    assert is_boolean(tx.success)
