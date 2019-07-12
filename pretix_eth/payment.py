@@ -6,12 +6,16 @@ from collections import OrderedDict
 
 import requests
 from django import forms
+from django.db import transaction as db_transaction
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template.loader import get_template
 from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
-from eth_utils import import_string
+from eth_utils import (
+    import_string,
+    to_bytes,
+)
 from requests import Session
 from requests.exceptions import ConnectionError
 
@@ -23,6 +27,10 @@ from eth_utils import to_wei, from_wei
 from .providers import (
     TransactionProviderAPI,
     TokenProviderAPI,
+)
+
+from .models import (
+    Transaction,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,12 +62,6 @@ class Ethereum(BasePaymentProvider):
             'pretix_eth.providers.BlockscoutTokenProvider',
         ))
         return token_provider_class()
-
-    def settings_content_render(self, request):
-        if not self.settings.token:
-            return (
-                "<p>An address where payment will be made.</p>"
-            )
 
     @property
     def settings_form_fields(self):
@@ -186,13 +188,19 @@ class Ethereum(BasePaymentProvider):
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         txn_hash = request.session['payment_ethereum_txn_hash']
+        txn_hash_bytes = to_bytes(hexstr=txn_hash)
         currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
         payment_amount = request.session['payment_ethereum_amount']
 
+        if Transaction.objects.filter(txn_hash=txn_hash_bytes).exists():
+            raise PaymentException(
+                f'Transaction with hash {txn_hash} already used for payment'
+            )
+
         payment.info_data = {
             'txn_hash': txn_hash,
-            'currency': currency_type,
+            'currency_type': currency_type,
             'time': payment_timestamp,
             'amount': payment_amount,
         }
@@ -200,33 +208,32 @@ class Ethereum(BasePaymentProvider):
 
         if currency_type == 'ETH':
             transaction = self.transaction_provider.get_transaction(txn_hash)
-            is_valid_payment_transaction = all((
+            is_valid_payment = all((
                 transaction.success,
                 transaction.to == self.settings.ETH,
                 transaction.value >= payment_amount,
                 transaction.timestamp >= payment_timestamp,
             ))
-            if is_valid_payment_transaction:
-                try:
-                    payment.confirm()
-                except Quota.QuotaExceededException as e:
-                    raise PaymentException(str(e))
         elif currency_type == 'DAI':
             transfer = self.token_provider.get_ERC20_transfer(txn_hash)
-            is_valid_payment_transfer = all((
+            is_valid_payment = all((
                 transfer.success,
                 transfer.to == self.settings.DAI,
                 transfer.value >= payment_amount,
                 transfer.timestamp >= payment_timestamp,
             ))
-            if is_valid_payment_transfer:
+        else:
+            # unkown currency
+            raise ImproperlyConfigured(f"Unknown currency: {currency_type}")
+
+        if is_valid_payment:
+            with db_transaction.atomic():
                 try:
                     payment.confirm()
                 except Quota.QuotaExceededException as e:
                     raise PaymentException(str(e))
-        else:
-            # unkown currency
-            raise ImproperlyConfigured(f"Unknown currency: {currency_type}")
+                else:
+                    Transaction.objects.create(txn_hash=txn_hash_bytes, order_payment=payment)
 
     def _get_rates_from_api(self, total, currency):
         try:
@@ -325,13 +332,9 @@ class Ethereum(BasePaymentProvider):
             'payment_info': payment.info_data,
             'order': payment.order,
             'provname': self.verbose_name,
-            'coin': request.session['payment_ethereum_currency_type'],
         }
 
-        r = template.render(ctx)
-        r._csp_ignore = True
-
-        return r
+        return template.render(ctx)
 
     abort_pending_allowed = True
 
