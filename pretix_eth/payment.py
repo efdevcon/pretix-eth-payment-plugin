@@ -192,7 +192,7 @@ class Ethereum(BasePaymentProvider):
 
         payment.info_data = {
             'txn_hash': txn_hash,
-            'currency': currency_type,
+            'currency_type': currency_type,
             'time': payment_timestamp,
             'amount': payment_amount,
         }
@@ -325,13 +325,9 @@ class Ethereum(BasePaymentProvider):
             'payment_info': payment.info_data,
             'order': payment.order,
             'provname': self.verbose_name,
-            'coin': request.session['payment_ethereum_currency_type'],
         }
 
-        r = template.render(ctx)
-        r._csp_ignore = True
-
-        return r
+        return template.render(ctx)
 
     abort_pending_allowed = True
 

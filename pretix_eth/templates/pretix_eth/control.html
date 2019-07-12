@@ -4,10 +4,10 @@
     <dl class="dl-horizontal">
         <dt>{% trans "Amount" %}</dt>
         <dd>{{ payment_info.amount }}</dd>
-        <dt>{% trans "Currency" %}</dt>
-        <dd>{{ payment_info.currency }}</dd>
-        <dt>{% trans "Address" %}</dt>
-        <dd>{{ payment_info.sender_address }}</dd>
+        <dt>{% trans "Currency type" %}</dt>
+        <dd>{{ payment_info.currency_type }}</dd>
+        <dt>{% trans "Transaction hash" %}</dt>
+        <dd>{{ payment_info.txn_hash }}</dd>
     </dl>
     {% if "message" in payment_info %}
         <dl class="dl-horizontal">
