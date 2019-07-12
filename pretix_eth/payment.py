@@ -281,7 +281,7 @@ class Ethereum(BasePaymentProvider):
         if 'txhash' in request.GET:
             request.session['payment_ethereum_txn_hash'] = request.GET.get('txhash')
         if 'currency' in request.GET:
-            request.session['payment_ethereum_currency_type'] = request.GET.get('txhash')
+            request.session['payment_ethereum_currency_type'] = request.GET.get('currency')
         form = self.payment_form(request)
         template = get_template('pretix_eth/checkout_payment_form.html')
         ctx = {
