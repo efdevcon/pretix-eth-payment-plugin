@@ -32,29 +32,31 @@ class Transaction(NamedTuple):
 
 class TransactionProviderAPI(ABC):
     @abstractmethod
-    def get_transactions(self, to_address: ChecksumAddress) -> Tuple[Transaction, ...]:
+    def get_transaction(self, txn_hash: str) -> Transaction:
         ...
 
 
 class BlockscoutTransactionProvider(TransactionProviderAPI):
-    def get_transactions(self, from_address: ChecksumAddress) -> Tuple[Transaction, ...]:
+    def get_transaction(self, txn_hash: str) -> Transaction:
         response = requests.get(
-            f'https://blockscout.com/poa/core/api?module=account&action=txlist&address={from_address}',  # noqa: E501
+            f'https://blockscout.com/eth/mainnet/api?module=transaction&action=gettxinfo&txhash={txn_hash}',  # noqa: E501
         )
-        # TODO: handle http errors here
+
         response.raise_for_status()
         response_data = response.json()
+
         if response_data['status'] != "1":
             raise Exception("TODO: real exception and message")
-        return tuple(
-            Transaction(
-                hash=to_bytes(hexstr=raw_transaction['hash']),
-                sender=to_checksum_address(raw_transaction['from']),
-                success=(raw_transaction['txreceipt_status'] == 1),
-                timestamp=int(raw_transaction['timeStamp']),
-                to=to_checksum_address(raw_transaction['to']),
-                value=int(raw_transaction['value']),
-            ) for raw_transaction in response_data['result']
+
+        raw_transaction = response_data['result']
+
+        return Transaction(
+            hash=to_bytes(hexstr=raw_transaction['hash']),
+            sender=to_checksum_address(raw_transaction['from']),
+            success=raw_transaction['success'],
+            timestamp=int(raw_transaction['timeStamp']),
+            to=to_checksum_address(raw_transaction['to']),
+            value=int(raw_transaction['value']),
         )
 
 
