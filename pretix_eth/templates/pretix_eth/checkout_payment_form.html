@@ -1,24 +1,16 @@
-{% load i18n %}
-{% load ibanformat %}
-
-<p>
-    {% blocktrans trimmed %}
-    After completing your purchase, we will ask you to transfer the money to
-    the following bank account, using a personal reference code:
-    {% endblocktrans %}
-</p>
-
-<address>
-    {% if settings.bank_details_type == "sepa" %}
-        {% trans "Account holder" %}: {{ settings.bank_details_sepa_name }}<br>
-        {% trans "IBAN" %}: {{ settings.bank_details_sepa_iban|ibanformat }}<br>
-        {% trans "BIC" %}: {{ settings.bank_details_sepa_bic }}<br>
-        {% trans "Bank" %}: {{ settings.bank_details_sepa_bank }}<br>
+{% load bootstrap3 %}
+<div class="form-horizontal">
+    {% if ETH_address %}
+      <div class="ETH-crypto-payment-details">
+        <p>Send {{ WEI_per_ticket }} ETH to {{ ETH_address }}</p>
+      </div>
     {% endif %}
-    {% if details %}
-        {{ details|linebreaksbr }}<br>
+    {% if DAI_address %}
+      <div class="ETH-crypto-payment-details">
+        <p>Send {{ DAI_per_ticket }} DAI to {{ DAI_address }}</p>
+      </div>
     {% endif %}
-    <strong>
-        {% trans "We will assign you a personal reference code to use after you completed the order." %}
-    </strong>
-</address>
+
+
+    {% bootstrap_form form layout='horizontal' %}
+</div>

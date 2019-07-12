@@ -1,8 +1,9 @@
+import decimal
+import json
+import logging
 import time
 from collections import OrderedDict
 
-import json
-import logging
 import requests
 from django import forms
 from django.core.exceptions import ImproperlyConfigured
@@ -16,6 +17,8 @@ from requests.exceptions import ConnectionError
 
 from pretix.base.models import OrderPayment, Quota
 from pretix.base.payment import BasePaymentProvider, PaymentException
+
+from eth_utils import to_wei, from_wei
 
 from .providers import (
     TransactionProviderAPI,
@@ -145,8 +148,8 @@ class Ethereum(BasePaymentProvider):
             'event': self.event,
             'settings': self.settings,
             'provider': self,
-            'txn_hash': request.session['payment_ethereum_fm_txn_hash'],
-            'currency_type': request.session['payment_ethereum_fm_currency_type'],
+            'txn_hash': request.session['payment_ethereum_txn_hash'],
+            'currency_type': request.session['payment_ethereum_currency_type'],
         }
 
         return template.render(ctx)
@@ -155,8 +158,8 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
-            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
+            request.session['payment_ethereum_txn_hash'] = form.cleaned_data['txn_hash']
+            request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
             self._get_rates_checkout(request, total['total'])
             return True
 
@@ -166,8 +169,8 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
-            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
+            request.session['payment_ethereum_txn_hash'] = form.cleaned_data['txn_hash']
+            request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
             self._get_rates(request, payment)
             return True
 
@@ -175,15 +178,15 @@ class Ethereum(BasePaymentProvider):
 
     def payment_is_valid_session(self, request):
         return all((
-            'payment_ethereum_fm_txn_hash' in request.session,
-            'payment_ethereum_fm_currency_type' in request.session,
+            'payment_ethereum_txn_hash' in request.session,
+            'payment_ethereum_currency_type' in request.session,
             'payment_ethereum_time' in request.session,
             'payment_ethereum_amount' in request.session,
         ))
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        txn_hash = request.session['payment_ethereum_fm_txn_hash']
-        currency_type = request.session['payment_ethereum_fm_currency_type']
+        txn_hash = request.session['payment_ethereum_txn_hash']
+        currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
         payment_amount = request.session['payment_ethereum_amount']
 
@@ -227,11 +230,13 @@ class Ethereum(BasePaymentProvider):
 
     def _get_rates_from_api(self, total, currency):
         try:
-            if self.event.currency == 'USD':
-                rate = requests.get('https://api.bitfinex.com/v1/pubticker/' + currency + 'usd')
+            if currency == 'ETH':
+                rate = requests.get(f'https://api.bitfinex.com/v1/pubticker/eth{self.event.currency}')  # noqa: E501
                 rate = rate.json()
-                final_price = float(total) / float(rate['last_price'])
-            elif self.event.currency == 'DAI':
+                final_price = to_wei((
+                    total / decimal.Decimal(rate['last_price'])
+                ).quantize(decimal.Decimal('1.00000')), 'ether')
+            elif currency == 'DAI':
                 url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
                 parameters = {
                     'symbol': currency,
@@ -246,7 +251,9 @@ class Ethereum(BasePaymentProvider):
 
                 response = session.get(url, params=parameters)
                 data = json.loads(response.text)
-                final_price = float(total) / float(data['data'][currency]['quote'][self.event.currency]['price'])  # noqa: E501
+                final_price = (
+                    total / decimal.Decimal(data['data'][currency]['quote'][self.event.currency]['price'])  # noqa: E501
+                ).quantize(decimal.Decimal('1.00'))
             else:
                 raise ImproperlyConfigured("Unrecognized currency: {0}".format(self.event.currency))
 
@@ -258,21 +265,39 @@ class Ethereum(BasePaymentProvider):
             )
 
     def _get_rates_checkout(self, request: HttpRequest, total):
-        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_fm_currency_type'])  # noqa: E501
+        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
-        request.session['payment_ethereum_amount'] = round(final_price, 2)
+        request.session['payment_ethereum_amount'] = final_price
         request.session['payment_ethereum_time'] = int(time.time())
 
     def _get_rates(self, request: HttpRequest, payment: OrderPayment):
-        final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_fm_currency_type'])  # noqa: E501
+        final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
-        request.session['payment_ethereum_amount'] = round(final_price, 2)
+        request.session['payment_ethereum_amount'] = final_price
         request.session['payment_ethereum_time'] = int(time.time())
+
+    def payment_form_render(self, request: HttpRequest, total: decimal.Decimal):
+        # this ensures that the form will pre-populate the transaction hash into the form.
+        if 'txhash' in request.GET:
+            request.session['payment_ethereum_txn_hash'] = request.GET.get('txhash')
+        if 'currency' in request.GET:
+            request.session['payment_ethereum_currency_type'] = request.GET.get('txhash')
+        form = self.payment_form(request)
+        template = get_template('pretix_eth/checkout_payment_form.html')
+        ctx = {
+            'request': request,
+            'form': form,
+            'WEI_per_ticket': from_wei(self._get_rates_from_api(total, 'ETH'), 'ether'),
+            'DAI_per_ticket': self._get_rates_from_api(total, 'DAI'),
+            'ETH_address': self.settings.get('ETH'),
+            'DAI_address': self.settings.get('DAI'),
+        }
+        return template.render(ctx)
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
 
-        if request.session['payment_ethereum_fm_currency_type'] == 'ETH':
+        if request.session['payment_ethereum_currency_type'] == 'ETH':
             cur = self.settings.ETH
         else:
             cur = self.settings.DAI
@@ -300,7 +325,7 @@ class Ethereum(BasePaymentProvider):
             'payment_info': payment.info_data,
             'order': payment.order,
             'provname': self.verbose_name,
-            'coin': request.session['payment_ethereum_fm_currency_type'],
+            'coin': request.session['payment_ethereum_currency_type'],
         }
 
         r = template.render(ctx)
