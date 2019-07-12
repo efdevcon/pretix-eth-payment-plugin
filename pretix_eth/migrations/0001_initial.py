@@ -18,7 +18,7 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False)),
                 ('txn_hash', models.BinaryField(max_length=32, unique=True)),
-                ('order_payment', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='pretixbase.OrderPayment')),
+                ('order_payment', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='pretixbase.OrderPayment')),  # noqa: E501
             ],
         ),
     ]
