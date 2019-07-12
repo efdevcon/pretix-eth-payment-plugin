@@ -53,6 +53,7 @@ setup(
     install_requires=[
         "Django==2.2.2",
         "pretix==2.8.2",
+        "eth-abi>=2.0.0,<3",
         "eth-typing>=2.1.0,<3",
         "eth-utils>=1.6.1,<2",
         "eth-hash[pycryptodome]>=0.2.0,<0.3",

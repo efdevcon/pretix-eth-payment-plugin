@@ -8,13 +8,13 @@ from eth_utils import (
 )
 
 
-POA_DAI_TXN_HASH = '0x67c4d34ff58351d196bdd74160b3a93d4e3298c5dd8423aa954f268f3f54d610'
+MAINNET_DAI_TXN_HASH = '0x4122bca6b9304170d02178c616185594b05ca1562e8893afa434f4df8d600dfa'
 
 
 def test_blockscout_transaction_provider():
     provider = BlockscoutTokenProvider()
 
-    tx = provider.get_ERC20_transfer(POA_DAI_TXN_HASH)
+    tx = provider.get_ERC20_transfer(MAINNET_DAI_TXN_HASH)
 
     assert is_bytes(tx.hash) and len(tx.hash)
     assert is_checksum_address(tx.sender)
