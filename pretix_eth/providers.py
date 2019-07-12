@@ -106,8 +106,12 @@ class TokenProviderAPI(ABC):
 
 class BlockscoutTokenProvider(BlockscoutMixin, TokenProviderAPI):
     error_class = TokenProviderError
-    token_address = '0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359'  # Mainnet DAI address
-    transfer_method_id = to_bytes(hexstr='0xa9059cbb')  # Method id for ERC20 "transfer(address,uint256)"
+
+    # Mainnet DAI address
+    token_address = '0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359'
+
+    # Method id for ERC20 "transfer(address,uint256)"
+    transfer_method_id = to_bytes(hexstr='0xa9059cbb')
 
     def get_ERC20_transfer(self, txn_hash: str) -> Transfer:
         response = requests.get(
