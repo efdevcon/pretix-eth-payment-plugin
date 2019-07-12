@@ -1,49 +1,12 @@
-import datetime
-
 from django.core.exceptions import ImproperlyConfigured
-from django.utils import timezone
 from django.test import RequestFactory
 from django.contrib.sessions.backends.db import SessionStore
 
 import pytest
 
-from pretix.base.models import (
-    Event,
-    Organizer,
-)
-
-from pretix_eth.payment import Ethereum
-
 
 ETH_ADDRESS = '0xeee0123400000000000000000000000000000000'
 DAI_ADDRESS = '0xda10123400000000000000000000000000000000'
-
-
-@pytest.fixture
-def event(transactional_db):
-    now = timezone.now()
-    presale_start_at = now + datetime.timedelta(days=2)
-    presale_end_at = now + datetime.timedelta(days=6)
-    start_at = now + datetime.timedelta(days=7)
-    end_at = now + datetime.timedelta(days=14)
-
-    organizer = Organizer.objects.create(name='Ethereum Foundation')
-    event = Event.objects.create(
-        name='Devcon',
-        organizer=organizer,
-        date_from=start_at,
-        date_to=end_at,
-        presale_start=presale_start_at,
-        presale_end=presale_end_at,
-        location='Osaka',
-    )
-    return event
-
-
-@pytest.fixture
-def provider(event):
-    provider = Ethereum(event)
-    return provider
 
 
 @pytest.mark.django_db
@@ -59,6 +22,8 @@ def test_provider_settings_form_fields(provider):
 
     assert 'ETH' in form_fields
     assert 'DAI' in form_fields
+    assert 'TRANSACTION_PROVIDER' in form_fields
+    assert 'TOKEN_PROVIDER' in form_fields
 
 
 @pytest.mark.parametrize(
@@ -71,7 +36,7 @@ def test_provider_settings_form_fields(provider):
     )
 )
 @pytest.mark.django_db
-def test_provider_is_allowed(event, provider, ETH, DAI):
+def test_provider_is_allowed(event, provider, ETH, DAI):  # noqa: N803
     # pre-check that ETH and DAI settings are null and not allowed without configuration
     assert provider.settings.ETH is None
     assert provider.settings.DAI is None
