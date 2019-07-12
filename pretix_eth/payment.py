@@ -55,12 +55,6 @@ class Ethereum(BasePaymentProvider):
         ))
         return token_provider_class()
 
-    def settings_content_render(self, request):
-        if not self.settings.token:
-            return (
-                "<p>An address where payment will be made.</p>"
-            )
-
     @property
     def settings_form_fields(self):
         form_fields = OrderedDict(
