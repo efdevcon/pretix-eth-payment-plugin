@@ -129,7 +129,7 @@ class Ethereum(BasePaymentProvider):
                 )),
                 ('txn_hash', forms.CharField(
                     label=_('Transaction hash'),
-                    help_text=_('Enter the hash of the transaction in which you paid with the selected currency.'),
+                    help_text=_('Enter the hash of the transaction in which you paid with the selected currency.'),  # noqa: E501
                     required=True,
                 )),
             ]
@@ -156,7 +156,7 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
-            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']
+            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
             self._get_rates_checkout(request, total['total'])
             return True
 
@@ -167,7 +167,7 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             request.session['payment_ethereum_fm_txn_hash'] = form.cleaned_data['txn_hash']
-            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']
+            request.session['payment_ethereum_fm_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
             self._get_rates(request, payment)
             return True
 

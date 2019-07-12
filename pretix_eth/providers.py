@@ -4,7 +4,6 @@ from abc import (
 )
 from typing import (
     NamedTuple,
-    Tuple,
 )
 
 import requests

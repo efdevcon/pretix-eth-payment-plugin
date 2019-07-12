@@ -36,7 +36,7 @@ def test_provider_settings_form_fields(provider):
     )
 )
 @pytest.mark.django_db
-def test_provider_is_allowed(event, provider, ETH, DAI):
+def test_provider_is_allowed(event, provider, ETH, DAI):  # noqa: N803
     # pre-check that ETH and DAI settings are null and not allowed without configuration
     assert provider.settings.ETH is None
     assert provider.settings.DAI is None
