@@ -196,37 +196,31 @@ class Ethereum(BasePaymentProvider):
         payment.save(update_fields=['info'])
 
         if currency_type == 'ETH':
-            transactions_by_sender = self.transaction_provider.get_transactions(sender)
-            for tx in transactions_by_sender:
-                is_valid_payment_tx = all((
-                    tx.success,
-                    tx.to == self.settings.ETH,
-                    tx.value >= payment_amount,
-                    tx.timestamp >= payment_timestamp,
-                ))
-                if is_valid_payment_tx:
-                    try:
-                        payment.confirm()
-                    except Quota.QuotaExceededException as e:
-                        raise PaymentException(str(e))
-                    else:
-                        break
+            transaction = self.transaction_provider.get_transaction(txn_hash)
+            is_valid_payment_transaction = all((
+                transaction.success,
+                transaction.to == self.settings.ETH,
+                transaction.value >= payment_amount,
+                transaction.timestamp >= payment_timestamp,
+            ))
+            if is_valid_payment_transaction:
+                try:
+                    payment.confirm()
+                except Quota.QuotaExceededException as e:
+                    raise PaymentException(str(e))
         elif currency_type == 'DAI':
-            transfers_by_sender = self.token_provider.get_ERC20_transfers(sender)
-            for transfer in transfers_by_sender:
-                is_valid_payment_transfer = all((
-                    transfer.success,
-                    transfer.to == self.settings.DAI,
-                    transfer.value >= payment_amount,
-                    transfer.timestamp >= payment_timestamp,
-                ))
-                if is_valid_payment_transfer:
-                    try:
-                        payment.confirm()
-                    except Quota.QuotaExceededException as e:
-                        raise PaymentException(str(e))
-                    else:
-                        break
+            transfer = self.token_provider.get_ERC20_transfer(txn_hash)
+            is_valid_payment_transfer = all((
+                transfer.success,
+                transfer.to == self.settings.DAI,
+                transfer.value >= payment_amount,
+                transfer.timestamp >= payment_timestamp,
+            ))
+            if is_valid_payment_transfer:
+                try:
+                    payment.confirm()
+                except Quota.QuotaExceededException as e:
+                    raise PaymentException(str(e))
         else:
             # unkown currency
             raise ImproperlyConfigured(f"Unknown currency: {currency_type}")
