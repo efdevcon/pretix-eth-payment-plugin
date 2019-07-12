@@ -77,15 +77,15 @@ class BlockscoutTransactionProvider(BlockscoutMixin, TransactionProviderAPI):
         response_data = response.json()
         self.raise_for_json_status(response_data)
 
-        raw_transaction = response_data['result']
+        txn_data = response_data['result']
 
         return Transaction(
-            hash=to_bytes(hexstr=raw_transaction['hash']),
-            sender=to_checksum_address(raw_transaction['from']),
-            success=raw_transaction['success'],
-            timestamp=int(raw_transaction['timeStamp']),
-            to=to_checksum_address(raw_transaction['to']),
-            value=int(raw_transaction['value']),
+            hash=to_bytes(hexstr=txn_data['hash']),
+            sender=to_checksum_address(txn_data['from']),
+            success=txn_data['success'],
+            timestamp=int(txn_data['timeStamp']),
+            to=to_checksum_address(txn_data['to']),
+            value=int(txn_data['value']),
         )
 
 
