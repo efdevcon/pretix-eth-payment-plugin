@@ -287,7 +287,7 @@ class Ethereum(BasePaymentProvider):
         ctx = {
             'request': request,
             'form': form,
-            'WEI_per_ticket': from_wei(self._get_rates_from_api(total, 'ETH'), 'ether'),
+            'ETH_per_ticket': from_wei(self._get_rates_from_api(total, 'ETH'), 'ether'),
             'DAI_per_ticket': self._get_rates_from_api(total, 'DAI'),
             'ETH_address': self.settings.get('ETH'),
             'DAI_address': self.settings.get('DAI'),
