@@ -21,6 +21,13 @@
         {% blocktrans trimmed %}
         Send {{ ETH_per_ticket }} ETH to {{ ETH_address }}.
         {% endblocktrans %}
+        <a
+          href="https://checkout.web3connect.com/?currency=ETH&amount={{ ETH_per_ticket }}&to={{ ETH_address }}&callbackUrl={{ request.path|urlencode }}"
+          target="blank"
+          rel="noreferrer noopener"
+        >
+          <button type="button">{% trans "Pay with Web3Connect" %}</button>
+        </a>
       </p>
     </div>
   {% endif %}
@@ -35,6 +42,13 @@
         {% blocktrans trimmed %}
         Send {{ DAI_per_ticket }} DAI to {{ DAI_address }}.
         {% endblocktrans %}
+        <a
+          href="https://checkout.web3connect.com/?currency=DAI&amount={{ DAI_per_ticket }}&to={{ DAI_address }}&callbackUrl={{ request.path|urlencode }}"
+          target="blank"
+          rel="noreferrer noopener"
+        >
+          <button type="button">{% trans "Pay with Web3Connect" %}</button>
+        </a>
       </p>
     </div>
   {% endif %}

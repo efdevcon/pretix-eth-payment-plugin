@@ -1,13 +1,13 @@
-{% load i18n %}
-{% load static %}
-<script type="text/javascript" src="{% static "pretix_eth/check.js" %}"></script>
+{% load i18n %} {% load static %}
 <p>
-    <strong>{% blocktrans %}Deposit {{ amount }} {{ coin }} into {{ payment_info }}{% endblocktrans %}</strong>
-</p>
-<p>
-    {% blocktrans trimmed %}
-    We're waiting for a successful deposit to the address provided. Kindly deposit to the address and wait for confirmation. Please contact us if this
-    takes more than an hour after you've made a deposit.
+  <strong>
+    {% blocktrans %} Deposit {{ amount }} {{ coin }} into {{ payment_info }}
     {% endblocktrans %}
+  </strong>
 </p>
-
+<p>
+  {% blocktrans trimmed %} We're waiting for a successful deposit to the address
+  provided. Kindly deposit to the address and wait for confirmation. Please
+  contact us if this takes more than an hour after you've made a deposit. {%
+  endblocktrans %}
+</p>
