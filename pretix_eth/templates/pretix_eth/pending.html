@@ -1,8 +1,9 @@
 {% load i18n %} {% load static %}
 <p>
   <strong>
-    {% blocktrans %} Deposit {{ amount }} {{ coin }} into {{ payment_info }}
-    {% endblocktrans %}
+    {% blocktrans trimmed %}Deposit {{ amount }} {{ coin }} into{{
+      payment_info
+    }}{% endblocktrans %}
   </strong>
 </p>
 <p>
