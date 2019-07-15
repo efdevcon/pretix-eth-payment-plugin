@@ -20,8 +20,9 @@ def test_provider_properties(provider):
 def test_provider_settings_form_fields(provider):
     form_fields = provider.settings_form_fields
 
-    assert 'ETH' in form_fields
-    assert 'DAI' in form_fields
+    assert 'WALLET_ADDRESS' in form_fields
+    assert 'ETH_RATE' in form_fields
+    assert 'xDAI_RATE' in form_fields
     assert 'TRANSACTION_PROVIDER' in form_fields
     assert 'TOKEN_PROVIDER' in form_fields
 
