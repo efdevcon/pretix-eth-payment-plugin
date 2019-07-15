@@ -59,12 +59,6 @@ def test_provider_is_allowed(event, provider):
 
 
 @pytest.mark.django_db
-def test_provider_payment_form_fields_improper_configuration(provider):
-    with pytest.raises(ImproperlyConfigured):
-        provider.payment_form_fields
-
-
-@pytest.mark.django_db
 def test_provider_payment_form_fields(provider):
     payment_form_fields = provider.payment_form_fields
 
