@@ -1,7 +1,7 @@
 {% load i18n %}
 {% load static %}
 
-<a id="pretix-eth-qr-anchor" href="ethereum:{{ wallet_address }}?value={{ amount }}" class="collapse"></a>
+<a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 <br/><br/>
 <p>
     <strong>Please pay for your ticket! Be sure to not change the amount (e.g. round up) even if your wallet allows your to as the order is encoded in the amount.</strong>
@@ -11,7 +11,7 @@ You can either use this <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681
 <p>
 <script type="text/javascript" src="{% static "pretix_eth/check.js" %}"></script>
 <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
-<a target="blank" rel="noreferrer noopener" href="https://checkout.web3connect.com/?currency={{ currency_type }}&amount={{ amount_human }}&to={{ wallet_address }}&callbackUrl={{ request.build_absolute_uri |urlencode }}">Or Pay via Web3Connect</a>
+<a target="blank" rel="noreferrer noopener" href="{{ web3connect_url }}">Or Pay via Web3Connect</a>
 
 <p>
     {% blocktrans trimmed %}
