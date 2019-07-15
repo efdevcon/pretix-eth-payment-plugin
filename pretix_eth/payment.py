@@ -319,6 +319,7 @@ class Ethereum(BasePaymentProvider):
             'provname': self.verbose_name,
             'coin': payment.info_data['currency_type'],
             'amount': payment.info_data['amount'],
+            'amount_human': from_wei(payment.info_data['amount'], 'ether')
         }
 
         return template.render(ctx)
