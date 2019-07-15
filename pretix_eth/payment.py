@@ -162,12 +162,12 @@ class Ethereum(BasePaymentProvider):
 
         return template.render(ctx)
 
-    def checkout_prepare(self, request, total):
+    def checkout_prepare(self, request, cart):
         form = self.payment_form(request)
 
         if form.is_valid():
             request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
-            self._get_rates_checkout(request, total['total'])
+            self._get_rates_checkout(request, cart['total'])
             return True
 
         return False
