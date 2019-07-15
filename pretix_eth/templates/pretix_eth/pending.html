@@ -4,9 +4,9 @@
 <a id="pretix-eth-qr-anchor" href="ethereum:{{ wallet_address }}?value={{ amount }}" class="collapse"></a>
 <br/><br/>
 <p>
-    <strong>{% blocktrans %}Deposit {{ amount_human }} {{ currency_type }} into {{ wallet_address }}{% endblocktrans %}</strong>
+    <strong>Please pay for your ticket! Be sure to not change the amount (e.g. round up) even if your wallet allows your to as the order is encoded in the amount.</strong>
 </p>
-Either via this <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a> QR-Code:<br/><br/>
+You can either use this <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a> QR-Code:<br/><br/>
 <div id="pretix-eth-qr-div"></div>
 <p>
 <script type="text/javascript" src="{% static "pretix_eth/check.js" %}"></script>
