@@ -6,8 +6,8 @@
         <dd>{{ payment_info.amount }}</dd>
         <dt>{% trans "Currency type" %}</dt>
         <dd>{{ payment_info.currency_type }}</dd>
-        <dt>{% trans "Transaction hash" %}</dt>
-        <dd>{{ payment_info.txn_hash }}</dd>
+        {% comment %} <dt>{% trans "Transaction hash" %}</dt>
+        <dd>{{ payment_info.txn_hash }}</dd> {% endcomment %}
     </dl>
     {% if "message" in payment_info %}
         <dl class="dl-horizontal">

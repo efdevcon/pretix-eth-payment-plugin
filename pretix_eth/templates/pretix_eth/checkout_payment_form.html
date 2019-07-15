@@ -1,7 +1,7 @@
 {% load i18n bootstrap3 %}
 
 <div class="form-horizontal">
-  {% if ETH_address or DAI_address %}
+  {% comment %} {% if ETH_address or DAI_address %}
     <div class="ETH-crypto-payment-details">
       <p>
         {% blocktrans trimmed %}
@@ -37,7 +37,7 @@
         {% endblocktrans %}
       </p>
     </div>
-  {% endif %}
+  {% endif %} {% endcomment %}
 
   {% bootstrap_form form layout='horizontal' %}
 </div>
