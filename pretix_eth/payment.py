@@ -183,7 +183,6 @@ class Ethereum(BasePaymentProvider):
 
     def payment_is_valid_session(self, request):
         return all((
-            'payment_ethereum_txn_hash' in request.session,
             'payment_ethereum_currency_type' in request.session,
             'payment_ethereum_time' in request.session,
             'payment_ethereum_amount' in request.session,
