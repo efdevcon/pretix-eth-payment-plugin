@@ -137,12 +137,7 @@ class Ethereum(BasePaymentProvider):
                     widget=forms.Select,
                     choices=currency_type_choices,
                     initial='ETH'
-                )),
-                ('txn_hash', forms.CharField(
-                    label=_('Transaction hash'),
-                    help_text=_('Enter the hash of the transaction in which you paid with the selected currency.'),  # noqa: E501
-                    required=True,
-                )),
+                ))
             ]
         )
 
@@ -166,7 +161,6 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_txn_hash'] = form.cleaned_data['txn_hash']
             request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
             self._get_rates_checkout(request, total['total'])
             return True
