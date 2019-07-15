@@ -1,12 +1,21 @@
 {% load i18n %}
 {% load static %}
-<a id="pretix-eth-qr-anchor" href="yolo" class="collapse"></a>
+
+<a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
+<br/><br/>
+<p>
+    <strong>Please pay for your ticket! Be sure to not change the amount (e.g. round up) even if your wallet allows your to as the order is encoded in the amount.</strong>
+</p>
+You can either use this <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a> QR-Code:<br/><br/>
 <div id="pretix-eth-qr-div"></div>
+<p>
+<script type="text/javascript" src="{% static "pretix_eth/check.js" %}"></script>
 <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
+<a target="blank" rel="noreferrer noopener" href="{{ web3connect_url }}">Or Pay via Web3Connect</a>
+
 <p>
     {% blocktrans trimmed %}
-    We'll verify that a deposit was made to the correct address. Once this
-    has been done, you'll receive a confirmation email.
+    If you already paid - please just stay patient - the transactions are currently just checked once a day. You will get an email - stay patient. If you want to improve this submit a PR this github repository: <a href="https://github.com/esPass/pretix-eth-payment-plugin">https://github.com/esPass/pretix-eth-payment-plugin</a>
     {% endblocktrans %}
 </p>
 
