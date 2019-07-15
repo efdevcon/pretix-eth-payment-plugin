@@ -32,6 +32,13 @@ DAI_CHOICE = ('DAI', _('DAI'))
 DEFAULT_TRANSACTION_PROVIDER = 'pretix_eth.providers.BlockscoutTransactionProvider'
 DEFAULT_TOKEN_PROVIDER = 'pretix_eth.providers.BlockscoutTokenProvider'
 
+RESERVED_ORDER_DIGITS = 5
+
+
+def truncate_wei_value(value: int, digits: int) -> int:
+    multiplier = 10 ** digits
+    return int(round(value / multiplier) * multiplier)
+
 
 class Ethereum(BasePaymentProvider):
     identifier = 'ethereum'
@@ -201,7 +208,7 @@ class Ethereum(BasePaymentProvider):
             else:
                 raise ImproperlyConfigured("Unrecognized currency: {0}".format(self.event.currency))
 
-            return round(final_price, 2)
+            return final_price
         except ConnectionError:
             logger.exception('Internal eror occured.')
             raise PaymentException(
@@ -211,7 +218,7 @@ class Ethereum(BasePaymentProvider):
     def _get_rates_checkout(self, request: HttpRequest, total):
         final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
-        request.session['payment_ethereum_amount'] = final_price
+        request.session['payment_ethereum_amount'] = truncate_wei_value(final_price, RESERVED_ORDER_DIGITS)
         request.session['payment_ethereum_time'] = int(time.time())
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
