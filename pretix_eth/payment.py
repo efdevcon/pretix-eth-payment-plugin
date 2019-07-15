@@ -152,11 +152,8 @@ class Ethereum(BasePaymentProvider):
         template = get_template('pretix_eth/checkout_payment_confirm.html')
 
         ctx = {
-            'request': request,
-            'event': self.event,
-            'settings': self.settings,
-            'provider': self,
-            'txn_hash': request.session['payment_ethereum_txn_hash'],
+            'wallet_address': self.settings.WALLET_ADDRESS,
+            'amount': request.session['payment_ethereum_amount'],
             'currency_type': request.session['payment_ethereum_currency_type'],
         }
 
