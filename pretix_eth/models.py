@@ -11,5 +11,5 @@ class Transaction(models.Model):
     proof of payment. Storing this information allows us to prevent the same
     transaction from being used more than once for payment.
     """
-    txn_hash = models.BinaryField(max_length=32, unique=True)
+    txn_hash = models.CharField(max_length=66, unique=True)
     order_payment = models.ForeignKey(OrderPayment, on_delete=models.PROTECT)
