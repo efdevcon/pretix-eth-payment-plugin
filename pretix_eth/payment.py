@@ -218,17 +218,19 @@ class Ethereum(BasePaymentProvider):
         template = get_template('pretix_eth/pending.html')
 
         cur = self.settings.WALLET_ADDRESS
+        currency_type = payment.info_data['currency_type']
 
         amount_plus_payment_id = payment.info_data['amount'] + payment.id
+        amount_in_ether = from_wei(amount_plus_payment_id, 'ether')
 
         if payment.info_data['currency_type'] == 'ETH':
-            erc_681_url = "ethereum:" + cur + "?value=" + str(amount_plus_payment_id)
+            erc_681_url = f'ethereum:{cur}?value={amount_plus_payment_id}'
         elif payment.info_data['currency_type'] == 'DAI':
-            erc_681_url = "ethereum:0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359/transfer?address=" + cur + "&uint256=" + str(amount_plus_payment_id)  # noqa: E501
+            erc_681_url = f'ethereum:0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359/transfer?address={cur}&uint256={amount_plus_payment_id}'  # noqa: E501
         else:
-            raise ImproperlyConfigured("Unrecognized currency: {0}".format(payment.info_data['currency_type']))  # noqa: E501
+            raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
 
-        web3connect_url = "https://checkout.web3connect.com/?currency=" + payment.info_data['currency_type'] + "&amount=" + str(from_wei(amount_plus_payment_id, 'ether')) + "&to=" + cur  # noqa: E501
+        web3connect_url = f'https://checkout.web3connect.com/?currency={currency_type}&amount={amount_in_ether}&to={cur}'  # noqa: E501
 
         ctx = {
             'request': request,
