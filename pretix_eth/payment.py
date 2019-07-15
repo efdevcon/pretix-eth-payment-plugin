@@ -49,18 +49,24 @@ class Ethereum(BasePaymentProvider):
 
     @cached_property
     def transaction_provider(self) -> TransactionProviderAPI:
-        transaction_provider_class = import_string(self.settings.get(
-            'TRANSACTION_PROVIDER',
-            'pretix_eth.providers.BlockscoutTransactionProvider',
-        ))
+        transaction_provider_path = self.settings.get('TRANSACTION_PROVIDER')
+
+        try:
+            transaction_provider_class = import_string(transaction_provider_path)
+        except ImportError:
+            transaction_provider_class = import_string(DEFAULT_TRANSACTION_PROVIDER)
+
         return transaction_provider_class()
 
     @cached_property
     def token_provider(self) -> TokenProviderAPI:
-        token_provider_class = import_string(self.settings.get(
-            'TOKEN_PROVIDER',
-            'pretix_eth.providers.BlockscoutTokenProvider',
-        ))
+        token_provider_path = self.settings.get('TOKEN_PROVIDER')
+
+        try:
+            token_provider_class = import_string(token_provider_path)
+        except ImportError:
+            token_provider_class = import_string(DEFAULT_TOKEN_PROVIDER)
+
         return token_provider_class()
 
     @property
