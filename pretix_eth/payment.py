@@ -74,14 +74,18 @@ class Ethereum(BasePaymentProvider):
         form_fields = OrderedDict(
             list(super().settings_form_fields.items())
             + [
-                ('ETH', forms.CharField(
-                    label=_('Ethereum wallet address'),
-                    help_text=_('Leave empty if you do not want to accept ethereum.'),
+                ('WALLET_ADDRESS', forms.CharField(
+                    label=_('Wallet address'),
+                    required=True
+                )),
+                ('ETH_RATE', forms.DecimalField(
+                    label=_('Ethereum rate'),
+                    help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),
                     required=False
                 )),
-                ('DAI', forms.CharField(
-                    label=_('DAI wallet address'),
-                    help_text=_('Leave empty if you do not want to accept DAI.'),
+                ('xDAI_RATE', forms.DecimalField(
+                    label=_('xDAI rate'),
+                    help_text=_('Specify the exchange rate between xDAI and your base currency. Leave out if you do not want to accept DAI'),
                     required=False
                 )),
                 ('TRANSACTION_PROVIDER', forms.CharField(
@@ -105,8 +109,9 @@ class Ethereum(BasePaymentProvider):
             ]
         )
 
-        form_fields.move_to_end('ETH', last=True)
-        form_fields.move_to_end('DAI', last=True)
+        form_fields.move_to_end('WALLET_ADDRESS', last=True)
+        form_fields.move_to_end('ETH_RATE', last=True)
+        form_fields.move_to_end('xDAI_RATE', last=True)
         form_fields.move_to_end('TRANSACTION_PROVIDER', last=True)
         form_fields.move_to_end('TOKEN_PROVIDER', last=True)
 
@@ -119,11 +124,11 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def payment_form_fields(self):
-        if self.settings.ETH and self.settings.DAI:
+        if self.settings.ETH_RATE and self.settings.xDAI_RATE:
             currency_type_choices = (DAI_CHOICE, ETH_CHOICE)
-        elif self.settings.DAI:
+        elif self.settings.xDAI_RATE:
             currency_type_choices = (DAI_CHOICE,)
-        elif self.settings.ETH:
+        elif self.settings.ETH_RATE:
             currency_type_choices = (ETH_CHOICE,)
         else:
             raise ImproperlyConfigured("Must have one of `ETH` or `DAI` enabled for payments")
@@ -137,12 +142,7 @@ class Ethereum(BasePaymentProvider):
                     widget=forms.Select,
                     choices=currency_type_choices,
                     initial='ETH'
-                )),
-                ('txn_hash', forms.CharField(
-                    label=_('Transaction hash'),
-                    help_text=_('Enter the hash of the transaction in which you paid with the selected currency.'),  # noqa: E501
-                    required=True,
-                )),
+                ))
             ]
         )
 
@@ -166,7 +166,6 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_txn_hash'] = form.cleaned_data['txn_hash']
             request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
             self._get_rates_checkout(request, total['total'])
             return True
@@ -177,9 +176,7 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_txn_hash'] = form.cleaned_data['txn_hash']
             request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
-            self._get_rates(request, payment)
             return True
 
         return False
@@ -245,29 +242,13 @@ class Ethereum(BasePaymentProvider):
     def _get_rates_from_api(self, total, currency):
         try:
             if currency == 'ETH':
-                rate = requests.get(f'https://api.bitfinex.com/v1/pubticker/eth{self.event.currency}')  # noqa: E501
-                rate = rate.json()
                 final_price = to_wei((
-                    total / decimal.Decimal(rate['last_price'])
+                    total * decimal.Decimal(self.settings.ETH_RATE)
                 ).quantize(decimal.Decimal('1.00000')), 'ether')
             elif currency == 'DAI':
-                url = 'https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest'
-                parameters = {
-                    'symbol': currency,
-                    'convert': self.event.currency,
-                }
-                headers = {
-                    'Accepts': 'application/json',
-                    'X-CMC_PRO_API_KEY': '7578555c-bf3e-4639-8651-11a20ddb30c6',
-                }
-                session = Session()
-                session.headers.update(headers)
-
-                response = session.get(url, params=parameters)
-                data = json.loads(response.text)
-                final_price = (
-                    total / decimal.Decimal(data['data'][currency]['quote'][self.event.currency]['price'])  # noqa: E501
-                ).quantize(decimal.Decimal('1.00'))
+                final_price = to_wei((
+                    total * decimal.Decimal(self.settings.xDAI_RATE)
+                ).quantize(decimal.Decimal('1.00000')), 'ether')
             else:
                 raise ImproperlyConfigured("Unrecognized currency: {0}".format(self.event.currency))
 
@@ -279,32 +260,19 @@ class Ethereum(BasePaymentProvider):
             )
 
     def _get_rates_checkout(self, request: HttpRequest, total):
-        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
-
-        request.session['payment_ethereum_amount'] = final_price
-        request.session['payment_ethereum_time'] = int(time.time())
-
-    def _get_rates(self, request: HttpRequest, payment: OrderPayment):
-        final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_currency_type'])  # noqa: E501
+        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type']) # noqa: E501
 
         request.session['payment_ethereum_amount'] = final_price
         request.session['payment_ethereum_time'] = int(time.time())
 
     def payment_form_render(self, request: HttpRequest, total: decimal.Decimal):
-        # this ensures that the form will pre-populate the transaction hash into the form.
-        if 'txhash' in request.GET:
-            request.session['payment_ethereum_txn_hash'] = request.GET.get('txhash')
         if 'currency' in request.GET:
             request.session['payment_ethereum_currency_type'] = request.GET.get('currency')
         form = self.payment_form(request)
         template = get_template('pretix_eth/checkout_payment_form.html')
         ctx = {
             'request': request,
-            'form': form,
-            'ETH_per_ticket': from_wei(self._get_rates_from_api(total, 'ETH'), 'ether'),
-            'DAI_per_ticket': self._get_rates_from_api(total, 'DAI'),
-            'ETH_address': self.settings.get('ETH'),
-            'DAI_address': self.settings.get('DAI'),
+            'form': form
         }
         return template.render(ctx)
 
@@ -316,6 +284,7 @@ class Ethereum(BasePaymentProvider):
         else:
             cur = self.settings.DAI
 
+        amount_plus_paymentId = payment.info_data['amount'] + payment.id
         ctx = {
             'request': request,
             'event': self.event,
@@ -324,7 +293,9 @@ class Ethereum(BasePaymentProvider):
             'order': payment.order,
             'provname': self.verbose_name,
             'coin': payment.info_data['currency_type'],
-            'amount': payment.info_data['amount'],
+            'amount': amount_plus_paymentId,
+            'id': payment.id,
+            'amount_human': from_wei(amount_plus_paymentId, 'ether')
         }
 
         return template.render(ctx)
