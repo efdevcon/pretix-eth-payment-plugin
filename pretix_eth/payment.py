@@ -74,14 +74,18 @@ class Ethereum(BasePaymentProvider):
         form_fields = OrderedDict(
             list(super().settings_form_fields.items())
             + [
-                ('ETH', forms.CharField(
-                    label=_('Ethereum wallet address'),
-                    help_text=_('Leave empty if you do not want to accept ethereum.'),
+                ('WALLET_ADDRESS', forms.CharField(
+                    label=_('Wallet address'),
+                    required=True
+                )),
+                ('ETH_RATE', forms.DecimalField(
+                    label=_('Ethereum rate'),
+                    help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),
                     required=False
                 )),
-                ('DAI', forms.CharField(
-                    label=_('DAI wallet address'),
-                    help_text=_('Leave empty if you do not want to accept DAI.'),
+                ('xDAI_RATE', forms.DecimalField(
+                    label=_('xDAI rate'),
+                    help_text=_('Specify the exchange rate between xDAI and your base currency. Leave out if you do not want to accept DAI'),
                     required=False
                 )),
                 ('TRANSACTION_PROVIDER', forms.CharField(
@@ -105,8 +109,9 @@ class Ethereum(BasePaymentProvider):
             ]
         )
 
-        form_fields.move_to_end('ETH', last=True)
-        form_fields.move_to_end('DAI', last=True)
+        form_fields.move_to_end('WALLET_ADDRESS', last=True)
+        form_fields.move_to_end('ETH_RATE', last=True)
+        form_fields.move_to_end('xDAI_RATE', last=True)
         form_fields.move_to_end('TRANSACTION_PROVIDER', last=True)
         form_fields.move_to_end('TOKEN_PROVIDER', last=True)
 
@@ -119,11 +124,11 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def payment_form_fields(self):
-        if self.settings.ETH and self.settings.DAI:
+        if self.settings.ETH_RATE and self.settings.xDAI_RATE:
             currency_type_choices = (DAI_CHOICE, ETH_CHOICE)
-        elif self.settings.DAI:
+        elif self.settings.xDAI_RATE:
             currency_type_choices = (DAI_CHOICE,)
-        elif self.settings.ETH:
+        elif self.settings.ETH_RATE:
             currency_type_choices = (ETH_CHOICE,)
         else:
             raise ImproperlyConfigured("Must have one of `ETH` or `DAI` enabled for payments")
