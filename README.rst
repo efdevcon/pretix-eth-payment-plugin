@@ -1,6 +1,9 @@
 Pretix Ethereum Payment Provider
 ==========================
 
+!! This plugin is not ready for simple 3rd party production use *yet* - if you want to use it you must really understand the code !!
+PRs to make it production ready and more eyes on this code are most welcome!
+
 This is a plugin for `pretix`_. This plugin supports both Ethereum and DAI.
 
 Development setup
