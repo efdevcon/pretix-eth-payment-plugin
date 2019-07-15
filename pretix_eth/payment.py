@@ -128,14 +128,10 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def payment_form_fields(self):
-        if self.settings.ETH_RATE and self.settings.xDAI_RATE:
-            currency_type_choices = (DAI_CHOICE, ETH_CHOICE)
-        elif self.settings.xDAI_RATE:
-            currency_type_choices = (DAI_CHOICE,)
-        elif self.settings.ETH_RATE:
-            currency_type_choices = (ETH_CHOICE,)
-        else:
-            raise ImproperlyConfigured("Must have one of `ETH` or `DAI` enabled for payments")
+        currency_type_choices = (
+            ('DAI', _('DAI')),
+            ('ETH', _('ETH')),
+        )
 
         form_fields = OrderedDict(
             list(super().payment_form_fields.items())

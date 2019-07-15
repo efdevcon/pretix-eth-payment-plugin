@@ -65,36 +65,12 @@ def test_provider_payment_form_fields_improper_configuration(provider):
 
 
 @pytest.mark.django_db
-def test_provider_payment_form_fields_only_ETH(provider):
-    provider.settings.set('ETH', ETH_ADDRESS)
-
+def test_provider_payment_form_fields(provider):
     payment_form_fields = provider.payment_form_fields
+
     currency_type_field = payment_form_fields['currency_type']
-    assert len(currency_type_field.choices) == 1
-    choice = currency_type_field.choices[0]
-    assert choice[0] == 'ETH'
 
-
-@pytest.mark.django_db
-def test_provider_payment_form_fields_only_DAI(provider):
-    provider.settings.set('DAI', DAI_ADDRESS)
-
-    payment_form_fields = provider.payment_form_fields
-    currency_type_field = payment_form_fields['currency_type']
-    assert len(currency_type_field.choices) == 1
-    choice = currency_type_field.choices[0]
-    assert choice[0] == 'DAI'
-
-
-@pytest.mark.django_db
-def test_provider_payment_form_fields_both_ETH_and_DAI(provider):
-    provider.settings.set('DAI', DAI_ADDRESS)
-    provider.settings.set('ETH', ETH_ADDRESS)
-
-    payment_form_fields = provider.payment_form_fields
-    currency_type_field = payment_form_fields['currency_type']
     assert len(currency_type_field.choices) == 2
-    dai_choice = currency_type_field.choices[0]
-    eth_choice = currency_type_field.choices[1]
-    assert dai_choice[0] == 'DAI'
-    assert eth_choice[0] == 'ETH'
+
+    assert currency_type_field.choices[0][0] == 'DAI'
+    assert currency_type_field.choices[1][0] == 'ETH'
