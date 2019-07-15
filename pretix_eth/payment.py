@@ -223,17 +223,6 @@ class Ethereum(BasePaymentProvider):
         request.session['payment_ethereum_amount'] = final_price
         request.session['payment_ethereum_time'] = int(time.time())
 
-    def payment_form_render(self, request: HttpRequest, total: decimal.Decimal):
-        if 'currency' in request.GET:
-            request.session['payment_ethereum_currency_type'] = request.GET.get('currency')
-        form = self.payment_form(request)
-        template = get_template('pretix_eth/checkout_payment_form.html')
-        ctx = {
-            'request': request,
-            'form': form
-        }
-        return template.render(ctx)
-
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
 
