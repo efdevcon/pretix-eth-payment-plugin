@@ -218,29 +218,25 @@ class Ethereum(BasePaymentProvider):
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
 
-        cur = self.settings.WALLET_ADDRESS
+        wallet_address = self.settings.WALLET_ADDRESS
         currency_type = payment.info_data['currency_type']
 
-        amount_plus_payment_id = payment.info_data['amount'] + payment.id
+        truncated_amount_in_wei = payment.info_data['amount']
+        amount_plus_payment_id = truncated_amount_in_wei + payment.id
         amount_in_ether = from_wei(amount_plus_payment_id, 'ether')
 
-        if payment.info_data['currency_type'] == 'ETH':
-            erc_681_url = f'ethereum:{cur}?value={amount_plus_payment_id}'
-        elif payment.info_data['currency_type'] == 'DAI':
-            erc_681_url = f'ethereum:0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359/transfer?address={cur}&uint256={amount_plus_payment_id}'  # noqa: E501
+        if currency_type == 'ETH':
+            erc_681_url = f'ethereum:{wallet_address}?value={amount_plus_payment_id}'
+        elif currency_type == 'DAI':
+            erc_681_url = f'ethereum:0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359/transfer?address={wallet_address}&uint256={amount_plus_payment_id}'  # noqa: E501
         else:
             raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
 
-        web3connect_url = f'https://checkout.web3connect.com/?currency={currency_type}&amount={amount_in_ether}&to={cur}'  # noqa: E501
+        web3connect_url = f'https://checkout.web3connect.com/?currency={currency_type}&amount={amount_in_ether}&to={wallet_address}'  # noqa: E501
 
         ctx = {
-            'request': request,
-            'event': self.event,
-            'settings': self.settings,
-            'order': payment.order,
-            'provname': self.verbose_name,
             'erc_681_url': erc_681_url,
-            "web3connect_url": web3connect_url
+            'web3connect_url': web3connect_url
         }
 
         return template.render(ctx)
