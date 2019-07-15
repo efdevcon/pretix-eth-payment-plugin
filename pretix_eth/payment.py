@@ -34,6 +34,8 @@ DEFAULT_TOKEN_PROVIDER = 'pretix_eth.providers.BlockscoutTokenProvider'
 
 RESERVED_ORDER_DIGITS = 5
 
+DAI_MAINNET_ADDRESS = '0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359'
+
 
 def truncate_wei_value(value: int, digits: int) -> int:
     multiplier = 10 ** digits
@@ -228,7 +230,7 @@ class Ethereum(BasePaymentProvider):
         if currency_type == 'ETH':
             erc_681_url = f'ethereum:{wallet_address}?value={amount_plus_payment_id}'
         elif currency_type == 'DAI':
-            erc_681_url = f'ethereum:0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359/transfer?address={wallet_address}&uint256={amount_plus_payment_id}'  # noqa: E501
+            erc_681_url = f'ethereum:{DAI_MAINNET_ADDRESS}/transfer?address={wallet_address}&uint256={amount_plus_payment_id}'  # noqa: E501
         else:
             raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
 
