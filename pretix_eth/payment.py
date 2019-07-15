@@ -14,7 +14,7 @@ from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
 from eth_utils import (
     import_string,
-    to_bytes,
+    to_hex,
 )
 from requests import Session
 from requests.exceptions import ConnectionError
@@ -188,12 +188,13 @@ class Ethereum(BasePaymentProvider):
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         txn_hash = request.session['payment_ethereum_txn_hash']
-        txn_hash_bytes = to_bytes(hexstr=txn_hash)
+        txn_hash_normalized = to_hex(hexstr=txn_hash)
+
         currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
         payment_amount = request.session['payment_ethereum_amount']
 
-        if Transaction.objects.filter(txn_hash=txn_hash_bytes).exists():
+        if Transaction.objects.filter(txn_hash=txn_hash_normalized).exists():
             raise PaymentException(
                 f'Transaction with hash {txn_hash} already used for payment'
             )
@@ -233,7 +234,7 @@ class Ethereum(BasePaymentProvider):
                 except Quota.QuotaExceededException as e:
                     raise PaymentException(str(e))
                 else:
-                    Transaction.objects.create(txn_hash=txn_hash_bytes, order_payment=payment)
+                    Transaction.objects.create(txn_hash=txn_hash_normalized, order_payment=payment)
 
     def _get_rates_from_api(self, total, currency):
         try:
