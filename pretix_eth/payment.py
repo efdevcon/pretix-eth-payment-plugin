@@ -1,12 +1,9 @@
 import decimal
-import json
 import logging
 import time
 from collections import OrderedDict
 
-import requests
 from django import forms
-from django.db import transaction as db_transaction
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template.loader import get_template
@@ -14,12 +11,10 @@ from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
 from eth_utils import (
     import_string,
-    to_hex,
 )
-from requests import Session
 from requests.exceptions import ConnectionError
 
-from pretix.base.models import OrderPayment, Quota
+from pretix.base.models import OrderPayment
 from pretix.base.payment import BasePaymentProvider, PaymentException
 
 from eth_utils import to_wei, from_wei
@@ -27,10 +22,6 @@ from eth_utils import to_wei, from_wei
 from .providers import (
     TransactionProviderAPI,
     TokenProviderAPI,
-)
-
-from .models import (
-    Transaction,
 )
 
 logger = logging.getLogger(__name__)
@@ -80,12 +71,12 @@ class Ethereum(BasePaymentProvider):
                 )),
                 ('ETH_RATE', forms.DecimalField(
                     label=_('Ethereum rate'),
-                    help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),
+                    help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),  # noqa: E501
                     required=False
                 )),
                 ('xDAI_RATE', forms.DecimalField(
                     label=_('xDAI rate'),
-                    help_text=_('Specify the exchange rate between xDAI and your base currency. Leave out if you do not want to accept DAI'),
+                    help_text=_('Specify the exchange rate between xDAI and your base currency. Leave out if you do not want to accept DAI'),  # noqa: E501
                     required=False
                 )),
                 ('TRANSACTION_PROVIDER', forms.CharField(
@@ -218,7 +209,7 @@ class Ethereum(BasePaymentProvider):
             )
 
     def _get_rates_checkout(self, request: HttpRequest, total):
-        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type']) # noqa: E501
+        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
         request.session['payment_ethereum_amount'] = final_price
         request.session['payment_ethereum_time'] = int(time.time())

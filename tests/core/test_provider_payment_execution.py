@@ -6,16 +6,12 @@ import pytest
 from django.test import RequestFactory
 from django.utils import timezone
 from django.contrib.sessions.backends.db import SessionStore
-from eth_utils import to_hex
 
 from pretix.base.models import Order, OrderPayment
-from pretix.base.payment import PaymentException
 
 from pretix_eth.providers import (
     TokenProviderAPI,
-    Transfer,
     TransactionProviderAPI,
-    Transaction,
 )
 
 

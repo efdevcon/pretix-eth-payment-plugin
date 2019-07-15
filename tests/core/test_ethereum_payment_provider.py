@@ -1,4 +1,3 @@
-from django.core.exceptions import ImproperlyConfigured
 from django.test import RequestFactory
 from django.contrib.sessions.backends.db import SessionStore
 
