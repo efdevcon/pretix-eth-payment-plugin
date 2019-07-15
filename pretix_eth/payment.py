@@ -226,15 +226,19 @@ class Ethereum(BasePaymentProvider):
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
 
-        if request.session['payment_ethereum_currency_type'] == 'ETH':
-            cur = self.settings.ETH
-        else:
-            cur = self.settings.DAI
+        cur = self.settings.WALLET_ADDRESS
 
         amount_plus_paymentId = payment.info_data['amount'] + payment.id
-        erc_681_url = "ethereum:" +  cur +"?value=" + str(amount_plus_paymentId)
+
+        if payment.info_data['currency_type'] == 'ETH':
+            erc_681_url = "ethereum:" +  cur +"?value=" + str(amount_plus_paymentId)
+        elif  payment.info_data['currency_type'] == 'DAI':
+            erc_681_url = "ethereum:0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359/transfer?address=" +  cur +"&uint256=" + str(amount_plus_paymentId)
+        else:
+            raise ImproperlyConfigured("Unrecognized currency: {0}".format(payment.info_data['currency_type']))
+
         web3connect_url = "https://checkout.web3connect.com/?currency=" +  payment.info_data['currency_type'] + "&amount=" + str(from_wei(amount_plus_paymentId, 'ether')) + "&to=" + cur
-        #{{ wallet_address }}&callbackUrl={{ request.build_absolute_uri |urlencode }}"
+
         ctx = {
             'request': request,
             'event': self.event,
