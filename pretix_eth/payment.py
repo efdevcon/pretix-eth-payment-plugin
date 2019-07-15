@@ -186,54 +186,17 @@ class Ethereum(BasePaymentProvider):
         ))
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        txn_hash = request.session['payment_ethereum_txn_hash']
-        txn_hash_normalized = to_hex(hexstr=txn_hash)
-
         currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
         payment_amount = request.session['payment_ethereum_amount']
 
-        if Transaction.objects.filter(txn_hash=txn_hash_normalized).exists():
-            raise PaymentException(
-                f'Transaction with hash {txn_hash} already used for payment'
-            )
-
         payment.info_data = {
-            'txn_hash': txn_hash,
             'currency_type': currency_type,
             'time': payment_timestamp,
             'amount': payment_amount,
         }
         payment.save(update_fields=['info'])
-
-        if currency_type == 'ETH':
-            transaction = self.transaction_provider.get_transaction(txn_hash)
-            is_valid_payment = all((
-                transaction.success,
-                transaction.to == self.settings.ETH,
-                transaction.value >= payment_amount,
-                transaction.timestamp >= payment_timestamp,
-            ))
-        elif currency_type == 'DAI':
-            transfer = self.token_provider.get_ERC20_transfer(txn_hash)
-            is_valid_payment = all((
-                transfer.success,
-                transfer.to == self.settings.DAI,
-                transfer.value >= payment_amount,
-                transfer.timestamp >= payment_timestamp,
-            ))
-        else:
-            # unkown currency
-            raise ImproperlyConfigured(f"Unknown currency: {currency_type}")
-
-        if is_valid_payment:
-            with db_transaction.atomic():
-                try:
-                    payment.confirm()
-                except Quota.QuotaExceededException as e:
-                    raise PaymentException(str(e))
-                else:
-                    Transaction.objects.create(txn_hash=txn_hash_normalized, order_payment=payment)
+        payment.confirm()
 
     def _get_rates_from_api(self, total, currency):
         try:
