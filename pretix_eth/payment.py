@@ -196,7 +196,6 @@ class Ethereum(BasePaymentProvider):
             'amount': payment_amount,
         }
         payment.save(update_fields=['info'])
-        payment.confirm()
 
     def _get_rates_from_api(self, total, currency):
         try:
@@ -244,17 +243,17 @@ class Ethereum(BasePaymentProvider):
             cur = self.settings.DAI
 
         amount_plus_paymentId = payment.info_data['amount'] + payment.id
+        erc_681_url = "ethereum:" +  cur +"?value=" + str(amount_plus_paymentId)
+        web3connect_url = "https://checkout.web3connect.com/?currency=" +  payment.info_data['currency_type'] + "&amount=" + str(from_wei(amount_plus_paymentId, 'ether')) + "&to=" + cur
+        #{{ wallet_address }}&callbackUrl={{ request.build_absolute_uri |urlencode }}"
         ctx = {
             'request': request,
             'event': self.event,
             'settings': self.settings,
-            'wallet_address': cur,
             'order': payment.order,
             'provname': self.verbose_name,
-            'currency_type': payment.info_data['currency_type'],
-            'amount': amount_plus_paymentId,
-            'id': payment.id,
-            'amount_human': from_wei(amount_plus_paymentId, 'ether')
+            'erc_681_url': erc_681_url,
+            "web3connect_url": web3connect_url
         }
 
         return template.render(ctx)
