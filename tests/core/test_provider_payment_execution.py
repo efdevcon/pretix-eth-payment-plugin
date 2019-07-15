@@ -63,31 +63,16 @@ def order_and_payment(transactional_db, event):
 def test_provider_execute_successful_payment_in_ETH(provider, order_and_payment):
     order, payment = order_and_payment
 
-    # setup a transaction provider which returns a fixed transaction
-    transaction = Transaction(
-        hash=ZERO_HASH,
-        sender=ZERO_ADDRESS,
-        success=True,
-        to=ETH_ADDRESS,
-        timestamp=int(time.time()),
-        value=100,
-    )
-
-    tx_provider = FixtureTransactionProvider(transaction)
-    provider.transaction_provider = tx_provider
-    assert provider.transaction_provider is tx_provider
-
     assert order.status == order.STATUS_PENDING
     assert payment.state == payment.PAYMENT_STATE_PENDING
 
-    provider.settings.set('ETH', ETH_ADDRESS)
+    provider.settings.set('ETH_RATE', '0.004')
 
     factory = RequestFactory()
     session = SessionStore()
     session.create()
 
     # setup all the necessary session data for the payment to be valid
-    session['payment_ethereum_txn_hash'] = to_hex(ZERO_HASH)
     session['payment_ethereum_currency_type'] = 'ETH'
     session['payment_ethereum_time'] = int(time.time()) - 10
     session['payment_ethereum_amount'] = 100
@@ -101,39 +86,24 @@ def test_provider_execute_successful_payment_in_ETH(provider, order_and_payment)
     order.refresh_from_db()
     payment.refresh_from_db()
 
-    assert order.status == order.STATUS_PAID
-    assert payment.state == payment.PAYMENT_STATE_CONFIRMED
+    assert order.status == order.STATUS_PENDING
+    assert payment.state == payment.PAYMENT_STATE_PENDING
 
 
 @pytest.mark.django_db
 def test_provider_execute_successful_payment_in_DAI(provider, order_and_payment):
     order, payment = order_and_payment
 
-    # setup a transfer provider which returns a fixed transfer
-    transfer = Transfer(
-        hash=ZERO_HASH,
-        sender=ZERO_ADDRESS,
-        success=True,
-        to=DAI_ADDRESS,
-        timestamp=int(time.time()),
-        value=100,
-    )
-
-    token_provider = FixtureTokenProvider(transfer)
-    provider.token_provider = token_provider
-    assert provider.token_provider is token_provider
-
     assert order.status == order.STATUS_PENDING
     assert payment.state == payment.PAYMENT_STATE_PENDING
 
-    provider.settings.set('DAI', DAI_ADDRESS)
+    provider.settings.set('xDAI_RATE', '0.004')
 
     factory = RequestFactory()
     session = SessionStore()
     session.create()
 
     # setup all the necessary session data for the payment to be valid
-    session['payment_ethereum_txn_hash'] = to_hex(ZERO_HASH)
     session['payment_ethereum_currency_type'] = 'DAI'
     session['payment_ethereum_time'] = int(time.time()) - 10
     session['payment_ethereum_amount'] = 100
@@ -147,54 +117,5 @@ def test_provider_execute_successful_payment_in_DAI(provider, order_and_payment)
     order.refresh_from_db()
     payment.refresh_from_db()
 
-    assert order.status == order.STATUS_PAID
-    assert payment.state == payment.PAYMENT_STATE_CONFIRMED
-
-
-@pytest.mark.django_db
-def test_cannot_replay_same_transaction(provider, order_and_payment):
-    order, payment = order_and_payment
-
-    # setup a transaction provider which returns a fixed transaction
-    transaction = Transaction(
-        hash=ZERO_HASH,
-        sender=ZERO_ADDRESS,
-        success=True,
-        to=ETH_ADDRESS,
-        timestamp=int(time.time()),
-        value=100,
-    )
-
-    tx_provider = FixtureTransactionProvider(transaction)
-    provider.transaction_provider = tx_provider
-    assert provider.transaction_provider is tx_provider
-
     assert order.status == order.STATUS_PENDING
     assert payment.state == payment.PAYMENT_STATE_PENDING
-
-    provider.settings.set('ETH', ETH_ADDRESS)
-
-    factory = RequestFactory()
-    session = SessionStore()
-    session.create()
-
-    # setup all the necessary session data for the payment to be valid
-    session['payment_ethereum_txn_hash'] = to_hex(ZERO_HASH)
-    session['payment_ethereum_currency_type'] = 'ETH'
-    session['payment_ethereum_time'] = int(time.time()) - 10
-    session['payment_ethereum_amount'] = 100
-
-    request = factory.get('/checkout')
-    request.event = provider.event
-    request.session = session
-
-    provider.execute_payment(request, payment)
-
-    order.refresh_from_db()
-    payment.refresh_from_db()
-
-    with pytest.raises(
-        PaymentException,
-        match=r'Transaction with hash .* already used for payment',
-    ):
-        provider.execute_payment(request, payment)

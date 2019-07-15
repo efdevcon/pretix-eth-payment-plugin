@@ -1,0 +1,10 @@
+[
+  "tests/core/test_ethereum_payment_provider.py::test_provider_properties",
+  "tests/core/test_ethereum_payment_provider.py::test_provider_settings_form_fields",
+  "tests/core/test_ethereum_payment_provider.py::test_provider_is_allowed",
+  "tests/core/test_ethereum_payment_provider.py::test_provider_payment_form_fields",
+  "tests/core/test_provider_payment_execution.py::test_provider_execute_successful_payment_in_ETH",
+  "tests/core/test_provider_payment_execution.py::test_provider_execute_successful_payment_in_DAI",
+  "tests/integration/test_token_provider.py::test_blockscout_transaction_provider",
+  "tests/integration/test_transaction_provider.py::test_blockscout_transaction_provider"
+]
