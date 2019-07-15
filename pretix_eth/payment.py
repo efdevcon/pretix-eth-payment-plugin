@@ -138,7 +138,7 @@ class Ethereum(BasePaymentProvider):
             + [
                 ('currency_type', forms.ChoiceField(
                     label=_('Payment currency'),
-                    help_text=_('Select the currency you used for payment.'),
+                    help_text=_('Select the currency you will use for payment.'),
                     widget=forms.Select,
                     choices=currency_type_choices,
                     initial='ETH'
