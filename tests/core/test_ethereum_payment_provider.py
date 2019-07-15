@@ -5,8 +5,9 @@ from django.contrib.sessions.backends.db import SessionStore
 import pytest
 
 
-ETH_ADDRESS = '0xeee0123400000000000000000000000000000000'
-DAI_ADDRESS = '0xda10123400000000000000000000000000000000'
+TEST_ETH_RATE = '0.004'
+TEST_DAI_RATE = '1.0'
+TEST_WALLET_ADDRESS = '0x0000000000000000000000000000000000000000'
 
 
 @pytest.mark.django_db
@@ -27,38 +28,34 @@ def test_provider_settings_form_fields(provider):
     assert 'TOKEN_PROVIDER' in form_fields
 
 
-@pytest.mark.parametrize(
-    'ETH,DAI',
-    (
-        (None, None),
-        (ETH_ADDRESS, None),
-        (None, DAI_ADDRESS),
-        (ETH_ADDRESS, DAI_ADDRESS),
-    )
-)
 @pytest.mark.django_db
-def test_provider_is_allowed(event, provider, ETH, DAI):  # noqa: N803
-    # pre-check that ETH and DAI settings are null and not allowed without configuration
-    assert provider.settings.ETH is None
-    assert provider.settings.DAI is None
+def test_provider_is_allowed(event, provider):
+    assert provider.settings.WALLET_ADDRESS is None
+    assert provider.settings.ETH_RATE is None
+    assert provider.settings.xDAI_RATE is None
 
     factory = RequestFactory()
+
     session = SessionStore()
     session.create()
+
     request = factory.get('/checkout')
     request.event = event
     request.session = session
 
-    assert provider.is_allowed(request) is False
+    assert not provider.is_allowed(request)
 
-    if ETH is not None:
-        provider.settings.set('ETH', ETH)
-    if DAI is not None:
-        provider.settings.set('DAI', DAI)
+    provider.settings.set('WALLET_ADDRESS', TEST_WALLET_ADDRESS)
 
-    expected = ETH is not None or DAI is not None
+    assert not provider.is_allowed(request)
 
-    assert provider.is_allowed(request) is expected
+    provider.settings.set('ETH_RATE', TEST_ETH_RATE)
+
+    assert not provider.is_allowed(request)
+
+    provider.settings.set('xDAI_RATE', TEST_DAI_RATE)
+
+    assert provider.is_allowed(request)
 
 
 @pytest.mark.django_db
