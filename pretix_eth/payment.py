@@ -289,10 +289,10 @@ class Ethereum(BasePaymentProvider):
             'request': request,
             'event': self.event,
             'settings': self.settings,
-            'payment_info': cur,
+            'wallet_address': cur,
             'order': payment.order,
             'provname': self.verbose_name,
-            'coin': payment.info_data['currency_type'],
+            'currency_type': payment.info_data['currency_type'],
             'amount': amount_plus_paymentId,
             'id': payment.id,
             'amount_human': from_wei(amount_plus_paymentId, 'ether')

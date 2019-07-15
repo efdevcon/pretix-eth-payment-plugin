@@ -1,17 +1,17 @@
 {% load i18n %}
 {% load static %}
 
-<a id="pretix-eth-qr-anchor" href="ethereum:{% blocktrans %}{{ payment_info }}?value={{ amount }}{% endblocktrans %}" class="collapse"></a>
+<a id="pretix-eth-qr-anchor" href="ethereum:{{ wallet_address }}?value={{ amount }}" class="collapse"></a>
 <br/><br/>
 <p>
-    <strong>{% blocktrans %}Deposit {{ amount_human }} {{ coin }} into {{ payment_info }}{% endblocktrans %}</strong>
+    <strong>{% blocktrans %}Deposit {{ amount_human }} {{ currency_type }} into {{ wallet_address }}{% endblocktrans %}</strong>
 </p>
 Either via this <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a> QR-Code:<br/><br/>
 <div id="pretix-eth-qr-div"></div>
 <p>
 <script type="text/javascript" src="{% static "pretix_eth/check.js" %}"></script>
 <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
-<a target="blank" rel="noreferrer noopener" href="https://checkout.web3connect.com/?currency={{ coin }}&amount={{ amount_human }}&to={{ payment_info}}&callbackUrl={{ request.build_absolute_uri |urlencode }}">Or Pay via Web3Connect</a>
+<a target="blank" rel="noreferrer noopener" href="https://checkout.web3connect.com/?currency={{ currency_type }}&amount={{ amount_human }}&to={{ wallet_address }}&callbackUrl={{ request.build_absolute_uri |urlencode }}">Or Pay via Web3Connect</a>
 
 <p>
     {% blocktrans trimmed %}
