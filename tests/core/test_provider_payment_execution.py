@@ -93,7 +93,7 @@ def test_provider_execute_successful_payment_in_DAI(provider, order_and_payment)
     assert order.status == order.STATUS_PENDING
     assert payment.state == payment.PAYMENT_STATE_PENDING
 
-    provider.settings.set('xDAI_RATE', '0.004')
+    provider.settings.set('DAI_RATE', '0.004')
 
     factory = RequestFactory()
     session = SessionStore()

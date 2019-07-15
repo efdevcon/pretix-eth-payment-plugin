@@ -83,9 +83,9 @@ class Ethereum(BasePaymentProvider):
                     help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),  # noqa: E501
                     required=False
                 )),
-                ('xDAI_RATE', forms.DecimalField(
-                    label=_('xDAI rate'),
-                    help_text=_('Specify the exchange rate between xDAI and your base currency. Leave out if you do not want to accept DAI'),  # noqa: E501
+                ('DAI_RATE', forms.DecimalField(
+                    label=_('DAI rate'),
+                    help_text=_('Specify the exchange rate between DAI and your base currency. Leave out if you do not want to accept DAI'),  # noqa: E501
                     required=False
                 )),
                 ('TRANSACTION_PROVIDER', forms.CharField(
@@ -111,7 +111,7 @@ class Ethereum(BasePaymentProvider):
 
         form_fields.move_to_end('WALLET_ADDRESS', last=True)
         form_fields.move_to_end('ETH_RATE', last=True)
-        form_fields.move_to_end('xDAI_RATE', last=True)
+        form_fields.move_to_end('DAI_RATE', last=True)
         form_fields.move_to_end('TRANSACTION_PROVIDER', last=True)
         form_fields.move_to_end('TOKEN_PROVIDER', last=True)
 
@@ -121,7 +121,7 @@ class Ethereum(BasePaymentProvider):
         settings_configured = all((
             self.settings.WALLET_ADDRESS,
             self.settings.ETH_RATE,
-            self.settings.xDAI_RATE,
+            self.settings.DAI_RATE,
         ))
 
         return settings_configured and super().is_allowed(request)
@@ -199,7 +199,7 @@ class Ethereum(BasePaymentProvider):
                 ).quantize(decimal.Decimal('1.00000')), 'ether')
             elif currency == 'DAI':
                 final_price = to_wei((
-                    total * decimal.Decimal(self.settings.xDAI_RATE)
+                    total * decimal.Decimal(self.settings.DAI_RATE)
                 ).quantize(decimal.Decimal('1.00000')), 'ether')
             else:
                 raise ImproperlyConfigured("Unrecognized currency: {0}".format(self.event.currency))

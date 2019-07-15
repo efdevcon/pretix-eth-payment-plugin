@@ -22,7 +22,7 @@ def test_provider_settings_form_fields(provider):
 
     assert 'WALLET_ADDRESS' in form_fields
     assert 'ETH_RATE' in form_fields
-    assert 'xDAI_RATE' in form_fields
+    assert 'DAI_RATE' in form_fields
     assert 'TRANSACTION_PROVIDER' in form_fields
     assert 'TOKEN_PROVIDER' in form_fields
 
@@ -31,7 +31,7 @@ def test_provider_settings_form_fields(provider):
 def test_provider_is_allowed(event, provider):
     assert provider.settings.WALLET_ADDRESS is None
     assert provider.settings.ETH_RATE is None
-    assert provider.settings.xDAI_RATE is None
+    assert provider.settings.DAI_RATE is None
 
     factory = RequestFactory()
 
@@ -52,7 +52,7 @@ def test_provider_is_allowed(event, provider):
 
     assert not provider.is_allowed(request)
 
-    provider.settings.set('xDAI_RATE', TEST_DAI_RATE)
+    provider.settings.set('DAI_RATE', TEST_DAI_RATE)
 
     assert provider.is_allowed(request)
 
