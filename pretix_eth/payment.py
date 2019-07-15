@@ -214,7 +214,7 @@ class Ethereum(BasePaymentProvider):
     def _get_rates_checkout(self, request: HttpRequest, total):
         final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
-        request.session['payment_ethereum_amount'] = truncate_wei_value(final_price, RESERVED_ORDER_DIGITS)
+        request.session['payment_ethereum_amount'] = truncate_wei_value(final_price, RESERVED_ORDER_DIGITS)  # noqa: E501
         request.session['payment_ethereum_time'] = int(time.time())
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
