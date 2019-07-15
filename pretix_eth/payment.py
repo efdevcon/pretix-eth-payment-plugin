@@ -248,12 +248,7 @@ class Ethereum(BasePaymentProvider):
         template = get_template('pretix_eth/control.html')
 
         ctx = {
-            'request': request,
-            'event': self.event,
-            'settings': self.settings,
             'payment_info': payment.info_data,
-            'order': payment.order,
-            'provname': self.verbose_name,
         }
 
         return template.render(ctx)
