@@ -1,6 +1,8 @@
 {% load i18n %}
 {% load static %}
-<script type="text/javascript" src="{% static "pretix_eth/check.js" %}"></script>
+<a id="pretix-eth-qr-anchor" href="yolo" class="collapse"></a>
+<div id="pretix-eth-qr-div"></div>
+<script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
 <p>
     {% blocktrans trimmed %}
     We'll verify that a deposit was made to the correct address. Once this
