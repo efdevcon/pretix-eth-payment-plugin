@@ -198,7 +198,7 @@ class Ethereum(BasePaymentProvider):
 
         currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
-        payment_amount = request.session['payment_ethereum_amount']
+        payment_amount = decimal.Decimal(request.session['payment_ethereum_amount'])
 
         if Transaction.objects.filter(txn_hash=txn_hash_normalized).exists():
             raise PaymentException(
@@ -209,7 +209,10 @@ class Ethereum(BasePaymentProvider):
             'txn_hash': txn_hash,
             'currency_type': currency_type,
             'time': payment_timestamp,
-            'amount': payment_amount,
+            # payment_amount is a decimal value, but the payment object
+            # serializes as JSON so we need to downcast to a string for proper
+            # storage.
+            'amount': str(payment_amount),
         }
         payment.save(update_fields=['info'])
 
@@ -281,13 +284,13 @@ class Ethereum(BasePaymentProvider):
     def _get_rates_checkout(self, request: HttpRequest, total):
         final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
-        request.session['payment_ethereum_amount'] = final_price
+        request.session['payment_ethereum_amount'] = str(final_price)
         request.session['payment_ethereum_time'] = int(time.time())
 
     def _get_rates(self, request: HttpRequest, payment: OrderPayment):
         final_price = self._get_rates_from_api(payment.amount, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
-        request.session['payment_ethereum_amount'] = final_price
+        request.session['payment_ethereum_amount'] = str(final_price)
         request.session['payment_ethereum_time'] = int(time.time())
 
     def payment_form_render(self, request: HttpRequest, total: decimal.Decimal):
