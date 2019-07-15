@@ -1,13 +1,12 @@
 {% load i18n %}
 {% load static %}
-<script type="text/javascript" src="{% static "pretix_eth/check.js" %}"></script>
-<p>
-    <strong>{% blocktrans %}Deposit {{ amount }} {{ coin }} into {{ payment_info }}{% endblocktrans %}</strong>
-</p>
+<a id="pretix-eth-qr-anchor" href="yolo" class="collapse"></a>
+<div id="pretix-eth-qr-div"></div>
+<script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
 <p>
     {% blocktrans trimmed %}
-    We're waiting for a successful deposit to the address provided. Kindly deposit to the address and wait for confirmation. Please contact us if this
-    takes more than an hour after you've made a deposit.
+    We'll verify that a deposit was made to the correct address. Once this
+    has been done, you'll receive a confirmation email.
     {% endblocktrans %}
 </p>
 
