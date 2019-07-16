@@ -4,7 +4,7 @@ from distutils.command.build import build
 from setuptools import setup, find_packages
 
 
-with open(os.path.join(os.path.dirname(__file__), 'README.rst'), encoding='utf-8') as f:
+with open(os.path.join(os.path.dirname(__file__), 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
 
 
@@ -46,6 +46,7 @@ setup(
     version='1.0.2',
     description='Ethereum payment provider plugin for pretix software',
     long_description=long_description,
+    long_description_content_type='text/markdown',
     url='https://github.com/esPass/pretix-eth-payment-plugin',
     author='Pretix Ethereum Plugin Developers',
     author_email='pretix-eth-payment-plugin@ethereum.org',
