@@ -158,7 +158,7 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
-            self._get_rates_checkout(request, cart['total'])
+            self._update_session_payment_amount(request, cart['total'])
             return True
 
         return False
@@ -168,7 +168,7 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
-            self._get_rates_checkout(request, payment.amount)
+            self._update_session_payment_amount(request, payment.amount)
             return True
 
         return False
@@ -212,7 +212,7 @@ class Ethereum(BasePaymentProvider):
                 _('Please try again and get in touch with us if this problem persists.')
             )
 
-    def _get_rates_checkout(self, request: HttpRequest, total):
+    def _update_session_payment_amount(self, request: HttpRequest, total):
         final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
         request.session['payment_ethereum_amount'] = truncate_wei_value(final_price, RESERVED_ORDER_DIGITS)  # noqa: E501
