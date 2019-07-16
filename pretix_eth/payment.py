@@ -12,10 +12,9 @@ from django.utils.translation import ugettext_lazy as _
 from eth_utils import (
     import_string,
 )
-from requests.exceptions import ConnectionError
 
 from pretix.base.models import OrderPayment
-from pretix.base.payment import BasePaymentProvider, PaymentException
+from pretix.base.payment import BasePaymentProvider
 
 from eth_utils import to_wei, from_wei
 
@@ -192,28 +191,23 @@ class Ethereum(BasePaymentProvider):
         }
         payment.save(update_fields=['info'])
 
-    def _get_rates_from_api(self, total, currency):
-        try:
-            if currency == 'ETH':
-                final_price = to_wei((
-                    total * decimal.Decimal(self.settings.ETH_RATE)
-                ).quantize(decimal.Decimal('1.00000')), 'ether')
-            elif currency == 'DAI':
-                final_price = to_wei((
-                    total * decimal.Decimal(self.settings.xDAI_RATE)
-                ).quantize(decimal.Decimal('1.00000')), 'ether')
-            else:
-                raise ImproperlyConfigured("Unrecognized currency: {0}".format(self.event.currency))
+    def _get_final_price(self, total, currency_type):
+        rounding_base = decimal.Decimal('1.00000')
 
-            return final_price
-        except ConnectionError:
-            logger.exception('Internal eror occured.')
-            raise PaymentException(
-                _('Please try again and get in touch with us if this problem persists.')
-            )
+        if currency_type == 'ETH':
+            chosen_currency_rate = decimal.Decimal(self.settings.ETH_RATE)
+        elif currency_type == 'DAI':
+            chosen_currency_rate = decimal.Decimal(self.settings.xDAI_RATE)
+        else:
+            raise ImproperlyConfigured(f'Unrecognized currency type: {currency_type}')  # noqa: E501
+
+        rounded_price = (total * chosen_currency_rate).quantize(rounding_base)
+        final_price = to_wei(rounded_price, 'ether')
+
+        return final_price
 
     def _update_session_payment_amount(self, request: HttpRequest, total):
-        final_price = self._get_rates_from_api(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
+        final_price = self._get_final_price(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
         request.session['payment_ethereum_amount'] = truncate_wei_value(final_price, RESERVED_ORDER_DIGITS)  # noqa: E501
         request.session['payment_ethereum_time'] = int(time.time())
