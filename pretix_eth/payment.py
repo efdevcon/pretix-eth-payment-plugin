@@ -168,6 +168,7 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
+            self._get_rates_checkout(request, payment.amount)
             return True
 
         return False
