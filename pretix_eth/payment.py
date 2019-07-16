@@ -76,17 +76,17 @@ class Ethereum(BasePaymentProvider):
             + [
                 ('WALLET_ADDRESS', forms.CharField(
                     label=_('Wallet address'),
-                    required=True
+                    required=True,
                 )),
                 ('ETH_RATE', forms.DecimalField(
                     label=_('Ethereum rate'),
-                    help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),  # noqa: E501
-                    required=False
+                    help_text=_('Specify the exchange rate between Ethereum and your base currency.'),  # noqa: E501
+                    required=True,
                 )),
                 ('xDAI_RATE', forms.DecimalField(
                     label=_('xDAI rate'),
-                    help_text=_('Specify the exchange rate between xDAI and your base currency. Leave out if you do not want to accept DAI'),  # noqa: E501
-                    required=False
+                    help_text=_('Specify the exchange rate between xDAI and your base currency.'),  # noqa: E501
+                    required=True,
                 )),
                 ('TRANSACTION_PROVIDER', forms.CharField(
                     label=_('Transaction Provider'),
@@ -95,7 +95,7 @@ class Ethereum(BasePaymentProvider):
                         f'transfers of Ether.  Leave empty to use the default '
                         f'provider: {DEFAULT_TRANSACTION_PROVIDER}'
                     ),
-                    required=False
+                    required=False,
                 )),
                 ('TOKEN_PROVIDER', forms.CharField(
                     label=_('Token Provider'),
@@ -104,7 +104,7 @@ class Ethereum(BasePaymentProvider):
                         f'transfers.  Leave empty to use the default provider: '
                         f'{DEFAULT_TOKEN_PROVIDER}'
                     ),
-                    required=False
+                    required=False,
                 )),
             ]
         )
