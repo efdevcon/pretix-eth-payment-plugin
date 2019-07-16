@@ -229,8 +229,10 @@ class Ethereum(BasePaymentProvider):
 
         if currency_type == 'ETH':
             erc_681_url = f'ethereum:{wallet_address}?value={amount_plus_payment_id}'
+            amount_manual = f'{amount_plus_payment_id} WEI'
         elif currency_type == 'DAI':
             erc_681_url = f'ethereum:{DAI_MAINNET_ADDRESS}/transfer?address={wallet_address}&uint256={amount_plus_payment_id}'  # noqa: E501
+            amount_manual = f'{amount_in_ether} DAI'
         else:
             raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
 
@@ -238,7 +240,9 @@ class Ethereum(BasePaymentProvider):
 
         ctx = {
             'erc_681_url': erc_681_url,
-            'web3connect_url': web3connect_url
+            'web3connect_url': web3connect_url,
+            'amount_manual': amount_manual,
+            'wallet_address': wallet_address
         }
 
         return template.render(ctx)
