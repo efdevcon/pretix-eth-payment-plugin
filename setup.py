@@ -43,7 +43,7 @@ extras_require['dev'] = (
 
 setup(
     name='pretix-eth-payment-plugin',
-    version='1.0.2',
+    version='1.0.3',
     description='Ethereum payment provider plugin for pretix software',
     long_description=long_description,
     long_description_content_type='text/markdown',
