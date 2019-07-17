@@ -25,9 +25,6 @@ from .providers import (
 
 logger = logging.getLogger(__name__)
 
-ETH_CHOICE = ('ETH', _('ETH'))
-DAI_CHOICE = ('DAI', _('DAI'))
-
 DEFAULT_TRANSACTION_PROVIDER = 'pretix_eth.providers.BlockscoutTransactionProvider'
 DEFAULT_TOKEN_PROVIDER = 'pretix_eth.providers.BlockscoutTokenProvider'
 
@@ -116,20 +113,28 @@ class Ethereum(BasePaymentProvider):
         return form_fields
 
     def is_allowed(self, request, **kwargs):
-        settings_configured = all((
-            self.settings.WALLET_ADDRESS,
+        one_or_more_currencies_configured = any((
             self.settings.ETH_RATE,
             self.settings.xDAI_RATE,
         ))
 
-        return settings_configured and super().is_allowed(request)
+        return all((
+            self.settings.WALLET_ADDRESS,
+            one_or_more_currencies_configured,
+            super().is_allowed(request),
+        ))
 
     @property
     def payment_form_fields(self):
-        currency_type_choices = (
-            ('DAI', _('DAI')),
-            ('ETH', _('ETH')),
-        )
+        currency_type_choices = ()
+
+        if self.settings.xDAI_RATE:
+            currency_type_choices += (('DAI', _('DAI')),)
+        if self.settings.ETH_RATE:
+            currency_type_choices += (('ETH', _('ETH')),)
+
+        if len(currency_type_choices) == 0:
+            raise ImproperlyConfigured('No currencies configured')
 
         form_fields = OrderedDict(
             list(super().payment_form_fields.items()) + [
