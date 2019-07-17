@@ -7,6 +7,10 @@ import pytest
 TEST_ETH_RATE = '0.004'
 TEST_DAI_RATE = '1.0'
 TEST_WALLET_ADDRESS = '0x0000000000000000000000000000000000000000'
+CURRENCY_RATE_SETTINGS = (
+    'ETH_RATE',
+    'xDAI_RATE',
+)
 
 
 @pytest.mark.django_db
@@ -30,8 +34,8 @@ def test_provider_settings_form_fields(provider):
 @pytest.mark.django_db
 def test_provider_is_allowed(event, provider):
     assert provider.settings.WALLET_ADDRESS is None
-    assert provider.settings.ETH_RATE is None
-    assert provider.settings.xDAI_RATE is None
+    for setting in CURRENCY_RATE_SETTINGS:
+        assert provider.settings.get(setting) is None
 
     factory = RequestFactory()
 
@@ -45,25 +49,60 @@ def test_provider_is_allowed(event, provider):
     assert not provider.is_allowed(request)
 
     provider.settings.set('WALLET_ADDRESS', TEST_WALLET_ADDRESS)
-
     assert not provider.is_allowed(request)
 
-    provider.settings.set('ETH_RATE', TEST_ETH_RATE)
+    for setting in CURRENCY_RATE_SETTINGS:
+        provider.settings.set(setting, '1.0')
+        assert provider.is_allowed(request)
+        provider.settings.set(setting, '')
+        assert not provider.is_allowed(request)
 
-    assert not provider.is_allowed(request)
-
-    provider.settings.set('xDAI_RATE', TEST_DAI_RATE)
+    for setting in CURRENCY_RATE_SETTINGS:
+        provider.settings.set(setting, '1.0')
 
     assert provider.is_allowed(request)
 
 
 @pytest.mark.django_db
-def test_provider_payment_form_fields(provider):
-    payment_form_fields = provider.payment_form_fields
+def test_provider_payment_form_fields_only_ETH(provider):
+    provider.settings.set('ETH_RATE', TEST_ETH_RATE)
 
+    payment_form_fields = provider.payment_form_fields
+    currency_type_field = payment_form_fields['currency_type']
+
+    assert len(currency_type_field.choices) == 1
+
+    choice = currency_type_field.choices[0]
+
+    assert choice[0] == 'ETH'
+
+
+@pytest.mark.django_db
+def test_provider_payment_form_fields_only_DAI(provider):
+    provider.settings.set('xDAI_RATE', TEST_DAI_RATE)
+
+    payment_form_fields = provider.payment_form_fields
+    currency_type_field = payment_form_fields['currency_type']
+
+    assert len(currency_type_field.choices) == 1
+
+    choice = currency_type_field.choices[0]
+
+    assert choice[0] == 'DAI'
+
+
+@pytest.mark.django_db
+def test_provider_payment_form_fields_both_ETH_and_DAI(provider):
+    provider.settings.set('xDAI_RATE', TEST_DAI_RATE)
+    provider.settings.set('ETH_RATE', TEST_ETH_RATE)
+
+    payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields['currency_type']
 
     assert len(currency_type_field.choices) == 2
 
-    assert currency_type_field.choices[0][0] == 'DAI'
-    assert currency_type_field.choices[1][0] == 'ETH'
+    dai_choice = currency_type_field.choices[0]
+    eth_choice = currency_type_field.choices[1]
+
+    assert dai_choice[0] == 'DAI'
+    assert eth_choice[0] == 'ETH'
