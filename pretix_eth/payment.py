@@ -182,12 +182,14 @@ class Ethereum(BasePaymentProvider):
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
-        payment_amount = request.session['payment_ethereum_amount']
+
+        truncated_amount_in_wei = request.session['payment_ethereum_amount']
+        amount_plus_payment_id = truncated_amount_in_wei + payment.id
 
         payment.info_data = {
             'currency_type': currency_type,
             'time': payment_timestamp,
-            'amount': payment_amount,
+            'amount': amount_plus_payment_id,
         }
         payment.save(update_fields=['info'])
 
@@ -217,9 +219,8 @@ class Ethereum(BasePaymentProvider):
 
         wallet_address = self.settings.WALLET_ADDRESS
         currency_type = payment.info_data['currency_type']
+        amount_plus_payment_id = payment.info_data['amount']
 
-        truncated_amount_in_wei = payment.info_data['amount']
-        amount_plus_payment_id = truncated_amount_in_wei + payment.id
         amount_in_ether = from_wei(amount_plus_payment_id, 'ether')
 
         if currency_type == 'ETH':
