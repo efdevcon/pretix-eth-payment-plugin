@@ -71,8 +71,7 @@ class Ethereum(BasePaymentProvider):
     @property
     def settings_form_fields(self):
         form_fields = OrderedDict(
-            list(super().settings_form_fields.items())
-            + [
+            list(super().settings_form_fields.items()) + [
                 ('WALLET_ADDRESS', forms.CharField(
                     label=_('Wallet address'),
                     required=True
@@ -133,8 +132,7 @@ class Ethereum(BasePaymentProvider):
         )
 
         form_fields = OrderedDict(
-            list(super().payment_form_fields.items())
-            + [
+            list(super().payment_form_fields.items()) + [
                 ('currency_type', forms.ChoiceField(
                     label=_('Payment currency'),
                     help_text=_('Select the currency you will use for payment.'),
