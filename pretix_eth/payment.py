@@ -177,6 +177,13 @@ class Ethereum(BasePaymentProvider):
             'payment_ethereum_amount' in request.session,
         ))
 
+    def _payment_is_valid_info(self, payment: OrderPayment) -> bool:
+        return all((
+            'currency_type' in payment.info_data,
+            'time' in payment.info_data,
+            'amount' in payment.info_data,
+        ))
+
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
@@ -215,6 +222,15 @@ class Ethereum(BasePaymentProvider):
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
 
+        payment_is_valid = self._payment_is_valid_info(payment)
+        ctx = {
+            'payment_is_valid': payment_is_valid,
+            'order': payment.order,
+        }
+
+        if not payment_is_valid:
+            return template.render(ctx)
+
         wallet_address = self.settings.WALLET_ADDRESS
         currency_type = payment.info_data['currency_type']
         amount_plus_payment_id = payment.info_data['amount']
@@ -232,12 +248,12 @@ class Ethereum(BasePaymentProvider):
 
         web3connect_url = f'https://pretix.web3connect.com/?currency={currency_type}&amount={amount_in_ether}&to={wallet_address}'  # noqa: E501
 
-        ctx = {
+        ctx.update({
             'erc_681_url': erc_681_url,
             'web3connect_url': web3connect_url,
             'amount_manual': amount_manual,
-            'wallet_address': wallet_address
-        }
+            'wallet_address': wallet_address,
+        })
 
         return template.render(ctx)
 
