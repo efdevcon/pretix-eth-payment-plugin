@@ -12,8 +12,8 @@ TEST_WALLET_ADDRESS = '0x0000000000000000000000000000000000000000'
 @pytest.mark.django_db
 def test_provider_properties(provider):
     assert provider.identifier == 'ethereum'
-    assert provider.verbose_name == 'Ethereum'
-    assert provider.public_name == 'Ethereum'
+    assert provider.verbose_name == 'ETH or DAI'
+    assert provider.public_name == 'ETH or DAI'
 
 
 @pytest.mark.django_db
