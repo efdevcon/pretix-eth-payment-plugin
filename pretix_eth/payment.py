@@ -43,8 +43,8 @@ def truncate_wei_value(value: int, digits: int) -> int:
 
 class Ethereum(BasePaymentProvider):
     identifier = 'ethereum'
-    verbose_name = _('Ethereum')
-    public_name = _('Ethereum')
+    verbose_name = _('ETH or DAI')
+    public_name = _('ETH or DAI')
 
     @cached_property
     def transaction_provider(self) -> TransactionProviderAPI:
