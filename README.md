@@ -14,7 +14,7 @@ supports both Ethereum and DAI.
 ## History
 
 It started with [ligi](https://ligi) suggesting [pretix for Ethereum
-Magicians](https://ethereum-magicians.org/t/charging-for-tickets-participant-numbers-event-ticketing-for-council-of-paris-2019/2321).
+Magicians](https://ethereum-magicians.org/t/charging-for-tickets-participant-numbers-event-ticketing-for-council-of-paris-2019/2321/2).
 
 Then it was used for Ethereum Magicians in Paris (shout out to
 [boris](https://github.com/bmann) for making this possible) - but accepting ETH
