@@ -28,7 +28,6 @@ def test_provider_settings_form_fields(provider):
     assert 'ETH_RATE' in form_fields
     assert 'DAI_RATE' in form_fields
     assert 'TRANSACTION_PROVIDER' in form_fields
-    assert 'TOKEN_PROVIDER' in form_fields
 
 
 @pytest.mark.django_db
