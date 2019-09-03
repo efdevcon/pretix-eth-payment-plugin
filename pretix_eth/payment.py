@@ -78,9 +78,9 @@ class Ethereum(BasePaymentProvider):
                     help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),  # noqa: E501
                     required=False
                 )),
-                ('xDAI_RATE', forms.DecimalField(
-                    label=_('xDAI rate'),
-                    help_text=_('Specify the exchange rate between xDAI and your base currency. Leave out if you do not want to accept DAI'),  # noqa: E501
+                ('DAI_RATE', forms.DecimalField(
+                    label=_('DAI rate'),
+                    help_text=_('Specify the exchange rate between DAI and your base currency. Leave out if you do not want to accept DAI'),  # noqa: E501
                     required=False
                 )),
                 ('TRANSACTION_PROVIDER', forms.CharField(
@@ -106,7 +106,7 @@ class Ethereum(BasePaymentProvider):
 
         form_fields.move_to_end('WALLET_ADDRESS', last=True)
         form_fields.move_to_end('ETH_RATE', last=True)
-        form_fields.move_to_end('xDAI_RATE', last=True)
+        form_fields.move_to_end('DAI_RATE', last=True)
         form_fields.move_to_end('TRANSACTION_PROVIDER', last=True)
         form_fields.move_to_end('TOKEN_PROVIDER', last=True)
 
@@ -115,7 +115,7 @@ class Ethereum(BasePaymentProvider):
     def is_allowed(self, request, **kwargs):
         one_or_more_currencies_configured = any((
             self.settings.ETH_RATE,
-            self.settings.xDAI_RATE,
+            self.settings.DAI_RATE,
         ))
 
         return all((
@@ -128,7 +128,7 @@ class Ethereum(BasePaymentProvider):
     def payment_form_fields(self):
         currency_type_choices = ()
 
-        if self.settings.xDAI_RATE:
+        if self.settings.DAI_RATE:
             currency_type_choices += (('DAI', _('DAI')),)
         if self.settings.ETH_RATE:
             currency_type_choices += (('ETH', _('ETH')),)
@@ -209,7 +209,7 @@ class Ethereum(BasePaymentProvider):
         if currency_type == 'ETH':
             chosen_currency_rate = decimal.Decimal(self.settings.ETH_RATE)
         elif currency_type == 'DAI':
-            chosen_currency_rate = decimal.Decimal(self.settings.xDAI_RATE)
+            chosen_currency_rate = decimal.Decimal(self.settings.DAI_RATE)
         else:
             raise ImproperlyConfigured(f'Unrecognized currency type: {currency_type}')  # noqa: E501
 

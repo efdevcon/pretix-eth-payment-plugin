@@ -9,7 +9,7 @@ TEST_DAI_RATE = '1.0'
 TEST_WALLET_ADDRESS = '0x0000000000000000000000000000000000000000'
 CURRENCY_RATE_SETTINGS = (
     'ETH_RATE',
-    'xDAI_RATE',
+    'DAI_RATE',
 )
 
 
@@ -26,7 +26,7 @@ def test_provider_settings_form_fields(provider):
 
     assert 'WALLET_ADDRESS' in form_fields
     assert 'ETH_RATE' in form_fields
-    assert 'xDAI_RATE' in form_fields
+    assert 'DAI_RATE' in form_fields
     assert 'TRANSACTION_PROVIDER' in form_fields
     assert 'TOKEN_PROVIDER' in form_fields
 
@@ -79,7 +79,7 @@ def test_provider_payment_form_fields_only_ETH(provider):
 
 @pytest.mark.django_db
 def test_provider_payment_form_fields_only_DAI(provider):
-    provider.settings.set('xDAI_RATE', TEST_DAI_RATE)
+    provider.settings.set('DAI_RATE', TEST_DAI_RATE)
 
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields['currency_type']
@@ -93,7 +93,7 @@ def test_provider_payment_form_fields_only_DAI(provider):
 
 @pytest.mark.django_db
 def test_provider_payment_form_fields_both_ETH_and_DAI(provider):
-    provider.settings.set('xDAI_RATE', TEST_DAI_RATE)
+    provider.settings.set('DAI_RATE', TEST_DAI_RATE)
     provider.settings.set('ETH_RATE', TEST_ETH_RATE)
 
     payment_form_fields = provider.payment_form_fields

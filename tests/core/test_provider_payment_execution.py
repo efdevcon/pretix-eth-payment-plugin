@@ -87,13 +87,13 @@ def test_provider_execute_successful_payment_in_ETH(provider, order_and_payment)
 
 
 @pytest.mark.django_db
-def test_provider_execute_successful_payment_in_DAI(provider, order_and_payment):
-    order, payment = order_and_payment
+def test_provider_execute_successful_payment_in_DAI(provider, get_order_and_payment):
+    order, payment = get_order_and_payment()
 
     assert order.status == order.STATUS_PENDING
     assert payment.state == payment.PAYMENT_STATE_PENDING
 
-    provider.settings.set('xDAI_RATE', '0.004')
+    provider.settings.set('DAI_RATE', '0.004')
 
     factory = RequestFactory()
     session = SessionStore()
