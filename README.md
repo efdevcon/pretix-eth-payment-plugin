@@ -56,6 +56,61 @@ issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 6. Head to the plugin settings page to set the deposit address for both
    Ethereum and DAI.
 
+## Automatic payment confirmation with the `confirm_payments` command
+
+This plugin includes a [django management
+command](https://docs.djangoproject.com/en/2.2/howto/custom-management-commands/#module-django.core.management)
+that can be used to automatically confirm orders from Ethereum transactions and
+ERC20 token transfers.  By default, this command will perform a dry run which
+only displays payment records that would be modified and why but without
+actually modifying them.  Here are some example invocations of this command:
+```bash
+# Using the pretix module
+python -m pretix confirm_payments --event-slug=devcon-5 --no-dry-run
+
+# Using a django manage.py file
+python manage.py confirm_payments --event-slug=devcon-5 --no-dry-run
+```
+Above, the `confirm_payments` command uses the `--event-slug` argument to
+determine the wallet address to which ticket payments for the `devcon-5` event
+were sent.  It then inspects *all* external and internal transactions sent to
+the event's wallet address to determine if sufficient payments were made for
+payment records identified by the payment IDs encoded in the transactions' wei
+values.  It also inspects all token transfer events targeting the event's
+wallet address for the DAI stablecoin's mainnet contract address.  The
+`--no-dry-run` flag directs the command to modify and confirm payments
+identified by transactions and transfers.  Without this flag, the command will
+only display which records would be modified.  Alternatively, the same command
+above could have been invoked as follows:
+```bash
+python manage.py confirm_payments --wallet-address=<devcon-5-wallet-address> --no-dry-run
+```
+...where `<devcon-5-wallet-address>` is replaced with the explicit
+`0x`-prefixed wallet address for the Devcon 5 event.
+
+The `confirm_payments` command also supports a number of other arguments.  Here
+are some example uses of them:
+```bash
+python manage.py confirm_payments \
+    --event-slug=<slug> \
+    --token-address=<token-address> \
+    --api=blockscout-mainnet \
+    --start-block=<start-block> \
+    --end-block=<end-block> \
+```
+The above command confirms payments for the event identified by `<slug>` using
+the ERC20 token at address `<token-address>` on the Ethereum mainnet queried
+through Blockscout.  It only considers transactions and token transfers that
+occurred between and within blocks `<start-block>` and `<end-block>`.  Also,
+because the `--no-dry-run` flag is absent, it simply prints the payments that
+*would be* confirmed by the command without confirming them.
+
+For more details about the `confirm_payments` command and its options, the
+command may be invoked with `--help`:
+```bash
+python manage.py confirm_payments --help
+```
+
 ## License
 
 Copyright 2019 Victor (https://github.com/vic-en)
