@@ -1,63 +1,13 @@
-import decimal
 import time
 
-import pytest
-
-from django.test import RequestFactory
-from django.utils import timezone
 from django.contrib.sessions.backends.db import SessionStore
-
-from pretix.base.models import Order, OrderPayment
-
-from pretix_eth.providers import (
-    TokenProviderAPI,
-    TransactionProviderAPI,
-)
-
-
-ZERO_HASH = b'\x00' * 32
-ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
-ETH_ADDRESS = '0xeee0123400000000000000000000000000000000'
-DAI_ADDRESS = '0xda10123400000000000000000000000000000000'
-
-
-class FixtureTransactionProvider(TransactionProviderAPI):
-    def __init__(self, transaction):
-        self._transaction = transaction
-
-    def get_transaction(self, from_address):
-        return self._transaction
-
-
-class FixtureTokenProvider(TokenProviderAPI):
-    def __init__(self, transfer):
-        self._transfer = transfer
-
-    def get_ERC20_transfer(self, from_address):
-        return self._transfer
-
-
-@pytest.fixture
-def order_and_payment(transactional_db, event):
-    order = Order.objects.create(
-        event=event,
-        email='test@example.com',
-        locale='en_US',
-        datetime=timezone.now(),
-        total=decimal.Decimal('100.00'),
-        status=Order.STATUS_PENDING,
-    )
-    payment = OrderPayment.objects.create(
-        order=order,
-        amount='100.00',
-        state=OrderPayment.PAYMENT_STATE_PENDING,
-    )
-    return order, payment
+from django.test import RequestFactory
+import pytest
 
 
 @pytest.mark.django_db
-def test_provider_execute_successful_payment_in_ETH(provider, order_and_payment):
-    order, payment = order_and_payment
+def test_provider_execute_successful_payment_in_ETH(provider, get_order_and_payment):
+    order, payment = get_order_and_payment()
 
     assert order.status == order.STATUS_PENDING
     assert payment.state == payment.PAYMENT_STATE_PENDING

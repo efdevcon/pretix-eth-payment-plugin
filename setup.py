@@ -1,5 +1,5 @@
 import os
-from distutils.command.build import build
+from distutils.command.build import build  # type: ignore
 
 from setuptools import setup, find_packages
 
@@ -22,15 +22,15 @@ cmdclass = {
 
 extras_require = {
     'test': [
-        'pytest>=5.0.1,<6',
-        'pytest-django>=3.5.1,<4',
+        'pytest>=5.1,<6',
+        'pytest-django>=3.5,<4',
     ],
     'lint': [
-        'flake8>=3.5.0,<4',
-        "mypy==0.701",
+        'flake8>=3.7,<4',
+        'mypy==0.720',
     ],
     'dev': [
-        'tox>=1.8.0,<2',
+        'tox>=3.14.5,<4',
     ],
 }
 

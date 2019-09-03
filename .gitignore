@@ -63,3 +63,6 @@ target/
 .ipynb_checkpoints
 
 .pytest_cache/
+
+# Local pretix dev env
+data/
