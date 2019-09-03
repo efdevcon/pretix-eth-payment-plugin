@@ -20,13 +20,11 @@ from eth_utils import to_wei, from_wei
 
 from .providers import (
     TransactionProviderAPI,
-    TokenProviderAPI,
 )
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TRANSACTION_PROVIDER = 'pretix_eth.providers.BlockscoutTransactionProvider'
-DEFAULT_TOKEN_PROVIDER = 'pretix_eth.providers.BlockscoutTokenProvider'
+DEFAULT_TRANSACTION_PROVIDER = 'pretix_eth.providers.BlockscoutMainnetProvider'
 
 RESERVED_ORDER_DIGITS = 5
 
@@ -53,17 +51,6 @@ class Ethereum(BasePaymentProvider):
             transaction_provider_class = import_string(DEFAULT_TRANSACTION_PROVIDER)
 
         return transaction_provider_class()
-
-    @cached_property
-    def token_provider(self) -> TokenProviderAPI:
-        token_provider_path = self.settings.get('TOKEN_PROVIDER')
-
-        try:
-            token_provider_class = import_string(token_provider_path)
-        except ImportError:
-            token_provider_class = import_string(DEFAULT_TOKEN_PROVIDER)
-
-        return token_provider_class()
 
     @property
     def settings_form_fields(self):
@@ -92,15 +79,6 @@ class Ethereum(BasePaymentProvider):
                     ),
                     required=False
                 )),
-                ('TOKEN_PROVIDER', forms.CharField(
-                    label=_('Token Provider'),
-                    help_text=_(
-                        f'This determines how the application looks up token '
-                        f'transfers.  Leave empty to use the default provider: '
-                        f'{DEFAULT_TOKEN_PROVIDER}'
-                    ),
-                    required=False
-                )),
             ]
         )
 
@@ -108,7 +86,6 @@ class Ethereum(BasePaymentProvider):
         form_fields.move_to_end('ETH_RATE', last=True)
         form_fields.move_to_end('DAI_RATE', last=True)
         form_fields.move_to_end('TRANSACTION_PROVIDER', last=True)
-        form_fields.move_to_end('TOKEN_PROVIDER', last=True)
 
         return form_fields
 
