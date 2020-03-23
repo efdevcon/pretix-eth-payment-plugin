@@ -62,12 +62,12 @@ class Ethereum(BasePaymentProvider):
                 )),
                 ('ETH_RATE', forms.DecimalField(
                     label=_('Ethereum rate'),
-                    help_text=_('Specify the exchange rate between Ethereum and your base currency. Leave out if you do not want to accept ETH'),  # noqa: E501
+                    help_text=_('The Ethereum exchange rate in ETH per unit fiat. Leave out if you do not want to accept ETH'),  # noqa: E501
                     required=False
                 )),
                 ('DAI_RATE', forms.DecimalField(
                     label=_('DAI rate'),
-                    help_text=_('Specify the exchange rate between DAI and your base currency. Leave out if you do not want to accept DAI'),  # noqa: E501
+                    help_text=_('The DAI exchange rate in DAI per unit fiat. Leave out if you do not want to accept DAI'),  # noqa: E501
                     required=False
                 )),
                 ('TRANSACTION_PROVIDER', forms.CharField(

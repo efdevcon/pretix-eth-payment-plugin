@@ -8,7 +8,8 @@ class PluginApp(AppConfig):
 
     class PretixPluginMeta:
         name = ugettext_lazy('Pretix Ethereum Payment Provider')
-        author = 'Victor(https://github.com/vic-en)'
+        author = 'Pretix Ethereum Payment Plugin Contributors'
+        category = 'PAYMENT'
         description = ugettext_lazy('An ethereum payment provider plugin for pretix software')
         visible = True
         version = '1.0.1'
