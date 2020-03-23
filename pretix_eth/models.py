@@ -1,15 +1,16 @@
 from django.db import models
 
 from pretix.base.models import (
+    Event,
     OrderPayment,
 )
 
 
-class Transaction(models.Model):
+class WalletAddress(models.Model):
     """
-    Represents a transaction that has been submitted by a ticket buyer as
-    proof of payment. Storing this information allows us to prevent the same
-    transaction from being used more than once for payment.
+    Represents a wallet address to be used to receive an order payment.
     """
-    txn_hash = models.CharField(max_length=66, unique=True)
-    order_payment = models.ForeignKey(OrderPayment, on_delete=models.PROTECT)
+    hex_address = models.CharField(max_length=42, unique=True)
+
+    event = models.ForeignKey(Event, on_delete=models.PROTECT)
+    order_payment = models.ForeignKey(OrderPayment, on_delete=models.PROTECT, null=True, blank=True)
