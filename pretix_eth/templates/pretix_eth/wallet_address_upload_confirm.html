@@ -1,0 +1,28 @@
+{% extends "pretixcontrol/event/settings_base.html" %}
+{% load i18n %}
+{% load bootstrap3 %}
+{% block title %} {% trans "Wallet address upload confirm" %} {% endblock %}
+{% block inside %}
+    <form action="" method="post" class="form-horizontal">
+        {% csrf_token %}
+        <fieldset>
+            <legend>{% trans "Wallet address upload confirm" %}</legend>
+            <p>Your upload file contained:</p>
+            <ul>
+              <li>{{ file_address_count }} total addresses</li>
+              <li>{{ unique_address_count }} unique addresses</li>
+              <li>{{ existing_address_count }} addresses that already exist in the database</li>
+              <li>{{ new_address_count }} new addresses that don't already exist in the database</li>
+            </ul>
+            <p>Click "Confirm" to create {{ new_address_count }} new addresses.</p>
+        </fieldset>
+        <div class="form-group submit-group">
+            <button type="submit" name="action" value="cancel" class="btn btn-danger btn-cancel">
+                {% trans "Cancel" %}
+            </button>
+            <button type="submit" name="action" value="confirm" class="btn btn-primary btn-save">
+                {% trans "Confirm" %}
+            </button>
+        </div>
+    </form>
+{% endblock %}

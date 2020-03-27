@@ -1,0 +1,18 @@
+{% extends "pretixcontrol/event/settings_base.html" %}
+{% load i18n %}
+{% load bootstrap3 %}
+{% block title %} {% trans "Wallet address upload" %} {% endblock %}
+{% block inside %}
+    <form action="" method="post" class="form-horizontal" enctype="multipart/form-data">
+        {% csrf_token %}
+        <fieldset>
+            <legend>{% trans "Wallet address upload" %}</legend>
+            {% bootstrap_form form layout="horizontal" %}
+        </fieldset>
+        <div class="form-group submit-group">
+            <button type="submit" class="btn btn-primary btn-save">
+                {% trans "Upload" %}
+            </button>
+        </div>
+    </form>
+{% endblock %}
