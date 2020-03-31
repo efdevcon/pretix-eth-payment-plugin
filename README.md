@@ -36,7 +36,7 @@ meriam](https://github.com/pipermerriam), [rami](https://github.com/raphaelm),
 [Pedro Gomes](https://github.com/pedrouid), and [Jamie
 Pitts](https://github.com/jpitts) brought it to a state where it is usable for
 DevCon5 (still a lot of work to be done to make this a good plugin). Currently,
-it is semi-automatic. But it now has ERC-681 and Web3Connect/WalletConnect
+it is semi-automatic. But it now has ERC-681 and Web3Modal
 support. If you want to dig a bit into the problems that emerged short before
 the launch you can have a look at [this
 issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
