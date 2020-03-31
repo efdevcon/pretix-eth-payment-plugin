@@ -187,7 +187,8 @@ class Command(BaseCommand):
         event_slug = options['event_slug']
         if event_slug is not None:
             try:
-                event = Event.objects.get(slug=event_slug)
+                with scope(organizer=None):
+                    event = Event.objects.get(slug=event_slug)
             except Event.DoesNotExist:
                 raise ValueError(f'Event with slug "{event_slug}" not found')
             payment_provider = Ethereum(event)
