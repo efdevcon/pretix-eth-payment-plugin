@@ -10,9 +10,8 @@
   <p>
     <strong>
       {% blocktrans trimmed %}
-      Please pay for your ticket!  <em>DO NOT</em> change the amount (e.g. round
-      up) even if your wallet allows you to do so.  If you do, we won't be able
-      to associate your payment with your order.
+      Please send your ticket payment to the address seen below.  This address
+      is specific to your order.  <em>DO NOT</em> pay to another address.
       {% endblocktrans %}
     </strong>
   </p>
@@ -38,9 +37,9 @@
 
       <li>
         {% blocktrans trimmed %}
-        Manually pay <strong>exactly</strong> {{ amount_manual }} to {{ wallet_address }}.
-        Please only do this if you know what you are doing. Otherwise, use the
-        ERC-681 or Web3Connect methods.
+        Manually pay {{ amount_manual }} to {{ wallet_address }}.  Please only
+        do this if you know what you are doing.  Otherwise, use the ERC-681 or
+        Web3Connect methods.
         {% endblocktrans %}
       </li>
     </ul>

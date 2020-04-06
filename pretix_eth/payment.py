@@ -7,20 +7,14 @@ from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template.loader import get_template
-from django.utils.functional import cached_property
 from django.utils.translation import ugettext_lazy as _
-from eth_utils import (
-    import_string,
-)
 
 from pretix.base.models import OrderPayment
 from pretix.base.payment import BasePaymentProvider
 
 from eth_utils import to_wei, from_wei
 
-from .providers import (
-    TransactionProviderAPI,
-)
+from .models import WalletAddress
 
 logger = logging.getLogger(__name__)
 
@@ -41,25 +35,10 @@ class Ethereum(BasePaymentProvider):
     verbose_name = _('ETH or DAI')
     public_name = _('ETH or DAI')
 
-    @cached_property
-    def transaction_provider(self) -> TransactionProviderAPI:
-        transaction_provider_path = self.settings.get('TRANSACTION_PROVIDER')
-
-        try:
-            transaction_provider_class = import_string(transaction_provider_path)
-        except ImportError:
-            transaction_provider_class = import_string(DEFAULT_TRANSACTION_PROVIDER)
-
-        return transaction_provider_class()
-
     @property
     def settings_form_fields(self):
         form_fields = OrderedDict(
             list(super().settings_form_fields.items()) + [
-                ('WALLET_ADDRESS', forms.CharField(
-                    label=_('Wallet address'),
-                    required=True
-                )),
                 ('ETH_RATE', forms.DecimalField(
                     label=_('Ethereum rate'),
                     help_text=_('The Ethereum exchange rate in ETH per unit fiat. Leave out if you do not want to accept ETH'),  # noqa: E501
@@ -70,22 +49,11 @@ class Ethereum(BasePaymentProvider):
                     help_text=_('The DAI exchange rate in DAI per unit fiat. Leave out if you do not want to accept DAI'),  # noqa: E501
                     required=False
                 )),
-                ('TRANSACTION_PROVIDER', forms.CharField(
-                    label=_('Transaction Provider'),
-                    help_text=_(
-                        f'This determines how the application looks up '
-                        f'transfers of Ether.  Leave empty to use the default '
-                        f'provider: {DEFAULT_TRANSACTION_PROVIDER}'
-                    ),
-                    required=False
-                )),
             ]
         )
 
-        form_fields.move_to_end('WALLET_ADDRESS', last=True)
         form_fields.move_to_end('ETH_RATE', last=True)
         form_fields.move_to_end('DAI_RATE', last=True)
-        form_fields.move_to_end('TRANSACTION_PROVIDER', last=True)
 
         return form_fields
 
@@ -96,7 +64,6 @@ class Ethereum(BasePaymentProvider):
         ))
 
         return all((
-            self.settings.WALLET_ADDRESS,
             one_or_more_currencies_configured,
             super().is_allowed(request),
         ))
@@ -170,13 +137,12 @@ class Ethereum(BasePaymentProvider):
         currency_type = request.session['payment_ethereum_currency_type']
         payment_timestamp = request.session['payment_ethereum_time']
 
-        truncated_amount_in_wei = request.session['payment_ethereum_amount']
-        amount_plus_payment_id = truncated_amount_in_wei + payment.id
+        payment_amount = request.session['payment_ethereum_amount']
 
         payment.info_data = {
             'currency_type': currency_type,
             'time': payment_timestamp,
-            'amount': amount_plus_payment_id,
+            'amount': payment_amount,
         }
         payment.save(update_fields=['info'])
 
@@ -198,7 +164,7 @@ class Ethereum(BasePaymentProvider):
     def _update_session_payment_amount(self, request: HttpRequest, total):
         final_price = self._get_final_price(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
 
-        request.session['payment_ethereum_amount'] = truncate_wei_value(final_price, RESERVED_ORDER_DIGITS)  # noqa: E501
+        request.session['payment_ethereum_amount'] = final_price
         request.session['payment_ethereum_time'] = int(time.time())
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
@@ -213,17 +179,17 @@ class Ethereum(BasePaymentProvider):
         if not payment_is_valid:
             return template.render(ctx)
 
-        wallet_address = self.settings.WALLET_ADDRESS
+        wallet_address = WalletAddress.objects.get_for_order_payment(payment).hex_address
         currency_type = payment.info_data['currency_type']
-        amount_plus_payment_id = payment.info_data['amount']
+        payment_amount = payment.info_data['amount']
 
-        amount_in_ether = from_wei(amount_plus_payment_id, 'ether')
+        amount_in_ether = from_wei(payment_amount, 'ether')
 
         if currency_type == 'ETH':
-            erc_681_url = f'ethereum:{wallet_address}?value={amount_plus_payment_id}'
-            amount_manual = f'{amount_plus_payment_id} WEI'
+            erc_681_url = f'ethereum:{wallet_address}?value={payment_amount}'
+            amount_manual = f'{payment_amount} WEI'
         elif currency_type == 'DAI':
-            erc_681_url = f'ethereum:{DAI_MAINNET_ADDRESS}/transfer?address={wallet_address}&uint256={amount_plus_payment_id}'  # noqa: E501
+            erc_681_url = f'ethereum:{DAI_MAINNET_ADDRESS}/transfer?address={wallet_address}&uint256={payment_amount}'  # noqa: E501
             amount_manual = f'{amount_in_ether} DAI'
         else:
             raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
