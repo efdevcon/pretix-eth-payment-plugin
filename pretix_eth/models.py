@@ -1,9 +1,48 @@
-from django.db import models
+from __future__ import annotations
 
+from django.db import (
+    models,
+    transaction,
+)
 from pretix.base.models import (
     Event,
     OrderPayment,
 )
+
+
+class WalletAddressError(Exception):
+    pass
+
+
+class WalletAddressQuerySet(models.QuerySet):
+    def for_event(self, event: Event) -> models.QuerySet:
+        return self.filter(event=event)
+
+    def unused(self) -> models.QuerySet:
+        return self.filter(order_payment__isnull=True)
+
+
+class WalletAddressManager(models.Manager):
+    def get_queryset(self) -> models.QuerySet:
+        return WalletAddressQuerySet(self.model, using=self._db)
+
+    def get_for_order_payment(self, order_payment: OrderPayment) -> WalletAddress:
+        event = order_payment.order.event
+        unused_addresses = self.select_for_update().unused().for_event(event)
+
+        with transaction.atomic():
+            if order_payment.walletaddress_set.exists():
+                address = order_payment.walletaddress_set.first()
+            else:
+                if not unused_addresses.exists():
+                    raise WalletAddressError(
+                        "No wallet addresses remain that haven't been used",
+                    )
+                address = unused_addresses.first()
+                address.order_payment = order_payment
+                address.save()
+
+        return address
 
 
 class WalletAddress(models.Model):
@@ -14,3 +53,5 @@ class WalletAddress(models.Model):
 
     event = models.ForeignKey(Event, on_delete=models.PROTECT)
     order_payment = models.ForeignKey(OrderPayment, on_delete=models.PROTECT, null=True, blank=True)
+
+    objects = WalletAddressManager()
