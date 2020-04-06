@@ -122,7 +122,10 @@ class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
             for hex_address in new_addresses
         ])
 
-        messages.success(self.request, _('Created {n} new wallet addresses!').format(n=len(created)))
+        messages.success(
+            self.request,
+            _('Created {n} new wallet addresses!').format(n=len(created)),
+        )
         return self.clear_and_start_over()
 
     def get_file_addresses(self):

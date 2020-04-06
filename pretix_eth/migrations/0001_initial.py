@@ -18,8 +18,8 @@ class Migration(migrations.Migration):
             fields=[
                 ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False)),
                 ('hex_address', models.CharField(max_length=42, unique=True)),
-                ('event', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='pretixbase.Event')),
-                ('order_payment', models.ForeignKey(null=True, on_delete=django.db.models.deletion.PROTECT, to='pretixbase.OrderPayment')),
+                ('event', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, to='pretixbase.Event')),  # noqa: E501
+                ('order_payment', models.ForeignKey(null=True, on_delete=django.db.models.deletion.PROTECT, to='pretixbase.OrderPayment')),  # noqa: E501
             ],
         ),
     ]
