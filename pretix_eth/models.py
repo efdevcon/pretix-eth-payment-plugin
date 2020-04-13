@@ -21,6 +21,12 @@ class WalletAddressQuerySet(models.QuerySet):
     def unused(self) -> models.QuerySet:
         return self.filter(order_payment__isnull=True)
 
+    def unconfirmed_orders(self) -> models.QuerySet:
+        return self.filter(order_payment__state__in=(
+            OrderPayment.PAYMENT_STATE_CREATED,
+            OrderPayment.PAYMENT_STATE_PENDING,
+        ))
+
 
 class WalletAddressManager(models.Manager):
     def get_queryset(self) -> models.QuerySet:
