@@ -194,11 +194,11 @@ class Ethereum(BasePaymentProvider):
         else:
             raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
 
-        web3connect_url = f'https://pretix.web3connect.com/?currency={currency_type}&amount={amount_in_ether}&to={wallet_address}'  # noqa: E501
+        web3modal_url = f'https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether}&to={wallet_address}'  # noqa: E501
 
         ctx.update({
             'erc_681_url': erc_681_url,
-            'web3connect_url': web3connect_url,
+            'web3modal_url': web3modal_url,
             'amount_manual': amount_manual,
             'wallet_address': wallet_address,
         })

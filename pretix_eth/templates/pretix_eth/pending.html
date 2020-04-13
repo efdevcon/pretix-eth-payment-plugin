@@ -29,8 +29,8 @@
       </li>
 
       <li>
-        <a target="blank" rel="noreferrer noopener" href="{{ web3connect_url }}">
-          {% trans "Via Web3Connect" %}
+        <a target="blank" rel="noreferrer noopener" href="{{ web3modal_url }}">
+          {% trans "Via Web3Modal" %}
         </a>
         ({% trans "allows you to pay with WalletConnect and MetaMask" %}).
       </li>
@@ -38,8 +38,8 @@
       <li>
         {% blocktrans trimmed %}
         Manually pay {{ amount_manual }} to {{ wallet_address }}.  Please only
-        do this if you know what you are doing.  Otherwise, use the ERC-681 or
-        Web3Connect methods.
+        do this if you know what you are doing.  Otherwise, use the
+        ERC-681 or Web3Modal methods.
         {% endblocktrans %}
       </li>
     </ul>
