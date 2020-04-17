@@ -109,7 +109,8 @@ class Command(BaseCommand):
 
                 if no_dry_run:
                     logger.info(f'  * Confirming order payment {full_id}')
-                    order_payment.confirm()
+                    with scope(organizer=None):
+                        order_payment.confirm()
                 else:
                     logger.info(f'  * DRY RUN: Would confirm order payment {full_id}')
             else:
