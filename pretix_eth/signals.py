@@ -26,8 +26,9 @@ def add_question_type_javascript(sender, request, **kwargs):
 @receiver(question_form_fields, dispatch_uid="payment_eth_mark_question_type")
 def mark_question_type(sender, position, **kwargs):
     questions = sender.questions.filter(identifier=NFT_QUESTION_IDENTIFIER)
-    payment_eth_info_widget = forms.TextInput(attrs={
-        'value': ','.join( str(q.id) for q in questions ),
+    question_ids = [ 'id_{e.id}-question_{q.id}'.format(e=sender, q=q) for q in questions ]
+    payment_eth_info_widget = forms.HiddenInput(attrs={
+        'value': ','.join(question_ids),
         'id': PAYMENT_ETH_INFO_ID,
     })
     payment_eth_info_field = forms.CharField(
