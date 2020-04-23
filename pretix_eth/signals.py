@@ -10,7 +10,7 @@ from pretix.control.signals import nav_event_settings
 
 
 NFT_QUESTION_IDENTIFIER = 'eth-payment-plugin-nft-address'
-PAYMENT_ETH_INFO_ID = 'payment_eth_info'
+PAYMENT_ETH_INFO_CLASS = 'payment_eth_info'
 PAYMENT_ETH_INFO_NAME = 'payment_eth_info'
 
 
@@ -29,7 +29,7 @@ def mark_question_type(sender, position, **kwargs):
     question_ids = [ 'id_{p.id}-question_{q.id}'.format(p=position, q=q) for q in questions ]
     payment_eth_info_widget = forms.HiddenInput(attrs={
         'value': ','.join(question_ids),
-        'id': PAYMENT_ETH_INFO_ID,
+        'class': PAYMENT_ETH_INFO_CLASS,
     })
     payment_eth_info_field = forms.CharField(
         label='Payment ETH Info',
