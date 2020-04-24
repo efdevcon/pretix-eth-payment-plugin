@@ -29,6 +29,13 @@
       </li>
 
       <li>
+        <a target="blank" rel="noreferrer noopener" href="{{ uniswap_url }}">
+          {% trans "Via uniswap" %}
+        </a>
+        ({% trans "allows you to pay with any uniswap supported token. Please do not change the output amount!" %}).
+      </li>
+
+      <li>
         {% blocktrans trimmed %}
         Manually pay {{ amount_manual }} to {{ wallet_address }}.  Otherwise,
         use the ERC-681 or Web3Modal methods.
