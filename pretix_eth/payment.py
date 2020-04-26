@@ -187,18 +187,18 @@ class Ethereum(BasePaymentProvider):
         currency_type = payment.info_data['currency_type']
         payment_amount = payment.info_data['amount']
 
-        amount_in_ether = from_wei(payment_amount, 'ether')
+        amount_in_ether_or_dai = from_wei(payment_amount, 'ether')
 
         if currency_type == 'ETH':
             erc_681_url = f'ethereum:{wallet_address}?value={payment_amount}'
-            amount_manual = f'{payment_amount} WEI'
+            amount_manual = f'{amount_in_ether_or_dai} ETH'
         elif currency_type == 'DAI':
             erc_681_url = f'ethereum:{DAI_MAINNET_ADDRESS}/transfer?address={wallet_address}&uint256={payment_amount}'  # noqa: E501
-            amount_manual = f'{amount_in_ether} DAI'
+            amount_manual = f'{amount_in_ether_or_dai} DAI'
         else:
             raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
 
-        web3modal_url = f'https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether}&to={wallet_address}'  # noqa: E501
+        web3modal_url = f'https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether_or_dai}&to={wallet_address}'  # noqa: E501
 
         ctx.update({
             'erc_681_url': erc_681_url,
