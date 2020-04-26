@@ -62,9 +62,13 @@ class Ethereum(BasePaymentProvider):
             self.settings.ETH_RATE,
             self.settings.DAI_RATE,
         ))
+        at_least_one_unused_address = (
+            WalletAddress.objects.all().unused().for_event(request.event).exists()
+        )
 
         return all((
             one_or_more_currencies_configured,
+            at_least_one_unused_address,
             super().is_allowed(request),
         ))
 
