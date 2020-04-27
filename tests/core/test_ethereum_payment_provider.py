@@ -3,6 +3,8 @@ from django.contrib.sessions.backends.db import SessionStore
 
 import pytest
 
+from pretix_eth.models import WalletAddress
+
 
 TEST_ETH_RATE = '0.004'
 TEST_DAI_RATE = '1.0'
@@ -40,6 +42,11 @@ def test_provider_is_allowed(event, provider):
     request = factory.get('/checkout')
     request.event = event
     request.session = session
+
+    WalletAddress.objects.create(
+        event=event,
+        hex_address="0x0000000000000000000000000000000000000000",
+    )
 
     assert not provider.is_allowed(request)
 
