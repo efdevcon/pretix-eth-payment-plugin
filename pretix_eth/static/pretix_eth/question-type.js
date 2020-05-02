@@ -34,8 +34,11 @@ function init() {
 async function refreshAccountData() {
   const web3 = new Web3(provider);
   const accounts = await web3.eth.getAccounts();
-  const targetedInputElement = document.querySelector(`#${get_payment_eth_question_ids('payment_eth_info')}`);
-  targetedInputElement.value = accounts[0];
+  const [...inputElements] = get_payment_eth_question_ids('payment_eth_info');
+  for (let i of inputElements) {
+    let inputElement = document.querySelector(`#${i}`);
+    inputElement.value = accounts[0];
+  }
 }
 
 async function onConnect() {
