@@ -98,7 +98,7 @@ $(function () {
   const warningText = document.createElement("p");
   warningText.style.cssText = "font-weight: 600; line-height: 1.5; margin-top: 4px;"
   warningText.classList.add("warningText");
-  const warningTextContent = document.createTextNode("Please use a non-custodial address. E.g. not Coinbase, Gemini, etc.");
+  const warningTextContent = document.createTextNode("Please use a non-custodial wallet address. E.g. not Coinbase, Binance, etc.");
   warningText.appendChild(warningTextContent);
 
   // Button Element
