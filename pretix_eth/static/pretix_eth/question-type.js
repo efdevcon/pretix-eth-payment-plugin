@@ -86,15 +86,17 @@ $(function () {
     for (var i = 0; i < payment_eth_question_ids.length; i++) {
         change_element(payment_eth_question_ids[i]);
     }
- 
-  // Parent Element
+
+  // Grandparent Element
   const formGroupElements = document.querySelectorAll("div.form-group");
   const lastFormGroupElement = formGroupElements.item(formGroupElements.length - 1);
+
+  // Parent Element
+  const columnElement = lastFormGroupElement.childNodes.item(1);
   
   // Warning Text Element
   const warningText = document.createElement("p");
-  // TODO Better, responsive CSS values
-  warningText.style.cssText = "font-weight: 600; line-height: 1.5; margin-left: 300px;"
+  warningText.style.cssText = "font-weight: 600; line-height: 1.5; margin-top: 4px;"
   warningText.classList.add("warningText");
   const warningTextContent = document.createTextNode("Please use a non-custodial address. E.g. not Coinbase, Gemini, etc.");
   warningText.appendChild(warningTextContent);
@@ -104,8 +106,7 @@ $(function () {
   addressButton.textContent = "Add Wallet Address";
   addressButton.id = "btn-connect";
   addressButton.classList.add("btn", "btn-block", "btn-primary", "btn-lg");
-  // TODO Better, responsive CSS values
-  addressButton.style.cssText = "max-width: 360px; margin-top: 40px; margin-left: 300px;";
-  lastFormGroupElement.append(addressButton);
-  lastFormGroupElement.appendChild(warningText);
+  addressButton.style.cssText = "max-width: 360px; margin-top: 8px;";
+  columnElement.append(addressButton);
+  columnElement.appendChild(warningText);
 });
