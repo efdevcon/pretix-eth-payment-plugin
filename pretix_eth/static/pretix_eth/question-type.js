@@ -37,6 +37,7 @@ async function refreshAccountData(e) {
   const buttonId = e.target.id;
   const inputElement = document.querySelector(`input#${buttonId}`);
   inputElement.value = accounts[0];
+  await disconnect();
 }
 
 async function onConnect(e) {
@@ -49,6 +50,17 @@ async function onConnect(e) {
   }
   await refreshAccountData(e);
 }
+
+async function disconnect() {
+
+  if(provider.close) {
+    await provider.close();
+    provider = null;
+  }
+
+  selectedAccount = null;
+}
+
 window.addEventListener('load', async () => {
   init();
   const addressButtons = document.querySelectorAll(".btn-connect");
