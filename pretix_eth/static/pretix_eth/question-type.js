@@ -71,17 +71,11 @@ function get_payment_eth_question_ids(class_name) {
 
 
 $(function () {
-  // Get unique Ids from hidden fields
-  const [...hiddenElements] = document.getElementsByClassName('payment_eth_info');
-  let inputElements = [];
-  const re = /payment_eth_info/;
-  for (let hiddenElement of hiddenElements) {
-    let inputElement = hideenElement.id.replace(re, 'question_1');
-    inputElement.push(inputElements);
-  }
+  // Get unique Ids
+  const [...targetElements] = get_payment_eth_question_ids('payment_eth_info');
 
   // Add Button Elements
-  for (let i of inputElements) {
+  for (let i of targetElements) {
     let el = document.querySelector(`#${i}`);
     let addressButton = document.createElement("button");
     addressButton.setAttribute('type', 'button');
