@@ -52,7 +52,7 @@ setup(
     author_email='pretix-eth-payment-plugin@ethereum.org',
     license='Apache Software License',
     install_requires=[
-        "Django>=2.2.0,<2.3.0",
+        "Django>=2.2.0",
         "pretix>=2.8.2",
         "web3>=5.7.0",
         "eth-abi>=2.1.1,<3",
