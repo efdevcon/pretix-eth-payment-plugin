@@ -2,7 +2,7 @@ from django.dispatch import receiver
 from django.urls import resolve, reverse
 from django.utils.translation import gettext_lazy as _
 
-from pretix.base.signals import register_payment_providers
+from pretix.base.signals import logentry_display, register_payment_providers
 from pretix.control.signals import nav_event_settings
 
 
@@ -29,3 +29,18 @@ def navbar_wallet_address_upload(sender, request, **kwargs):
             )
         ),
     }]
+
+
+@receiver(signal=logentry_display)
+def wallet_address_upload_logentry_display(sender, logentry, **kwargs):
+    if logentry.action_type == 'pretix_eth.wallet_address_upload':
+        data = logentry.parsed_data
+        return _(
+            'Uploaded {file_address_count} addresses '
+            'with {new_address_count} new addresses '
+            'and {existing_address_count} existing addresses.'
+        ).format(
+            file_address_count=data['file_address_count'],
+            new_address_count=data['new_address_count'],
+            existing_address_count=data['existing_address_count'],
+        )

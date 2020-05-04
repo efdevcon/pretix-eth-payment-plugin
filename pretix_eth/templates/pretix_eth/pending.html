@@ -7,17 +7,9 @@
 
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
+  {% trans "Choose one of the following options to send the payment:" %}
   <p>
-    <strong>
-      {% blocktrans trimmed %}
-      Please send your ticket payment to the address seen below.
-      {% endblocktrans %}
-    </strong>
-  </p>
-
-  {% trans "You have the following options to trigger the payment:" %}
-  <p>
-    <ul>
+    <ol>
       <li>
         {% blocktrans trimmed %}
         Via this <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a>
@@ -25,6 +17,7 @@
         {% endblocktrans %}
         <div id="pretix-eth-qr-div"></div>
         <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
+        <br/>
       </li>
 
       <li>
@@ -32,23 +25,29 @@
           {% trans "Via Web3Modal" %}
         </a>
         ({% trans "allows you to pay with WalletConnect and MetaMask" %}).
+        <br/>
       </li>
 
       <li>
         {% blocktrans trimmed %}
-        Manually pay {{ amount_manual }} to {{ wallet_address }}.  Please only
-        do this if you know what you are doing.  Otherwise, use the
-        ERC-681 or Web3Modal methods.
+        Manually pay {{ amount_manual }} to {{ wallet_address }}.  Otherwise,
+        use the ERC-681 or Web3Modal methods.
         {% endblocktrans %}
       </li>
-    </ul>
+    </ol>
   </p>
 
   <p>
     {% blocktrans trimmed %}
-    If you already paid, please be patient!  Transactions are currently checked
-    just once a day.  Once this happens, you will get an email.  If you want to
-    improve this process, submit a PR to this github repository:
+    Once you send your payment, our system will automatically check for
+    confirmation. Please allow up to several hours. Once confirmed, you will
+    get an email notification.
+    {% endblocktrans %}
+  </p>
+
+  <p>
+    {% blocktrans trimmed %}
+    If you want to improve this process, submit a PR to this github repository:
     {% endblocktrans %}
     <a href="https://github.com/esPass/pretix-eth-payment-plugin">
       https://github.com/esPass/pretix-eth-payment-plugin
