@@ -125,7 +125,6 @@ class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
         self.request.event.log_action(
             'pretix_eth.wallet_address_upload',
             user=self.request.user,
-            auth=self.request.auth,
             data={
                 'file_addresses': file_addresses,
                 'file_address_count': len(hex_addresses),
