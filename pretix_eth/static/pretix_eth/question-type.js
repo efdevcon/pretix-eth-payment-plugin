@@ -31,17 +31,15 @@ function init() {
   });
 }
 
-async function refreshAccountData() {
+async function refreshAccountData(e) {
   const web3 = new Web3(provider);
   const accounts = await web3.eth.getAccounts();
-  const [...inputElements] = get_payment_eth_question_ids('payment_eth_info');
-  for (let i of inputElements) {
-    let inputElement = document.querySelector(`#${i}`);
-    inputElement.value = accounts[0];
-  }
+  const buttonId = e.target.id;
+  const inputElement = document.querySelector(`input#${buttonId}`);
+  inputElement.value = accounts[0];
 }
 
-async function onConnect() {
+async function onConnect(e) {
   web3Modal.providerController.cachedProvider = null;
   try {
     provider = await web3Modal.connect();
@@ -49,11 +47,14 @@ async function onConnect() {
     console.log("Could not get a wallet connection", e);
     return;
   }
-  await refreshAccountData();
+  await refreshAccountData(e);
 }
 window.addEventListener('load', async () => {
   init();
-  document.querySelector("#btn-connect").addEventListener("click", onConnect);
+  const addressButtons = document.querySelectorAll(".btn-connect");
+  for (let i of addressButtons) {
+    i.addEventListener('click', e => onConnect(e));
+  }
 });
 
 // from our marked fields obtain all ids of desired questions
@@ -68,44 +69,26 @@ function get_payment_eth_question_ids(class_name) {
     return payment_eth_question_ids;
 }
 
-// try to get question element and do desired changes on it
-function change_element(element_id) {
-    var element = document.getElementById(element_id);
-    if (!element) {
-        return;
-    }
-    // do the actual change of an element
-    element.style.background = "pink";
-}
 
 $(function () {
-    // there are `payment_eth_info` hidden inputs with list of IDs
-    // of the other fields we want to change functionality
-    var payment_eth_question_ids = get_payment_eth_question_ids('payment_eth_info');
-    for (var i = 0; i < payment_eth_question_ids.length; i++) {
-        change_element(payment_eth_question_ids[i]);
-    }
+  // Get unique Ids from hidden fields
+  const [...hiddenElements] = document.getElementsByClassName('payment_eth_info');
+  let inputElements = [];
+  const re = /payment_eth_info/;
+  for (let hiddenElement of hiddenElements) {
+    let inputElement = hideenElement.id.replace(re, 'question_1');
+    inputElement.push(inputElements);
+  }
 
-  // Grandparent Element
-  const formGroupElements = document.querySelectorAll("div.form-group");
-  const lastFormGroupElement = formGroupElements.item(formGroupElements.length - 1);
-
-  // Parent Element
-  const columnElement = lastFormGroupElement.childNodes.item(1);
-  
-  // Warning Text Element
-  const warningText = document.createElement("p");
-  warningText.style.cssText = "font-weight: 600; line-height: 1.5; margin-top: 4px;"
-  warningText.classList.add("warningText");
-  const warningTextContent = document.createTextNode("Please use a non-custodial wallet address. E.g. not Coinbase, Binance, etc.");
-  warningText.appendChild(warningTextContent);
-
-  // Button Element
-  const addressButton = document.createElement("button");
-  addressButton.textContent = "Add Wallet Address";
-  addressButton.id = "btn-connect";
-  addressButton.classList.add("btn", "btn-block", "btn-primary", "btn-lg");
-  addressButton.style.cssText = "max-width: 360px; margin-top: 8px;";
-  columnElement.append(addressButton);
-  columnElement.appendChild(warningText);
+  // Add Button Elements
+  for (let i of inputElements) {
+    let el = document.querySelector(`#${i}`);
+    let addressButton = document.createElement("button");
+    addressButton.setAttribute('type', 'button');
+    addressButton.textContent = "Add Wallet Address";
+    addressButton.id = i;
+    addressButton.classList.add("btn", "btn-connect", "btn-block", "btn-primary", "btn-lg");
+    addressButton.style.cssText = "max-width: 360px; margin-top: 8px;";
+    el.parentNode.append(addressButton);
+  }
 });
