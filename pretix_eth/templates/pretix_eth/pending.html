@@ -36,9 +36,8 @@
 
       <li>
         {% blocktrans trimmed %}
-        Manually pay {{ amount_manual }} to {{ wallet_address }}.  Please only
-        do this if you know what you are doing.  Otherwise, use the
-        ERC-681 or Web3Modal methods.
+        Manually pay {{ amount_manual }} to {{ wallet_address }}.  Otherwise,
+        use the ERC-681 or Web3Modal methods.
         {% endblocktrans %}
       </li>
     </ul>
@@ -46,9 +45,9 @@
 
   <p>
     {% blocktrans trimmed %}
-    If you already paid, please be patient!  Transactions are currently checked
-    just once a day.  Once this happens, you will get an email.  If you want to
-    improve this process, submit a PR to this github repository:
+    If you already paid, please be patient!  Transactions are checked
+    periodically throughout the day.  Once this happens, you will get an email.
+    If you want to improve this process, submit a PR to this github repository:
     {% endblocktrans %}
     <a href="https://github.com/esPass/pretix-eth-payment-plugin">
       https://github.com/esPass/pretix-eth-payment-plugin
