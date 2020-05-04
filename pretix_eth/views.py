@@ -122,6 +122,19 @@ class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
             for hex_address in new_addresses
         ])
 
+        self.request.event.log_action(
+            'pretix_eth.wallet_address_upload',
+            user=self.request.user,
+            auth=self.request.auth,
+            data={
+                'file_addresses': file_addresses,
+                'file_address_count': len(hex_addresses),
+                'unique_address_count': len(hex_address_set),
+                'existing_address_count': existing_addresses.count(),
+                'new_address_count': len(new_addresses),
+            },
+        )
+
         messages.success(
             self.request,
             _('Created {n} new wallet addresses!').format(n=len(created)),
