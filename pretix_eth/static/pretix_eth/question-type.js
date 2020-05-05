@@ -84,11 +84,16 @@ function get_payment_eth_question_ids(class_name) {
 
 
 $(function () {
+  // Detect useragent, and disable button if Firefox
+  const isBrowserFirefox = navigator.userAgent.search('Firefox');
+
   // Get unique Ids
   const [...targetElements] = get_payment_eth_question_ids('payment_eth_info');
 
-  // Add Button Elements
+
+  // Add Button Elements or Firefox Warning Text
   for (let i of targetElements) {
+    // Button Element
     let el = document.querySelector(`#${i}`);
     let addressButton = document.createElement("button");
     addressButton.setAttribute('type', 'button');
@@ -96,6 +101,16 @@ $(function () {
     addressButton.id = i;
     addressButton.classList.add("btn", "btn-connect", "btn-block", "btn-primary", "btn-lg");
     addressButton.style.cssText = "max-width: 360px; margin-top: 8px;";
-    el.parentNode.append(addressButton);
+    // Warning Text Element
+    let warningText = document.createElement("p");
+    warningText.appendChild(document.createTextNode("Unfortunately the web3 API we use to automatically add a wallet address is not supported in Firefox at this time. Please carefully copy and paste your wallet address into the above field."));
+    warningText.style.cssText = "margin-top: 8px;";
+
+    // Insert Node
+    if (isBrowserFirefox === -1) {
+      el.parentNode.append(addressButton);
+    } else {
+      el.parentNode.append(warningText);
+    }
   }
 });
