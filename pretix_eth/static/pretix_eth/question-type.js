@@ -4,7 +4,7 @@
  * payment_eth_html_add_question_type_javascript
  */
 
-// Unpkg imports
+// Imports
 const Web3Modal = window.Web3Modal.default;
 const WalletConnectProvider = window.WalletConnectProvider.default;
 const EvmChains = window.EvmChains;
@@ -22,6 +22,9 @@ function init() {
   const providerOptions = {
     walletconnect: {
       package: WalletConnectProvider,
+      options: {
+        infuraId: "123456789b123456789" // Not a real id
+      }
     },
   };
 
@@ -52,12 +55,10 @@ async function onConnect(e) {
 }
 
 async function disconnect() {
-
-  if(provider.close) {
+  if (provider.close) {
     await provider.close();
     provider = null;
   }
-
   selectedAccount = null;
 }
 
