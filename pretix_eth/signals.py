@@ -21,7 +21,8 @@ PAYMENT_ETH_INFO_NAME = 'payment_eth_info'
 
 @receiver(process_response, dispatch_uid="payment_eth_add_question_type_csp")
 def signal_process_response(sender, request, response, **kwargs):
-    url = resolve(request.path_info) # TODO: enable js only when question is asked
+    # TODO: enable js only when question is asked
+    # url = resolve(request.path_info)
     h = {}
     if 'Content-Security-Policy' in response:
         h = _parse_csp(response['Content-Security-Policy'])
@@ -35,19 +36,22 @@ def signal_process_response(sender, request, response, **kwargs):
     response['Content-Security-Policy'] = _render_csp(h)
     return response
 
+
 @receiver(html_head, dispatch_uid="payment_eth_add_question_type_javascript")
 def add_question_type_javascript(sender, request, **kwargs):
-    url = resolve(request.path_info) # TODO: enable js only when question is asked
+    # TODO: enable js only when question is asked
+    # url = resolve(request.path_info)
     template = get_template('pretix_eth/question_type_javascript.html')
     context = {
         'event': sender,
     }
     return template.render(context)
 
+
 @receiver(question_form_fields, dispatch_uid="payment_eth_add_question_type_form_field")
 def mark_question_type(sender, position, **kwargs):
     questions = sender.questions.filter(identifier=NFT_QUESTION_IDENTIFIER)
-    question_ids = [ 'id_{p.id}-question_{q.id}'.format(p=position, q=q) for q in questions ]
+    question_ids = ['id_{p.id}-question_{q.id}'.format(p=position, q=q) for q in questions]
     payment_eth_info_widget = forms.HiddenInput(attrs={
         'value': ','.join(question_ids),
         'class': PAYMENT_ETH_INFO_CLASS,
@@ -61,6 +65,7 @@ def mark_question_type(sender, position, **kwargs):
     return {
         PAYMENT_ETH_INFO_NAME: payment_eth_info_field,
     }
+
 
 @receiver(register_payment_providers, dispatch_uid="payment_eth")
 def register_payment_provider(sender, **kwargs):
