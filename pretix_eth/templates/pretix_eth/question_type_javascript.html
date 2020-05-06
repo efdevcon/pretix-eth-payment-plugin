@@ -1,0 +1,23 @@
+{% load static %}
+<!--
+payment_eth_html_add_question_type_javascript
+
+3rd party libs: taken from https://github.com/Web3Modal/web3modal-vanilla-js-example/blob/master/index.html
+-->
+
+<!--
+<script src="https://unpkg.com/web3@1.2.6/dist/web3.min.js"></script>
+<script type="text/javascript" src="https://unpkg.com/web3modal@1.5.0/dist/index.js"></script>
+<script type="text/javascript" src="https://unpkg.com/evm-chains@0.1.1/lib/index.js"></script>
+<script type="text/javascript" src="https://unpkg.com/@walletconnect/web3-provider@1.0.0-beta.47/lib/index.js"></script>
+<script type="text/javascript" src="https://unpkg.com/fortmatic@2.0.6/dist/fortmatic.js"></script>
+-->
+
+<script src="{% static '3rd_party/web3-1.2.2.js' %}"></script>
+<script type="text/javascript" src="{% static '3rd_party/web3modal-1.5.0.js' %}"></script>
+<script type="text/javascript" src="{% static '3rd_party/evm-chains-0.1.1.js' %}"></script>
+<script type="text/javascript" src="{% static '3rd_party/walletconnect-web3-provider-1.0.0-beta.47.js' %}"></script>
+<script type="text/javascript" src="{% static '3rd_party/fortmatic-2.0.6.js' %}"></script>
+
+<script type="text/javascript" src="{% static 'pretix_eth/question-type.js' %}"></script>
+<!-- /payment_eth_html_add_question_type_javascript -->

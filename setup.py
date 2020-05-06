@@ -43,7 +43,7 @@ extras_require['dev'] = (
 
 setup(
     name='pretix-eth-payment-plugin',
-    version='1.1.2',
+    version='2.0.0-dev',
     description='Ethereum payment provider plugin for pretix software',
     long_description=long_description,
     long_description_content_type='text/markdown',
@@ -52,8 +52,7 @@ setup(
     author_email='pretix-eth-payment-plugin@ethereum.org',
     license='Apache Software License',
     install_requires=[
-        "Django>=2.2.0",
-        "pretix>=2.8.2",
+        "pretix>=3.8.0",
         "web3>=5.7.0",
         "eth-abi>=2.1.1,<3",
         "eth-typing>=2.2.1,<3",
