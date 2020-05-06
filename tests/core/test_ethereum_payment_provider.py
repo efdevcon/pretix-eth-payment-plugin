@@ -3,10 +3,11 @@ from django.contrib.sessions.backends.db import SessionStore
 
 import pytest
 
+from pretix_eth.models import WalletAddress
+
 
 TEST_ETH_RATE = '0.004'
 TEST_DAI_RATE = '1.0'
-TEST_WALLET_ADDRESS = '0x0000000000000000000000000000000000000000'
 CURRENCY_RATE_SETTINGS = (
     'ETH_RATE',
     'DAI_RATE',
@@ -24,15 +25,12 @@ def test_provider_properties(provider):
 def test_provider_settings_form_fields(provider):
     form_fields = provider.settings_form_fields
 
-    assert 'WALLET_ADDRESS' in form_fields
     assert 'ETH_RATE' in form_fields
     assert 'DAI_RATE' in form_fields
-    assert 'TRANSACTION_PROVIDER' in form_fields
 
 
 @pytest.mark.django_db
 def test_provider_is_allowed(event, provider):
-    assert provider.settings.WALLET_ADDRESS is None
     for setting in CURRENCY_RATE_SETTINGS:
         assert provider.settings.get(setting) is None
 
@@ -45,9 +43,11 @@ def test_provider_is_allowed(event, provider):
     request.event = event
     request.session = session
 
-    assert not provider.is_allowed(request)
+    WalletAddress.objects.create(
+        event=event,
+        hex_address="0x0000000000000000000000000000000000000000",
+    )
 
-    provider.settings.set('WALLET_ADDRESS', TEST_WALLET_ADDRESS)
     assert not provider.is_allowed(request)
 
     for setting in CURRENCY_RATE_SETTINGS:
