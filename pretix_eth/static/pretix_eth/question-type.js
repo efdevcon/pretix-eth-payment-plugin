@@ -120,7 +120,7 @@ function createWarning(inputNo) {
       invalidInputWarning.textContent = 'Invalid input. Please enter either a valid wallet address, or a valid ENS address.';
       inputElement.parentNode.insertBefore(invalidInputWarning, inputElement.parentNode.lastChild);
       if (firstIssue) {
-        invalidInputWarning.scrollIntoView({alignToTop: true, behavior: 'smooth'});
+        inputElement.scrollIntoView({alignToTop: true, behavior: 'smooth'});
         firstIssue = false;
       }
     }
@@ -141,7 +141,7 @@ function createDuplicateWarning() {
       duplicateInputWarning.textContent = 'Invalid input. We cannot send two NFTs to the same address. Please add a separate wallet address for each ticket.';
       inputElement.parentNode.insertBefore(duplicateInputWarning, inputElement.parentNode.lastChild);
       if (firstIssue) {
-        duplicateInputWarning.scrollIntoView({alignToTop: true, behavior: 'smooth'});
+        inputElement.scrollIntoView({alignToTop: true, behavior: 'smooth'});
         firstIssue = false;
       }
     } else {
