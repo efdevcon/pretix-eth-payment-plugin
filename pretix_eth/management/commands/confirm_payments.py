@@ -88,18 +88,18 @@ class Command(BaseCommand):
 
                 if expected_currency_type == 'ETH':
                     if token_amount > 0:
-                        logger.warning(f'  * Found unexpected token payment of {token_amount}')
+                        logger.warning(f'  * Found unexpected payment of {token_amount} DAI')
                     if eth_amount < expected_amount:
-                        logger.warning(f'  * Expected payment of at least {expected_amount} {expected_currency_type}')  # noqa: E501
-                        logger.warning(f'  * Given payment was only for {eth_amount}')
+                        logger.warning(f'  * Expected payment of at least {expected_amount} ETH')  # noqa: E501
+                        logger.warning(f'  * Given payment was {eth_amount} ETH')  # noqa: E501
                         logger.warning(f'  * Skipping')
                         continue
                 elif expected_currency_type == 'DAI':
                     if eth_amount > 0:
-                        logger.warning(f'  * Found unexpected ETH payment of {eth_amount}')
+                        logger.warning(f'  * Found unexpected payment of {eth_amount} ETH')
                     if token_amount < expected_amount:
-                        logger.warning(f'  * Expected payment of at least {expected_amount} {expected_currency_type}')  # noqa: E501
-                        logger.warning(f'  * Given payment was only for {token_amount}')
+                        logger.warning(f'  * Expected payment of at least {expected_amount} DAI')  # noqa: E501
+                        logger.warning(f'  * Given payment was {token_amount} DAI')  # noqa: E501
                         logger.warning(f'  * Skipping')
                         continue
 
