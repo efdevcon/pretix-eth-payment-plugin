@@ -87,21 +87,25 @@ class Command(BaseCommand):
                 logger.info(f'Payments found for {full_id} at {checksum_address}:')
 
                 if expected_currency_type == 'ETH':
-                    if token_amount > 0:
+                    if eth_amount >= expected_amount:
+                        logger.info(f'  * Found sufficient ETH payment of {eth_amount}')
+                    elif token_amount > 0:
                         logger.warning(f'  * Found unexpected token payment of {token_amount}')
                         logger.warning(f'  * Skipping')
                         continue
-                    if eth_amount < expected_amount:
+                    elif eth_amount < expected_amount:
                         logger.warning(f'  * Expected payment of at least {expected_amount} {expected_currency_type}')  # noqa: E501
                         logger.warning(f'  * Given payment was only for {eth_amount}')
                         logger.warning(f'  * Skipping')
                         continue
                 elif expected_currency_type == 'DAI':
-                    if eth_amount > 0:
+                    if token_amount >= expected_amount:
+                        logger.info(f'  * Found sufficient token payment of {token_amount}')
+                    elif eth_amount > 0:
                         logger.warning(f'  * Found unexpected ETH payment of {eth_amount}')
                         logger.warning(f'  * Skipping')
                         continue
-                    if token_amount < expected_amount:
+                    elif token_amount < expected_amount:
                         logger.warning(f'  * Expected payment of at least {expected_amount} {expected_currency_type}')  # noqa: E501
                         logger.warning(f'  * Given payment was only for {token_amount}')
                         logger.warning(f'  * Skipping')
