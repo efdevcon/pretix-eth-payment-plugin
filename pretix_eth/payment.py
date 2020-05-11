@@ -203,7 +203,6 @@ class Ethereum(BasePaymentProvider):
 
         web3modal_url = f'https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether_or_dai}&to={wallet_address}'  # noqa: E501
 
-
         ctx.update({
             'erc_681_url': erc_681_url,
             'uniswap_url': uniswap_url,
