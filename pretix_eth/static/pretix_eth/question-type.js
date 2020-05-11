@@ -207,7 +207,6 @@ function isEnsAddress(address) {
   }
   return false;
 }
->>>>>>> Form validation logic implemented
 
 $(function () {
   // Detect useragent, and disable button if Firefox
