@@ -231,11 +231,13 @@ $(function () {
     warningText.appendChild(document.createTextNode('Unfortunately the web3 API we use to automatically add a wallet address is not supported in Firefox at this time. Please carefully copy and paste your wallet address into the above field.'));
     warningText.style.cssText = 'margin-top: 8px;';
 
-    // Insert Node
-    if (isBrowserFirefox === -1) {
-      el.parentNode.append(addressButton);
-    } else {
-      el.parentNode.append(warningText);
+    // Insert DOM node if it exists
+    if (el) {
+      if (isBrowserFirefox === -1) {
+        el.parentNode.append(addressButton);
+      } else {
+        el.parentNode.append(warningText);
+      }
     }
   }
 });
