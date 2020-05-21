@@ -7,43 +7,44 @@
 
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
-  {% trans "Choose one of the following options to send the payment:" %}
-  <p>
-    <ol>
-      <li>
-        {% blocktrans trimmed %}
-        Via this <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a>
-        QR-Code:
-        {% endblocktrans %}
-        <div id="pretix-eth-qr-div"></div>
-        <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
-        <br/>
-      </li>
+  <p>{% trans "Choose one of the following payment options:" %}</p>
+  <ol>
+    <li class="payment-options">
+      <img src={% static "icons/qr_code.png" %} id="qr_icon" />
+      <button class="btn btn-primary" id="btn-qr">{% trans "Toggle QR Code" %}</button>
+      <ul class="payment-info">
+        <li>{% blocktrans trimmed %}Via <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a> QR-Code{% endblocktrans %}</li>
+      </ul>
+      <div id="pretix-eth-qr-div"></div>
+      <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
+    </li>
 
-      <li>
-        <a target="blank" rel="noreferrer noopener" href="{{ web3modal_url }}">
-          {% trans "Via Web3Modal" %}
-        </a>
-        ({% trans "allows you to pay with WalletConnect and MetaMask" %}).
-        <br/>
-      </li>
+    <li class="payment-options">
+      <img src="{% static "icons/web3modal-logo.png" %}" width=32 height=32 />
+      <a target="blank" rel="noreferrer noopener" href="{{ web3modal_url }}">
+        <button class="btn btn-primary" id="web3modal_btn">{% trans "Web3Modal" %}</button>
+      </a>
+      <ul class="payment-info">
+        <li>{% trans "Allows you to pay with WalletConnect and MetaMask" %}</li>
+      </ul>
+    </li>
 
-      <li>
-        <a target="blank" rel="noreferrer noopener" href="{{ uniswap_url }}">
-          {% trans "Via uniswap" %}
-        </a>
-        ({% trans "allows you to pay with any uniswap supported token. Please do not change the output amount!" %}).
-      </li>
-
-      <li>
-        {% blocktrans trimmed %}
-        Manually pay {{ amount_manual }} to {{ wallet_address }}.  Otherwise,
-        use the ERC-681 or Web3Modal methods.
-        {% endblocktrans %}
-      </li>
-    </ol>
-  </p>
-
+    <li class="payment-options">
+      <img src="{% static "icons/uniswap-logo-32.svg" %}" />
+      <a target="blank" rel="noreferrer noopener" href="{{ uniswap_url }}">
+        <button class="btn btn-primary" id="uniswap_btn">{% trans "Uniswap" %}</button>
+      </a>
+      <ul class="payment-info">
+        <li>{% trans "Allows you to pay with any uniswap supported token." %}
+          <strong>{% trans "Please do not change the output amount!" %}</strong>
+        </li>
+      </ul>
+    </li>
+    
+    <li class="payment-options">{% blocktrans trimmed %}Manually pay {{ amount_manual }} to <span id="address">{{ wallet_address }}</span>{% endblocktrans %}
+    </li>
+  </ol>
+  <script type="text/javascript" src="{% static "pretix_eth/pending.js" %}"></script>
   <p>
     {% blocktrans trimmed %}
     Once you send your payment, our system will automatically check for
