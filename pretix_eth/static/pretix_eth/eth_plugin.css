@@ -3,6 +3,19 @@ img#qr_icon {
   margin-right: 8px;
 }
 
+img#clipboard {
+  width: 32px;
+  vertical-align: bottom;
+}
+
+img#clipboard:hover {
+  cursor: pointer;
+}
+
+img#clipboard:focus {
+  outline: 1px solid lightblue;
+}
+
 #pretix-eth-qr-div {
   display: none;
 }
