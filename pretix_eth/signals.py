@@ -31,6 +31,7 @@ def signal_process_response(sender, request, response, **kwargs):
             "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
             "'sha256-O+AX3tWIOimhuzg+lrMfltcdtWo7Mp2Y9qJUkE6ysWE='",
         ],
+        # Chrome correctly errors out without this CSP
         'connect-src': [
             "wss://bridge.walletconnect.org/",
         ],
