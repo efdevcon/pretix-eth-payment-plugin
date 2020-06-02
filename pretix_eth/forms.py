@@ -22,8 +22,8 @@ class WalletAddressTxtFile(ExtFileField):
 
             # Strip leading and trailing whitespace on each line; filter empty
             # lines; filter comments
-            lines = [l.strip() for l in lines if l.strip()]
-            lines = [l for l in lines if not COMMENT_RE.match(l)]
+            lines = [line.strip() for line in lines if line.strip()]
+            lines = [line for line in lines if not COMMENT_RE.match(line)]
 
             if len(lines) == 0:
                 raise forms.ValidationError(_("File contains no addresses"))
