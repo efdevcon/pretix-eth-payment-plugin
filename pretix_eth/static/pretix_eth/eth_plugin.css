@@ -1,0 +1,55 @@
+img#qr_icon {
+  width: 28px;
+  margin-right: 8px;
+}
+
+img#clipboard {
+  width: 32px;
+  vertical-align: bottom;
+}
+
+img#clipboard:hover {
+  cursor: pointer;
+}
+
+img#clipboard:focus {
+  outline: 1px solid lightblue;
+}
+
+#pretix-eth-qr-div {
+  display: none;
+}
+
+span#address {
+  background: lightgray;
+  padding: 4px;
+  overflow-wrap: anywhere;
+}
+
+li.payment-options {
+  line-height: 1.5;
+  margin-bottom: 16px;
+  padding-left: 8px;
+}
+
+ul.payment-info {
+  margin-top: 4px;
+}
+
+button#web3modal_btn {
+  margin-left: 8px;
+  background: rgba(64, 153, 255);
+}
+
+button#web3modal_btn:hover {
+  box-shadow: none;
+}
+
+button#uniswap_btn {
+  margin-left: 8px;
+  background: #FF007A;
+}
+
+button#uniswap_btn:hover {
+  box-shadow: none;
+}
