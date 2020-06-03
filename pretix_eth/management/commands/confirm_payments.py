@@ -92,7 +92,7 @@ class Command(BaseCommand):
                     if eth_amount < expected_amount:
                         logger.warning(f'  * Expected payment of at least {expected_amount} ETH')  # noqa: E501
                         logger.warning(f'  * Given payment was {eth_amount} ETH')  # noqa: E501
-                        logger.warning(f'  * Skipping')
+                        logger.warning(f'  * Skipping')  # noqa: F541
                         continue
                 elif expected_currency_type == 'DAI':
                     if eth_amount > 0:
@@ -100,7 +100,7 @@ class Command(BaseCommand):
                     if token_amount < expected_amount:
                         logger.warning(f'  * Expected payment of at least {expected_amount} DAI')  # noqa: E501
                         logger.warning(f'  * Given payment was {token_amount} DAI')  # noqa: E501
-                        logger.warning(f'  * Skipping')
+                        logger.warning(f'  * Skipping')  # noqa: F541
                         continue
 
                 if no_dry_run:
