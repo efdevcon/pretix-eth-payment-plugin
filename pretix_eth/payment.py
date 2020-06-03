@@ -192,11 +192,11 @@ class Ethereum(BasePaymentProvider):
         if currency_type == 'ETH':
             erc_681_url = f'ethereum:{wallet_address}?value={payment_amount}'
             amount_manual = f'{amount_in_ether_or_dai} ETH'
-            uniswap_url = f'https://uniswap.exchange/send?exactField=output?exactAmount={amount_in_ether_or_dai}&inputCurrency=0x6b175474e89094c44da98b954eedeac495271d0f&outputCurrency=ETH&recipient={wallet_address}'  # noqa: E501
+            uniswap_url = f'https://v1.uniswap.exchange/send?exactField=output?exactAmount={amount_in_ether_or_dai}&inputCurrency=0x6b175474e89094c44da98b954eedeac495271d0f&outputCurrency=ETH&recipient={wallet_address}'  # noqa: E501
         elif currency_type == 'DAI':
             erc_681_url = f'ethereum:{DAI_MAINNET_ADDRESS}/transfer?address={wallet_address}&uint256={payment_amount}'  # noqa: E501
             amount_manual = f'{amount_in_ether_or_dai} DAI'
-            uniswap_url = f'https://uniswap.exchange/send?exactField=output?exactAmount={amount_in_ether_or_dai}&outputCurrency=0x6b175474e89094c44da98b954eedeac495271d0f&recipient={wallet_address}'  # noqa: E501
+            uniswap_url = f'https://v1.uniswap.exchange/send?exactField=output?exactAmount={amount_in_ether_or_dai}&outputCurrency=0x6b175474e89094c44da98b954eedeac495271d0f&recipient={wallet_address}'  # noqa: E501
 
         else:
             raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
