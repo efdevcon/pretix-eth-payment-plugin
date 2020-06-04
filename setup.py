@@ -59,7 +59,7 @@ setup(
         "eth-utils>=1.8.4,<2",
         "eth-hash[pycryptodome]>=0.2.0,<0.3",
     ],
-    python_requires='>=3.7, <4',
+    python_requires='>=3.6, <4',
     extras_require=extras_require,
     packages=find_packages(exclude=['tests', 'tests.*']),
     include_package_data=True,
