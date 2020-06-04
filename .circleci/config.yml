@@ -45,7 +45,7 @@ jobs:
     docker:
       - image: circleci/python:3.7
         environment:
-          TOXENV: py37-core-pretix37
+          TOXENV: py37-core-pretix3
   py37-integration:
     <<: *common
     docker:
