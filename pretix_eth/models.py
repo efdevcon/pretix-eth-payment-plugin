@@ -59,4 +59,3 @@ class WalletAddress(models.Model):
     order_payment = models.ForeignKey(OrderPayment, on_delete=models.PROTECT, null=True, blank=True)
 
     objects = WalletAddressManager()
-
