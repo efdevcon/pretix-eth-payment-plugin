@@ -30,7 +30,7 @@ class WalletAddressManager(models.Manager):
     def get_queryset(self) -> models.QuerySet:
         return WalletAddressQuerySet(self.model, using=self._db)
 
-    def get_for_order_payment(self, order_payment: OrderPayment):
+    def get_for_order_payment(self, order_payment: OrderPayment) -> WalletAddress:
         event = order_payment.order.event
         unused_addresses = self.select_for_update().unused().for_event(event)
 
