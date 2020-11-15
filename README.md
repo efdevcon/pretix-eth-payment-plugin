@@ -41,9 +41,7 @@ support. If you want to dig a bit into the problems that emerged short before
 the launch you can have a look at [this
 issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 
-### Features added for Devcon 6
-
-In preparation for Devcon 6, the following functionality was added:
+### Recently added features
 
 * A panel was added in the web admin interface to upload a list of addresses to
   be associated with each ticket order.
