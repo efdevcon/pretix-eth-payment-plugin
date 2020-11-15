@@ -40,12 +40,24 @@ common: &common
         key: cache-{{ .Environment.CIRCLE_JOB }}-{{ checksum "setup.py" }}-{{ checksum "tox.ini" }}
 
 jobs:
+  py38-core:
+    <<: *common
+    docker:
+      - image: circleci/python:3.8
+        environment:
+          TOXENV: py38-core
+  py38-integration:
+    <<: *common
+    docker:
+      - image: circleci/python:3.8
+        environment:
+          TOXENV: py38-integration
   py37-core:
     <<: *common
     docker:
       - image: circleci/python:3.7
         environment:
-          TOXENV: py37-core-pretix3
+          TOXENV: py37-core
   py37-integration:
     <<: *common
     docker:
@@ -57,7 +69,7 @@ jobs:
     docker:
       - image: circleci/python:3.6
         environment:
-          TOXENV: py36-core-pretix3
+          TOXENV: py36-core
   py36-integration:
     <<: *common
     docker:
@@ -67,7 +79,7 @@ jobs:
   lint:
     <<: *common
     docker:
-      - image: circleci/python:3.7
+      - image: circleci/python:3.8
         environment:
           TOXENV: lint
   
@@ -75,6 +87,8 @@ workflows:
   version: 2
   test:
     jobs:
+      - py38-core
+      - py38-integration
       - py37-core
       - py37-integration
       - py36-core
