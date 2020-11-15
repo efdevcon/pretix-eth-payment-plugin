@@ -41,20 +41,34 @@ support. If you want to dig a bit into the problems that emerged short before
 the launch you can have a look at [this
 issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 
+### Features added for Devcon 6
+
+In preparation for Devcon 6, the following functionality was added:
+
+* A panel was added in the web admin interface to upload a list of addresses to
+  be associated with each ticket order.
+* During the checkout process, an address is chosen for each order from the
+  list of remaining addresses created by the address upload process.
+* A payment confirmation management command was added that confirms pending
+  payments based on the address assigned to them during checkout.  See the
+  `confirm_payments` section below for details.
+
 ## Development setup
 
-1. Make sure that you have a working [pretix development
-   setup](https://docs.pretix.eu/en/latest/development/setup.html).
-2. Clone this repository, e.g. to `local/pretix-eth-payment-plugin`.
-3. Activate the virtual environment you created for your local pretix site that
-   was created in step 1.
-4. Execute `pip install -e .[dev]` within the `pretix-eth-payment-plugin` repo
+1. Clone this repository, e.g. to `local/pretix-eth-payment-plugin`.
+1. Create and activate a virtual environment.
+1. Execute `pip install -e .[dev]` within the `pretix-eth-payment-plugin` repo
    directory.
-5. Restart your local pretix server. You can now use the plugin from this
-   repository for your events by enabling it in the 'plugins' tab in the pretix
-   site's admin settings.
-6. Head to the plugin settings page to set the deposit address for both
-   Ethereum and DAI.
+1. Setup a local database by running `make devmigrate`.
+1. Fire up a local dev server by running `make devserver`.
+1. Visit http://localhost:8000/control/login in a browser windows and enter
+   username `admin@localhost` and password `admin` to log in.
+1. Enter "Admin mode" by clicking the "Admin mode" text in the upper-right
+   corner of the admin interface to create a test organization and event.
+1. Use the plugin from this repository for your events by enabling it in the
+   'Plugins' tab in the event's settings tab.  Note that you must enable the
+   plugin both in the "Plugins" tab as well as in the plugin's settings (found
+   in the "Payment" tab).
 
 ## Automatic payment confirmation with the `confirm_payments` command
 
