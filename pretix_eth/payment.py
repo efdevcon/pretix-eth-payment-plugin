@@ -18,8 +18,6 @@ from .models import WalletAddress
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TRANSACTION_PROVIDER = 'pretix_eth.providers.BlockscoutMainnetProvider'
-
 RESERVED_ORDER_DIGITS = 5
 
 DAI_MAINNET_ADDRESS = '0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359'

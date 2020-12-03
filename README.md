@@ -41,74 +41,67 @@ support. If you want to dig a bit into the problems that emerged short before
 the launch you can have a look at [this
 issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 
+### Recently added features
+
+* A panel was added in the web admin interface to upload a list of addresses to
+  be associated with each ticket order.
+* During the checkout process, an address is chosen for each order from the
+  list of remaining addresses created by the address upload process.
+* A payment confirmation management command was added that confirms pending
+  payments based on the address assigned to them during checkout.  See the
+  `confirm_payments` section below for details.
+
 ## Development setup
 
-1. Make sure that you have a working [pretix development
-   setup](https://docs.pretix.eu/en/latest/development/setup.html).
-2. Clone this repository, e.g. to `local/pretix-eth-payment-plugin`.
-3. Activate the virtual environment you created for your local pretix site that
-   was created in step 1.
-4. Execute `pip install -e .[dev]` within the `pretix-eth-payment-plugin` repo
+1. Clone this repository, e.g. to `local/pretix-eth-payment-plugin`.
+1. Create and activate a virtual environment.
+1. Execute `pip install -e .[dev]` within the `pretix-eth-payment-plugin` repo
    directory.
-5. Restart your local pretix server. You can now use the plugin from this
-   repository for your events by enabling it in the 'plugins' tab in the pretix
-   site's admin settings.
-6. Head to the plugin settings page to set the deposit address for both
-   Ethereum and DAI.
+1. Setup a local database by running `make devmigrate`.
+1. Fire up a local dev server by running `make devserver`.
+1. Visit http://localhost:8000/control/login in a browser windows and enter
+   username `admin@localhost` and password `admin` to log in.
+1. Enter "Admin mode" by clicking the "Admin mode" text in the upper-right
+   corner of the admin interface to create a test organization and event.
+1. Use the plugin from this repository for your events by enabling it in the
+   'Plugins' tab in the event's settings tab.  Note that you must enable the
+   plugin both in the "Plugins" tab as well as in the plugin's settings (found
+   in the "Payment" tab).
 
 ## Automatic payment confirmation with the `confirm_payments` command
 
 This plugin includes a [django management
 command](https://docs.djangoproject.com/en/2.2/howto/custom-management-commands/#module-django.core.management)
-that can be used to automatically confirm orders from Ethereum transactions and
-ERC20 token transfers.  By default, this command will perform a dry run which
-only displays payment records that would be modified and why but without
-actually modifying them.  Here are some example invocations of this command:
+that can be used to automatically confirm orders from the Ethereum address
+associated with each order.  By default, this command will perform a dry run
+which only displays payment records that would be modified and why but without
+actually modifying them.  Here's an example invocation of this command:
 ```bash
-# Using the pretix module
-python -m pretix confirm_payments --event-slug=devcon-5 --no-dry-run
-
-# Using a django manage.py file
-python manage.py confirm_payments --event-slug=devcon-5 --no-dry-run
+python -mpretix confirm_payments \
+    --event-slug=devcon-5 \
+    --token-address=0x6b175474e89094c44da98b954eedeac495271d0f \  # dai address
+    --web3-provider-uri=https://mainnet.infura.io/v3/<project-id> \
+    --no-dry-run
 ```
 Above, the `confirm_payments` command uses the `--event-slug` argument to
-determine the wallet address to which ticket payments for the `devcon-5` event
-were sent.  It then inspects *all* external and internal transactions sent to
-the event's wallet address to determine if sufficient payments were made for
-payment records identified by the payment IDs encoded in the transactions' wei
-values.  It also inspects all token transfer events targeting the event's
-wallet address for the DAI stablecoin's mainnet contract address.  The
-`--no-dry-run` flag directs the command to modify and confirm payments
-identified by transactions and transfers.  Without this flag, the command will
-only display which records would be modified.  Alternatively, the same command
-above could have been invoked as follows:
-```bash
-python manage.py confirm_payments --wallet-address=<devcon-5-wallet-address> --no-dry-run
-```
-...where `<devcon-5-wallet-address>` is replaced with the explicit
-`0x`-prefixed wallet address for the Devcon 5 event.
-
-The `confirm_payments` command also supports a number of other arguments.  Here
-are some example uses of them:
-```bash
-python manage.py confirm_payments \
-    --event-slug=<slug> \
-    --token-address=<token-address> \
-    --api=blockscout-mainnet \
-    --start-block=<start-block> \
-    --end-block=<end-block> \
-```
-The above command confirms payments for the event identified by `<slug>` using
-the ERC20 token at address `<token-address>` on the Ethereum mainnet queried
-through Blockscout.  It only considers transactions and token transfers that
-occurred between and within blocks `<start-block>` and `<end-block>`.  Also,
-because the `--no-dry-run` flag is absent, it simply prints the payments that
-*would be* confirmed by the command without confirming them.
+determine the list of unconfirmed payments to check (those associated with that
+event).  It then inspects the address that was associated with each order (at
+the time the ticket was reserved) to determine if sufficient payments were made
+for the order.  It may check for an ethereum payment or some kind of token
+payment depending on what was chosen during the checkout process.  Token
+payments will be checked using the given token address provided via the
+`--token-address` CLI flag.  The `--no-dry-run` flag directs the command to
+update order statuses based on the checks that are performed.  Without this
+flag, the command will only display how records would be modified.  All
+interactions with the blockchain are performed via web3.py and the node
+identified by the web3 provider URI given in by the `--web3-provider-uri` CLI
+flag.  For more information on the format of web3 provider URIs, see
+[here](https://web3py.readthedocs.io/en/stable/providers.html#provider-via-environment-variable).
 
 For more details about the `confirm_payments` command and its options, the
 command may be invoked with `--help`:
 ```bash
-python manage.py confirm_payments --help
+python -mpretix confirm_payments --help
 ```
 
 ## License
