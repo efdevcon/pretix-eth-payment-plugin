@@ -19,6 +19,12 @@ from pytest_django.fixtures import (
 )
 
 from pretix_eth.payment import Ethereum
+from rest_framework.test import APIClient
+
+
+@pytest.fixture
+def client():
+    return APIClient()
 
 
 @pytest.fixture
@@ -47,6 +53,7 @@ def event(django_db_reset_sequences, organizer):
         presale_start=presale_start_at,
         presale_end=presale_end_at,
         location='Osaka',
+        plugins='pretix_eth',
     )
 
     return event
