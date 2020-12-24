@@ -1,9 +1,8 @@
 import pytest
 
 from pretix.base.models import (
-    User, Team, Organizer, Event,
+    User, Team,
 )
-
 from django.core.files.uploadedfile import SimpleUploadedFile
 from pretix_eth.models import WalletAddress
 
@@ -11,7 +10,8 @@ from pretix_eth.models import WalletAddress
 @pytest.fixture
 def env(event, organizer):
     user = User.objects.create_user('admin@pretix', 'admin')
-    t = Team.objects.create(organizer=event.organizer, can_view_orders=True, can_change_orders=True)
+    t = Team.objects.create(organizer=event.organizer,
+                            can_view_orders=True, can_change_orders=True)
     t.members.add(user)
     t.limit_events.add(event)
 
@@ -38,7 +38,7 @@ def test_file_upload_success(client, env):
     file = SimpleUploadedFile('upload.txt', """
         # OK
         0x38A670EB58F937D63D79D92dC651155595e66009
-        # OK 
+        # OK
         0x26AA4d587584FE1f32707070768236eDC625dDD7
         # Duplicate
         0x26AA4d587584FE1f32707070768236eDC625dDD7
@@ -79,7 +79,7 @@ def test_file_upload_error(client, env):
 
     response = client.post(request_url, {'wallet_addresses': invalid_file_1}, follow=True)
     assert response.status_code == 200
-    assert b'Syntax error on line 1: 0x38A670EB58F9D63D79D92dC651155595e66009' in response.content
+    assert b'Syntax error on line 1:' in response.content
 
     invalid_file_2 = SimpleUploadedFile('upload.txt', """
         # Length is too long
@@ -88,7 +88,7 @@ def test_file_upload_error(client, env):
 
     response = client.post(request_url, {'wallet_addresses': invalid_file_2}, follow=True)
     assert response.status_code == 200
-    assert b'Syntax error on line 1: 0x38A670EB58F9D63Dfds32D279D92dC651155595e66009' in response.content
+    assert b'Syntax error on line 1:' in response.content
 
     invalid_file_3 = SimpleUploadedFile('upload.txt', """
         # Two addresses on the same line
@@ -119,3 +119,14 @@ def test_file_upload_error(client, env):
     response = client.post(request_url, {'wallet_addresses': invalid_file_5}, follow=True)
     assert response.status_code == 200
     assert b'Syntax error on line 1:' in response.content
+
+    empty_file = SimpleUploadedFile('upload.txt', ''.encode("utf-8"), content_type="text/plain")
+    response = client.post(request_url, {'wallet_addresses': empty_file}, follow=True)
+    assert response.status_code == 200
+    assert b'The submitted file is empty.' in response.content
+
+    no_address_file = SimpleUploadedFile(
+        'upload.txt', '#'.encode("utf-8"), content_type="text/plain")
+    response = client.post(request_url, {'wallet_addresses': no_address_file}, follow=True)
+    assert response.status_code == 200
+    assert b'File contains no addresses' in response.content
