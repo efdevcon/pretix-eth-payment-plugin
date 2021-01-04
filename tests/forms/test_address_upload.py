@@ -11,6 +11,11 @@ def wallet_address(event):
     return address
 
 
+@pytest.fixture
+def admin_client(event, create_admin_client):
+    return create_admin_client(event)
+
+
 @pytest.mark.django_db
 def test_file_upload_success(admin_client, organizer, event, wallet_address):
     existing_wallet_address = wallet_address

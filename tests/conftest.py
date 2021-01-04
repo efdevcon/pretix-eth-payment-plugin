@@ -62,16 +62,19 @@ def client():
 
 
 @pytest.fixture
-def admin_client(event):
-    user = User.objects.create_user(email='admin@example.com', password='admin')
-    team = Team.objects.create(organizer=event.organizer,
-                               can_view_orders=True, can_change_orders=True)
-    team.members.add(user)
-    team.limit_events.add(event)
+def create_admin_client():
+    def _create_event_admin(event):
+        user = User.objects.create_user(email='admin@example.com', password='admin')
+        team = Team.objects.create(organizer=event.organizer,
+                                   can_view_orders=True, can_change_orders=True)
+        team.members.add(user)
+        team.limit_events.add(event)
 
-    client = APIClient()
-    client.login(email='admin@example.com', password='admin')
-    return client
+        client = APIClient()
+        client.login(email='admin@example.com', password='admin')
+        return client
+
+    return _create_event_admin
 
 
 @pytest.fixture
