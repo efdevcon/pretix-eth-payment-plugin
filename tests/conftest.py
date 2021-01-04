@@ -12,6 +12,8 @@ from pretix.base.models import (
 from pretix.base.models import (
     Order,
     OrderPayment,
+    User,
+    Team,
 )
 import pytest
 from pytest_django.fixtures import (
@@ -20,11 +22,6 @@ from pytest_django.fixtures import (
 
 from pretix_eth.payment import Ethereum
 from rest_framework.test import APIClient
-
-
-@pytest.fixture
-def client():
-    return APIClient()
 
 
 @pytest.fixture
@@ -57,6 +54,24 @@ def event(django_db_reset_sequences, organizer):
     )
 
     return event
+
+
+@pytest.fixture
+def client():
+    return APIClient()
+
+
+@pytest.fixture
+def admin_client(event):
+    user = User.objects.create_user(email='admin@example.com', password='admin')
+    team = Team.objects.create(organizer=event.organizer,
+                               can_view_orders=True, can_change_orders=True)
+    team.members.add(user)
+    team.limit_events.add(event)
+
+    client = APIClient()
+    client.login(email='admin@example.com', password='admin')
+    return client
 
 
 @pytest.fixture
