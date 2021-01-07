@@ -3,6 +3,8 @@ import time
 
 from pretix_eth.models import WalletAddress, WalletAddressError
 
+from django.test import RequestFactory
+
 hex_addresses = [
     '0x4257a60613500E8272b0d6151E6CCcAcf79E8Ff4',
     '0x7D3013fB1Abe40A7bfBAA5E826E0A178F01Ef2F9',
@@ -13,20 +15,24 @@ hex_addresses = [
 
 
 @pytest.fixture
-def get_payment(get_order_and_payment):
-    def _create_payment_with_info_data():
+def get_request_and_payment(get_order_and_payment):
+    def _create_request_and_payment():
         info_data = {
             'currency_type': 'ETH',
             'time': int(time.time()),
             'amount': 1
         }
         _, payment = get_order_and_payment(info_data=info_data)
-        return payment
-    return _create_payment_with_info_data
+
+        factory = RequestFactory()
+        request = factory.get('/checkout')
+
+        return request, payment
+    return _create_request_and_payment
 
 
 @pytest.mark.django_db
-def test_addresses_correctly_assigned(event, provider, get_payment):
+def test_addresses_correctly_assigned(event, provider, get_request_and_payment):
     provider.settings.set('ETH_RATE', '1.0')
 
     assert WalletAddress.objects.filter(order_payment__isnull=True).count() == 0
@@ -39,8 +45,8 @@ def test_addresses_correctly_assigned(event, provider, get_payment):
     used_addresses = set()
 
     for _ in range(len(hex_addresses)):
-        payment = get_payment()
-        response_page = provider.payment_pending_render(None, payment)
+        request, payment = get_request_and_payment()
+        response_page = provider.payment_pending_render(request, payment)
 
         wallet_queryset = WalletAddress.objects.filter(order_payment=payment)
         assert wallet_queryset.count() == 1
@@ -57,20 +63,20 @@ def test_addresses_correctly_assigned(event, provider, get_payment):
 
 
 @pytest.mark.django_db
-def test_address_already_assigned(event, provider, get_payment):
+def test_address_already_assigned(event, provider, get_request_and_payment):
     provider.settings.set('ETH_RATE', '1.0')
 
     WalletAddress.objects.create(event=event, hex_address=hex_addresses[0])
 
-    payment = get_payment()
+    request, payment = get_request_and_payment()
+    provider.payment_pending_render(request, payment)
 
-    provider.payment_pending_render(None, payment)
     wallet_queryset = WalletAddress.objects.filter(order_payment=payment)
     assert wallet_queryset.count() == 1
 
     original_hex_address = wallet_queryset.first().hex_address
 
-    provider.payment_pending_render(None, payment)
+    provider.payment_pending_render(request, payment)
     wallet_queryset = WalletAddress.objects.filter(order_payment=payment)
     assert wallet_queryset.count() == 1
 
@@ -80,11 +86,11 @@ def test_address_already_assigned(event, provider, get_payment):
 
 
 @pytest.mark.django_db
-def test_no_address_available(provider, get_payment):
+def test_no_address_available(provider, get_request_and_payment):
     provider.settings.set('ETH_RATE', '1.0')
 
-    payment = get_payment()
+    request, payment = get_request_and_payment()
 
     with pytest.raises(WalletAddressError,
                        match='No wallet addresses remain that haven\'t been used'):
-        provider.payment_pending_render(None, payment)
+        provider.payment_pending_render(request, payment)
