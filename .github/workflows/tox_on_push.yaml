@@ -3,7 +3,8 @@ name: Run tests
 on: push
 
 jobs:
-  build:
+  test:
+    runs-on: ubuntu-latest
     strategy:
       max-parallel: 4
       matrix:
@@ -25,6 +26,7 @@ jobs:
         TOXENV: testenv
 
   lint:
+    runs-on: ubuntu-latest
     strategy:
       max-parallel: 4
       matrix:
