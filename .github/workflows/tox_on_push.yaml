@@ -5,119 +5,31 @@ on: push
 jobs:
   py36-core:
     runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.6
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.6
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run tests (core)
-      run: tox 
-      env: 
-        TOXENV: py36-core
-
-  py36-integration:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.6
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.6
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run tests
-      run: tox 
-      env: 
-        TOXENV: py36-integration
-
-  py37-core:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.7
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.7
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run tests (core)
-      run: tox 
-      env: 
-        TOXENV: py37-core
-
-  py37-integration:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.7
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.7
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run tests
-      run: tox 
-      env: 
-        TOXENV: py37-integration
-
-  py38-core:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run tests (core)
-      run: tox 
-      env: 
-        TOXENV: py38-core
-
-  py38-integration:
-    runs-on: ubuntu-latest
-
-    steps:
-    - uses: actions/checkout@v2
-    - name: Set up Python 3.8
-      uses: actions/setup-python@v2
-      with:
-        python-version: 3.8
-    - name: Install Dependencies
-      run: |
-        python -m pip install --upgrade pip
-        pip install -e .[dev]
-    - name: Run tests
-      run: tox 
-      env: 
-        TOXENV: py38-integration
-
-  lint:
-    runs-on: ubuntu-latest
     strategy:
-      max-parallel: 4
       matrix:
-        python-version: [3.8]
-
+        include:
+          - python-version: 3.6
+            name: Run tests py36-core
+            toxenv: py36-core
+          - python-version: 3.6
+            name: Run tests py36-integration
+            toxenv: py36-integration
+          - python-version: 3.7
+            name: Run tests py37-core
+            toxenv: py37-core
+          - python-version: 3.7
+            name: Run tests py37-integration
+            toxenv: py37-integration
+          - python-version: 3.8
+            name: Run tests py38-core
+            toxenv: py38-core
+          - python-version: 3.8
+            name: Run tests py38-integration
+            toxenv: py38-integration
+          - python-version: 3.8
+            name: Run lint
+            toxenv: lint
+          
     steps:
     - uses: actions/checkout@v2
     - name: Set up Python ${{ matrix.python-version }}
@@ -128,7 +40,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -e .[dev]
-    - name: Lint
+    - name: ${{ matrix.name }}
       run: tox 
       env: 
-        TOXENV: lint
+        TOXENV: ${{ matrix.toxenv }}
