@@ -4,8 +4,6 @@ on: push
 
 jobs:
   build:
-
-    runs-on: ubuntu-latest
     strategy:
       max-parallel: 4
       matrix:
@@ -22,4 +20,27 @@ jobs:
         python -m pip install --upgrade pip
         pip install -e .[dev]
     - name: Run tests
-      run: tox
+      run: tox 
+      env: 
+        TOXENV: testenv
+
+  lint:
+    strategy:
+      max-parallel: 4
+      matrix:
+        python-version: [3.8]
+
+    steps:
+    - uses: actions/checkout@v2
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[lint]
+    - name: Lint
+      run: tox 
+      env: 
+        TOXENV: flake8
