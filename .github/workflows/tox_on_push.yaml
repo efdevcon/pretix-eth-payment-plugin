@@ -21,7 +21,7 @@ jobs:
       env: 
         TOXENV: py36-core
 
-  py36-core:
+  py36-integration:
     runs-on: ubuntu-latest
 
     steps:
