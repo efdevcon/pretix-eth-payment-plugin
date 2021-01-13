@@ -66,3 +66,6 @@ target/
 
 # Local pretix dev env
 data/
+
+# Editor / IDE
+.vscode
