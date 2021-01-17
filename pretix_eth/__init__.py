@@ -12,7 +12,7 @@ class PluginApp(AppConfig):
         category = 'PAYMENT'
         description = ugettext_lazy('An ethereum payment provider plugin for pretix software')
         visible = True
-        version = '2.0.0-dev'
+        version = '2.0.1-dev'
 
     def ready(self):
         from . import signals  # NOQA
