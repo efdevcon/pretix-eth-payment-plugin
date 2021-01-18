@@ -9,7 +9,10 @@ from django.http import HttpRequest
 from django.template.loader import get_template
 from django.utils.translation import ugettext_lazy as _
 
-from pretix.base.models import OrderPayment
+from pretix.base.models import (
+    OrderPayment,
+    OrderRefund,
+)
 from pretix.base.payment import BasePaymentProvider
 
 from eth_utils import to_wei, from_wei
@@ -223,7 +226,17 @@ class Ethereum(BasePaymentProvider):
     abort_pending_allowed = True
 
     def payment_refund_supported(self, payment: OrderPayment):
-        return False
+        if payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED:
+            return True
+        else:
+            return False
 
     def payment_partial_refund_supported(self, payment: OrderPayment):
         return False
+
+    def execute_refund(self, refund: OrderRefund):
+        refund.info_data = {
+            'currency_type': refund.payment.currency_type,
+            'amount': refund.payment.amount
+        }
+        refund.save(update_fields=["info"])
