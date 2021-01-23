@@ -1,0 +1,47 @@
+name: Run tests and lint
+
+on: [push, pull_request]
+
+jobs:
+  tox:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - python-version: 3.6
+            toxenv: py36-core
+          - python-version: 3.6
+            toxenv: py36-integration
+          - python-version: 3.7
+            toxenv: py37-core
+          - python-version: 3.7
+            toxenv: py37-integration
+          - python-version: 3.8
+            toxenv: py38-core
+          - python-version: 3.8
+            toxenv: py38-integration
+          - python-version: 3.8
+            toxenv: lint
+          
+    steps:
+    - uses: actions/checkout@v2
+    - uses: actions/setup-python@v2
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - uses: actions/cache@v2
+      with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+    - name: Install Dependencies
+      if: steps.cache.outputs.cache-hit != 'true'
+      run: |
+        python -m pip install --upgrade pip
+        pip install -e .[dev]
+    - name: ${{ matrix.toxenv }}
+      run: tox 
+      env: 
+        TOXENV: ${{ matrix.toxenv }}
