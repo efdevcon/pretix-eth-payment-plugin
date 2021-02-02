@@ -233,12 +233,12 @@ class Ethereum(BasePaymentProvider):
 
     def execute_refund(self, refund: OrderRefund):
         if refund.payment is None:
-            raise ValueError("There is no associated payment with this refund")
+            raise Exception('Invariant: No payment associated with refund')
 
         wallet_queryset = WalletAddress.objects.filter(order_payment=refund.payment)
 
         if wallet_queryset.count() != 1:
-            raise ValueError("There is not assigned wallet address to this payment")
+            raise ValueError('There is not assigned wallet address to this payment')
 
         refund.info_data = {
             'currency_type': refund.payment.info_data['currency_type'],
