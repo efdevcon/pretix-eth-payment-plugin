@@ -6,6 +6,7 @@ from pretix.base.models import (
 )
 
 from pretix_eth.models import WalletAddress
+from django.urls import reverse
 
 
 @pytest.mark.django_db
@@ -22,7 +23,12 @@ def test_refund_created(event, organizer, create_admin_client, get_organizer_sco
                                  hex_address='0x0000000000000000000000000000000000000001')
     WalletAddress.objects.get_for_order_payment(payment)
 
-    url = f'/control/event/{organizer.slug}/{event.slug}/orders/{order.code}/refund'
+    url = reverse('control:event.order.refunds.start', kwargs={
+        'event': event.slug,
+        'organizer': organizer.slug,
+        'code': order.code
+    })
+
     client = create_admin_client(event)
     response = client.post(url, {
         f'refund-{payment.id}': '100',
@@ -54,7 +60,12 @@ def test_invalid_refund_no_wallet(event, organizer, create_admin_client, get_ord
         info_data={'amount': '100', 'currency_type': 'ETH'}
     )
 
-    url = f'/control/event/{organizer.slug}/{event.slug}/orders/{order.code}/refund'
+    url = reverse('control:event.order.refunds.start', kwargs={
+        'event': event.slug,
+        'organizer': organizer.slug,
+        'code': order.code
+    })
+
     client = create_admin_client(event)
 
     with pytest.raises(ValueError, match='There is not assigned wallet address to this payment'):
