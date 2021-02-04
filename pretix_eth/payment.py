@@ -238,7 +238,7 @@ class Ethereum(BasePaymentProvider):
         wallet_queryset = WalletAddress.objects.filter(order_payment=refund.payment)
 
         if wallet_queryset.count() != 1:
-            raise ValueError('There is not assigned wallet address to this payment')
+            raise Exception('Invariant: There is not assigned wallet address to this payment')
 
         refund.info_data = {
             'currency_type': refund.payment.info_data['currency_type'],
