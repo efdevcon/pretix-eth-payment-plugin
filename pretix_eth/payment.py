@@ -9,7 +9,10 @@ from django.http import HttpRequest
 from django.template.loader import get_template
 from django.utils.translation import ugettext_lazy as _
 
-from pretix.base.models import OrderPayment
+from pretix.base.models import (
+    OrderPayment,
+    OrderRefund,
+)
 from pretix.base.payment import BasePaymentProvider
 
 from eth_utils import to_wei, from_wei
@@ -223,7 +226,24 @@ class Ethereum(BasePaymentProvider):
     abort_pending_allowed = True
 
     def payment_refund_supported(self, payment: OrderPayment):
-        return False
+        return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
 
     def payment_partial_refund_supported(self, payment: OrderPayment):
-        return False
+        return self.payment_refund_supported(payment)
+
+    def execute_refund(self, refund: OrderRefund):
+        if refund.payment is None:
+            raise Exception('Invariant: No payment associated with refund')
+
+        wallet_queryset = WalletAddress.objects.filter(order_payment=refund.payment)
+
+        if wallet_queryset.count() != 1:
+            raise Exception('Invariant: There is not assigned wallet address to this payment')
+
+        refund.info_data = {
+            'currency_type': refund.payment.info_data['currency_type'],
+            'amount': refund.payment.info_data['amount'],
+            'wallet_address': wallet_queryset.first().hex_address,
+        }
+
+        refund.save(update_fields=["info"])
