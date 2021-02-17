@@ -52,6 +52,7 @@ setup(
     author_email='pretix-eth-payment-plugin@ethereum.org',
     license='Apache Software License',
     install_requires=[
+        "cryptography==3.3.1"
         "pretix>=3.8.0",
         "web3>=5.7.0",
         "eth-abi>=2.1.1,<3",
