@@ -10,8 +10,14 @@ from pretix.presale.signals import (
     question_form_fields,
     process_response,
 )
-from pretix.base.signals import logentry_display, register_payment_providers
+from pretix.base.signals import (
+    logentry_display,
+    register_payment_providers,
+    register_data_exporters,
+)
+
 from pretix.control.signals import nav_event_settings
+from .exporter import EthereumOrdersExporter
 
 
 NFT_QUESTION_IDENTIFIER = 'eth-payment-plugin-nft-address'
@@ -109,3 +115,8 @@ def wallet_address_upload_logentry_display(sender, logentry, **kwargs):
             new_address_count=data['new_address_count'],
             existing_address_count=data['existing_address_count'],
         )
+
+
+@receiver(register_data_exporters, dispatch_uid='single_event_eth_orders')
+def register_data_exporter(sender, **kwargs):
+    return EthereumOrdersExporter
