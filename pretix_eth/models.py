@@ -5,6 +5,7 @@ from django.db import (
 from pretix.base.models import (
     Event,
     OrderPayment,
+    OrderRefund,
 )
 
 
@@ -24,6 +25,12 @@ class WalletAddressQuerySet(models.QuerySet):
             OrderPayment.PAYMENT_STATE_CREATED,
             OrderPayment.PAYMENT_STATE_PENDING,
         ))
+
+    def unconfirmed_refunds(self) -> models.QuerySet:
+        orders_awaiting_refund = OrderRefund.obejcts.filter(
+            state=OrderRefund.PAYMENT_STATE_CREATED).values_list('order', flat=True)
+
+        return self.filter(order_payment__id_in=(orders_awaiting_refund))
 
 
 class WalletAddressManager(models.Manager):
