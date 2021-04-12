@@ -66,11 +66,13 @@ class Command(BaseCommand):
 
         w3 = Web3(load_provider_from_uri(uri))
         token_contract = w3.eth.contract(abi=TOKEN_ABI, address=token_address)
+
         try:
             with scope(organizer=None):
                 event = Event.objects.get(slug=slug)
         except Event.DoesNotExist:
             raise ValueError(f'Event with slug "{slug}" not found')
+
         unconfirmed_addresses = WalletAddress.objects.all().for_event(event).unconfirmed_refunds()
 
         for wallet_address in unconfirmed_addresses:
@@ -86,22 +88,15 @@ class Command(BaseCommand):
             eth_amount = w3.eth.getBalance(checksum_address)
             token_amount = token_contract.functions.balanceOf(checksum_address).call()
 
-            # Before confirming refund need to check if balance is zero and
-            # no outgoing transactions.
             if (eth_amount == 0 and expected_currency_type == 'ETH') or (
                     token_amount == 0 and expected_currency_type == 'DAI'):
                 logger.info(f'Refund found for {full_id} at {checksum_address}:')
 
-                # TODO: Verfiy there are no active transactions
-                has_active_transacions = False
-                if has_active_transacions:
-                    logger.warning('  * Awaiting for transaction to be complete')
+                if no_dry_run:
+                    logger.info(f'  * Confirming refund payment {full_id}')
+                    with scope(organizer=None):
+                        order_refund.done()
                 else:
-                    if no_dry_run:
-                        logger.info(f'  * Confirming refund payment {full_id}')
-                        with scope(organizer=None):
-                            order_refund.done()
-                    else:
-                        logger.info(f'  * DRY RUN: Would confirm order payment {full_id}')
+                    logger.info(f'  * DRY RUN: Would confirm order payment {full_id}')
             else:
                 logger.info(f'No refund process started for {full_id}')
