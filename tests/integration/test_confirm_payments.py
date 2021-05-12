@@ -9,7 +9,7 @@ from django.test import RequestFactory
 from pretix_eth.models import WalletAddress
 
 
-WEB3_PROVIDER_URI = 'wss://ropsten.infura.io/ws/v3/7c8da79a6f0e4485be91055385dbcd38'
+WEB3_PROVIDER_URI = os.environ.get('WEB3_PROVIDER_URI')
 skip_if_no_web3_provider = pytest.mark.skipif(
     WEB3_PROVIDER_URI is None,
     reason='Web3 provider uri is not set',
