@@ -68,23 +68,30 @@ def test_confirm_payment_enough(provider, event, get_request_order_payment):
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
+    payments = []
+    orders = []
     for payment_info in TEST_ENOUGH_AMOUNT:
         WalletAddress.objects.create(hex_address=payment_info['hex_address'], event=event)
 
         order, payment = make_order_payment(payment_info, provider, get_request_order_payment)
 
-        call_command(
-            'confirm_payments',
-            '--event-slug', event.slug,
-            '--web3-provider-uri', WEB3_PROVIDER_URI,
-            '--token-address', ROPSTEN_DAI_ADDRESS,
-            '--no-dry-run'
-        )
+        payments.append(payment)
+        orders.append(order)
 
+    call_command(
+        'confirm_payments',
+        '--event-slug', event.slug,
+        '--web3-provider-uri', WEB3_PROVIDER_URI,
+        '--token-address', ROPSTEN_DAI_ADDRESS,
+        '--no-dry-run'
+    )
+
+    for order in orders:
         order.refresh_from_db()
-        payment.refresh_from_db()
-
         assert order.status == order.STATUS_PAID
+
+    for payment in payments:
+        payment.refresh_from_db()
         assert payment.state == payment.PAYMENT_STATE_CONFIRMED
 
 
@@ -97,22 +104,29 @@ def test_confirm_payment_dry_run(provider, event, get_request_order_payment):
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
+    payments = []
+    orders = []
     for payment_info in TEST_ENOUGH_AMOUNT:
         WalletAddress.objects.create(hex_address=payment_info['hex_address'], event=event)
 
         order, payment = make_order_payment(payment_info, provider, get_request_order_payment)
 
-        call_command(
-            'confirm_payments',
-            '--event-slug', event.slug,
-            '--web3-provider-uri', WEB3_PROVIDER_URI,
-            '--token-address', ROPSTEN_DAI_ADDRESS,
-        )
+        payments.append(payment)
+        orders.append(order)
 
+    call_command(
+        'confirm_payments',
+        '--event-slug', event.slug,
+        '--web3-provider-uri', WEB3_PROVIDER_URI,
+        '--token-address', ROPSTEN_DAI_ADDRESS
+    )
+
+    for order in orders:
         order.refresh_from_db()
-        payment.refresh_from_db()
-
         assert order.status == order.STATUS_PENDING
+
+    for payment in payments:
+        payment.refresh_from_db()
         assert payment.state == payment.PAYMENT_STATE_PENDING
 
 
@@ -133,23 +147,30 @@ def test_confirm_payment_lower_amount(provider, event, get_request_order_payment
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
+    payments = []
+    orders = []
     for payment_info in TEST_LOWER_AMOUNT:
         WalletAddress.objects.create(hex_address=payment_info['hex_address'], event=event)
 
         order, payment = make_order_payment(payment_info, provider, get_request_order_payment)
 
-        call_command(
-            'confirm_payments',
-            '--event-slug', event.slug,
-            '--web3-provider-uri', WEB3_PROVIDER_URI,
-            '--token-address', ROPSTEN_DAI_ADDRESS,
-            '--no-dry-run'
-        )
+        payments.append(payment)
+        orders.append(order)
 
+    call_command(
+        'confirm_payments',
+        '--event-slug', event.slug,
+        '--web3-provider-uri', WEB3_PROVIDER_URI,
+        '--token-address', ROPSTEN_DAI_ADDRESS,
+        '--no-dry-run'
+    )
+
+    for order in orders:
         order.refresh_from_db()
-        payment.refresh_from_db()
-
         assert order.status == order.STATUS_PENDING
+
+    for payment in payments:
+        payment.refresh_from_db()
         assert payment.state == payment.PAYMENT_STATE_PENDING
 
 
@@ -170,21 +191,28 @@ def test_confirm_payment_wrong_currency(provider, event, get_request_order_payme
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
+    payments = []
+    orders = []
     for payment_info in TEST_WRONG_CURRENCY:
         WalletAddress.objects.create(hex_address=payment_info['hex_address'], event=event)
 
         order, payment = make_order_payment(payment_info, provider, get_request_order_payment)
 
-        call_command(
-            'confirm_payments',
-            '--event-slug', event.slug,
-            '--web3-provider-uri', WEB3_PROVIDER_URI,
-            '--token-address', ROPSTEN_DAI_ADDRESS,
-            '--no-dry-run'
-        )
+        payments.append(payment)
+        orders.append(order)
 
+    call_command(
+        'confirm_payments',
+        '--event-slug', event.slug,
+        '--web3-provider-uri', WEB3_PROVIDER_URI,
+        '--token-address', ROPSTEN_DAI_ADDRESS,
+        '--no-dry-run'
+    )
+
+    for order in orders:
         order.refresh_from_db()
-        payment.refresh_from_db()
-
         assert order.status == order.STATUS_PENDING
+
+    for payment in payments:
+        payment.refresh_from_db()
         assert payment.state == payment.PAYMENT_STATE_PENDING
