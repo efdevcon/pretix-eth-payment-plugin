@@ -35,18 +35,18 @@ TOKEN_ABI = [
 
 class Command(BaseCommand):
     help = (
-        'Verify pending orders from on-chain payments.  Performs a dry run '
+        'Verify pending refunds from on-chain payments.  Performs a dry run '
         'by default.'
     )
 
     def add_arguments(self, parser):
         parser.add_argument(
             '-s', '--event-slug',
-            help='The slug of the event for which payments should be confirmed.',
+            help='The slug of the event for which refunds should be confirmed.',
         )
         parser.add_argument(
             '-n', '--no-dry-run',
-            help='Modify database records to confirm payments.',
+            help='Modify database records to confirm refunds.',
             action='store_true',
         )
         parser.add_argument(
