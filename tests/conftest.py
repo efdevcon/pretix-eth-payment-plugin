@@ -195,3 +195,14 @@ def django_db_setup(
 
     if not django_db_keepdb:
         request.addfinalizer(teardown_database)
+
+
+def pytest_addoption(parser):
+    parser.addoption(
+        "--web3", action="store_true", default=False,
+        help="run integration tests that need web3 provider",
+    )
+
+
+def pytest_configure(config):
+    config.addinivalue_line("markers", "web3: mark test as one that requires web3 provider")

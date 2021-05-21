@@ -10,13 +10,18 @@ from pretix_eth.models import WalletAddress
 
 
 WEB3_PROVIDER_URI = os.environ.get('WEB3_PROVIDER_URI')
-skip_if_no_web3_provider = pytest.mark.skipif(
-    WEB3_PROVIDER_URI is None,
-    reason='Web3 provider uri is not set',
-)
-
-
 ROPSTEN_DAI_ADDRESS = "0xaD6D458402F60fD3Bd25163575031ACDce07538D"
+
+
+def check_web3_provider(pytesconfig):
+    __tracebackhide__ = True
+    if not pytesconfig.getoption("--web3"):
+        pytest.skip(
+            '--web3 flag is not set')
+
+    if WEB3_PROVIDER_URI is None:
+        pytest.fail(
+            '--web3 flag is set, but WEB3_PROVIDER_URI is None')
 
 
 @pytest.fixture
@@ -59,12 +64,13 @@ TEST_ENOUGH_AMOUNT = [
 ]
 
 
-@skip_if_no_web3_provider
 @pytest.mark.django_db(
     transaction=True,
     reset_sequences=True,
 )
-def test_confirm_payment_enough(provider, event, get_request_order_payment):
+def test_confirm_payment_enough(provider, event, get_request_order_payment, pytestconfig):
+    check_web3_provider(pytestconfig)
+
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
@@ -95,12 +101,13 @@ def test_confirm_payment_enough(provider, event, get_request_order_payment):
         assert payment.state == payment.PAYMENT_STATE_CONFIRMED
 
 
-@skip_if_no_web3_provider
 @pytest.mark.django_db(
     transaction=True,
     reset_sequences=True,
 )
-def test_confirm_payment_dry_run(provider, event, get_request_order_payment):
+def test_confirm_payment_dry_run(provider, event, get_request_order_payment, pytestconfig):
+    check_web3_provider(pytestconfig)
+
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
@@ -138,12 +145,13 @@ TEST_LOWER_AMOUNT = [
 ]
 
 
-@skip_if_no_web3_provider
 @pytest.mark.django_db(
     transaction=True,
     reset_sequences=True,
 )
-def test_confirm_payment_lower_amount(provider, event, get_request_order_payment):
+def test_confirm_payment_lower_amount(provider, event, get_request_order_payment, pytestconfig):
+    check_web3_provider(pytestconfig)
+
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
@@ -182,12 +190,13 @@ TEST_WRONG_CURRENCY = [
 ]
 
 
-@skip_if_no_web3_provider
 @pytest.mark.django_db(
     transaction=True,
     reset_sequences=True,
 )
-def test_confirm_payment_wrong_currency(provider, event, get_request_order_payment):
+def test_confirm_payment_wrong_currency(provider, event, get_request_order_payment, pytestconfig):
+    check_web3_provider(pytestconfig)
+
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
