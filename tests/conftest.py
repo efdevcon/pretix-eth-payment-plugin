@@ -199,10 +199,10 @@ def django_db_setup(
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--web3", action="store_true", default=False,
+        "--require-web3", action="store_true", default=False,
         help="run integration tests that need web3 provider",
     )
 
 
 def pytest_configure(config):
-    config.addinivalue_line("markers", "web3: mark test as one that requires web3 provider")
+    config.addinivalue_line("markers", "require-web3: mark test as one that requires web3 provider")

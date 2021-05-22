@@ -10,18 +10,23 @@ from pretix_eth.models import WalletAddress
 
 
 WEB3_PROVIDER_URI = os.environ.get('WEB3_PROVIDER_URI')
-ROPSTEN_DAI_ADDRESS = "0xaD6D458402F60fD3Bd25163575031ACDce07538D"
+ROPSTEN_DAI_ADDRESS = '0xaD6D458402F60fD3Bd25163575031ACDce07538D'
 
 
 def check_web3_provider(pytesconfig):
+    # If set to true, any pytest failures will be displayed as if they
+    # happened in the function that called check_web3_provider.
+    # Makes reading logs easier.
     __tracebackhide__ = True
-    if not pytesconfig.getoption("--web3"):
+
+    web3_required = pytesconfig.getoption('--require-web3')
+    if not web3_required:
         pytest.skip(
-            '--web3 flag is not set')
+            '--require-web3 flag is not set')
 
     if WEB3_PROVIDER_URI is None:
         pytest.fail(
-            '--web3 flag is set, but WEB3_PROVIDER_URI is None')
+            '--require-web3 flag is set, but WEB3_PROVIDER_URI is None')
 
 
 @pytest.fixture
