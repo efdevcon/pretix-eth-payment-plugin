@@ -17,7 +17,7 @@ from pretix.base.models import (
 )
 
 
-WEB3_PROVIDER_URI = 'https://ropsten.infura.io/v3/88b2b9b3e86b4128b3173cc71788efca'
+WEB3_PROVIDER_URI = os.environ.get('WEB3_PROVIDER_URI')
 ROPSTEN_DAI_ADDRESS = '0xaD6D458402F60fD3Bd25163575031ACDce07538D'
 
 
