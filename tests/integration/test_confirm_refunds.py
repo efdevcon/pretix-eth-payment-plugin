@@ -17,14 +17,24 @@ from pretix.base.models import (
 )
 
 
-WEB3_PROVIDER_URI = os.environ.get('WEB3_PROVIDER_URI')
-skip_if_no_web3_provider = pytest.mark.skipif(
-    WEB3_PROVIDER_URI is None,
-    reason='Web3 provider uri is not set',
-)
+WEB3_PROVIDER_URI = 'https://ropsten.infura.io/v3/88b2b9b3e86b4128b3173cc71788efca'
+ROPSTEN_DAI_ADDRESS = '0xaD6D458402F60fD3Bd25163575031ACDce07538D'
 
 
-ROPSTEN_DAI_ADDRESS = "0xaD6D458402F60fD3Bd25163575031ACDce07538D"
+def check_web3_provider(pytesconfig):
+    # If set to true, any pytest failures will be displayed as if they
+    # happened in the function that called check_web3_provider.
+    # Makes reading logs easier.
+    __tracebackhide__ = True
+
+    web3_required = pytesconfig.getoption('--require-web3')
+    if not web3_required:
+        pytest.skip(
+            '--require-web3 flag is not set')
+
+    if WEB3_PROVIDER_URI is None:
+        pytest.fail(
+            '--require-web3 flag is set, but WEB3_PROVIDER_URI is None')
 
 
 @pytest.fixture
@@ -91,13 +101,14 @@ TEST_REFUND_SUCCESSFUL_DATA = [
 ]
 
 
-@skip_if_no_web3_provider
 @pytest.mark.django_db(
     transaction=True,
     reset_sequences=True,
 )
 def test_confirm_refund_successful(provider, event, get_request_order_payment,
-                                   create_admin_client, organizer):
+                                   create_admin_client, organizer, pytestconfig):
+    check_web3_provider(pytestconfig)
+
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
@@ -136,13 +147,14 @@ def test_confirm_refund_successful(provider, event, get_request_order_payment,
         assert refund.state == refund.REFUND_STATE_DONE
 
 
-@skip_if_no_web3_provider
 @pytest.mark.django_db(
     transaction=True,
     reset_sequences=True,
 )
 def test_confirm_refund_dry_run(provider, event, get_request_order_payment,
-                                create_admin_client, organizer):
+                                create_admin_client, organizer, pytestconfig):
+    check_web3_provider(pytestconfig)
+
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
@@ -188,13 +200,14 @@ TEST_NOT_REFUNDED_YET = [
 ]
 
 
-@skip_if_no_web3_provider
 @pytest.mark.django_db(
     transaction=True,
     reset_sequences=True,
 )
 def test_confirm_refunds_not_refunded_yet(provider, event, get_request_order_payment,
-                                          create_admin_client, organizer):
+                                          create_admin_client, organizer, pytestconfig):
+    check_web3_provider(pytestconfig)
+
     provider.settings.set('ETH_RATE', '0.001')
     provider.settings.set('DAI_RATE', '1.0')
 
