@@ -27,10 +27,10 @@ class WalletAddressQuerySet(models.QuerySet):
         ))
 
     def unconfirmed_refunds(self) -> models.QuerySet:
-        orders_awaiting_refund = OrderRefund.obejcts.filter(
-            state=OrderRefund.PAYMENT_STATE_CREATED).values_list('order', flat=True)
+        orders_awaiting_refund = OrderRefund.objects.filter(
+            state=OrderRefund.REFUND_STATE_CREATED).values_list('order', flat=True)
 
-        return self.filter(order_payment__id_in=(orders_awaiting_refund))
+        return self.filter(order_payment_id__in=(orders_awaiting_refund))
 
 
 class WalletAddressManager(models.Manager):
