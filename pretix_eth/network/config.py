@@ -5,7 +5,7 @@ value= object of the class implemented in networks.py
 """
 import sys, importlib
 
-NETWORKS = ["ZkSync", "Rinkeby"]
+NETWORKS = ["L1", "Rinkeby", "ZkSync"]
 networks_dict = {}
 networks_module = importlib.import_module("pretix_eth.network.networks")
 
