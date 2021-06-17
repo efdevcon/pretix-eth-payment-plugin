@@ -18,6 +18,7 @@ from pretix.base.payment import BasePaymentProvider
 from eth_utils import to_wei, from_wei
 
 from .models import WalletAddress
+from .network.config import networks_dict
 
 logger = logging.getLogger(__name__)
 
