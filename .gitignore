@@ -69,3 +69,6 @@ data/
 
 # Editor / IDE
 .vscode
+
+venv
+addresses.txt

@@ -63,10 +63,11 @@ issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
    username `admin@localhost` and password `admin` to log in.
 1. Enter "Admin mode" by clicking the "Admin mode" text in the upper-right
    corner of the admin interface to create a test organization and event.
-1. Use the plugin from this repository for your events by enabling it in the
-   'Plugins' tab in the event's settings tab.  Note that you must enable the
-   plugin both in the "Plugins" tab as well as in the plugin's settings (found
-   in the "Payment" tab).
+1. Under the event, go to Settings -> Plugins -> Payment Providers -> click on Enable under "Pretix Ethereum Payment Provider" 
+1. Next, under Settings, go to Payments -> "ETH or DAI" -> Settings -> click on "enable payment option". Next, scroll down and set the values for the fields "ETH_RATE" and "DAI_RATE"
+1. Under Event, go to Settings -> Upload Wallet Addresses - upload some ethereum addresses 
+
+You can now play with the event by clicking on the "Go to Shop" button at the top left (next to the event name)
 
 ## Automatic payment confirmation with the `confirm_payments` command
 
