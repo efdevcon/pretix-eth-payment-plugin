@@ -19,13 +19,11 @@ from eth_utils import to_wei, from_wei
 
 from .models import WalletAddress
 from .network.config import networks_dict
+from .network.networks import INetwork
 
 logger = logging.getLogger(__name__)
 
 RESERVED_ORDER_DIGITS = 5
-
-DAI_MAINNET_ADDRESS = '0x89d24a6b4ccb1b6faa2625fe562bdd9a23260359'
-
 
 def truncate_wei_value(value: int, digits: int) -> int:
     multiplier = 10 ** digits
@@ -79,9 +77,11 @@ class Ethereum(BasePaymentProvider):
         currency_type_choices = ()
 
         if self.settings.DAI_RATE:
-            currency_type_choices += (('DAI', _('DAI')),)
+            for class_names in networks_dict:
+                currency_type_choices += networks_dict[class_names].dai_currency_choice
         if self.settings.ETH_RATE:
-            currency_type_choices += (('ETH', _('ETH')),)
+            for class_names in networks_dict:
+                currency_type_choices += networks_dict[class_names].eth_currency_choice
 
         if len(currency_type_choices) == 0:
             raise ImproperlyConfigured('No currencies configured')
@@ -109,7 +109,10 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
+            # currency_info = ETH-L1 or DAI-ZkSync etc.
+            currency_info = form.cleaned_data['currency_type'].split("-")
+            request.session['payment_currency_type'] = currency_info[0]
+            request.session['payment_network'] = currency_info[1]
             self._update_session_payment_amount(request, cart['total'])
             return True
 
@@ -119,7 +122,10 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            request.session['payment_ethereum_currency_type'] = form.cleaned_data['currency_type']  # noqa: E501
+            # currency_info = ETH-L1 or DAI-ZkSync etc.
+            currency_info = form.cleaned_data['currency_type'].split("-")
+            request.session['payment_currency_type'] = currency_info[0]
+            request.session['payment_network'] = currency_info[1]
             self._update_session_payment_amount(request, payment.amount)
             return True
 
@@ -127,12 +133,14 @@ class Ethereum(BasePaymentProvider):
 
     def payment_is_valid_session(self, request):
         return all((
-            'payment_ethereum_currency_type' in request.session,
-            'payment_ethereum_time' in request.session,
-            'payment_ethereum_amount' in request.session,
+            'payment_currency_type' in request.session,
+            'payment_network' in request.session,
+            'payment_time' in request.session,
+            'payment_amount' in request.session,
         ))
 
     def _payment_is_valid_info(self, payment: OrderPayment) -> bool:
+        # TODO: For now, currency_type = "ETH-L1" instead of separating the network part.
         return all((
             'currency_type' in payment.info_data,
             'time' in payment.info_data,
@@ -140,10 +148,10 @@ class Ethereum(BasePaymentProvider):
         ))
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        currency_type = request.session['payment_ethereum_currency_type']
-        payment_timestamp = request.session['payment_ethereum_time']
-
-        payment_amount = request.session['payment_ethereum_amount']
+        # TODO: For now, payment.currency_type = "ETH-L1" instead of separating the network part.
+        currency_type = request.session['payment_currency_type'] + "-" + request.session['payment_network'] # noqa: E501
+        payment_timestamp = request.session['payment_time']
+        payment_amount = request.session['payment_amount']
 
         payment.info_data = {
             'currency_type': currency_type,
@@ -160,7 +168,7 @@ class Ethereum(BasePaymentProvider):
         elif currency_type == 'DAI':
             chosen_currency_rate = decimal.Decimal(self.settings.DAI_RATE)
         else:
-            raise ImproperlyConfigured(f'Unrecognized currency type: {currency_type}')  # noqa: E501
+            raise ImproperlyConfigured(f'Unrecognized currency type: {currency_type}')
 
         rounded_price = (total * chosen_currency_rate).quantize(rounding_base)
         final_price = to_wei(rounded_price, 'ether')
@@ -168,10 +176,9 @@ class Ethereum(BasePaymentProvider):
         return final_price
 
     def _update_session_payment_amount(self, request: HttpRequest, total):
-        final_price = self._get_final_price(total, request.session['payment_ethereum_currency_type'])  # noqa: E501
-
-        request.session['payment_ethereum_amount'] = final_price
-        request.session['payment_ethereum_time'] = int(time.time())
+        final_price = self._get_final_price(total, request.session['payment_currency_type'])  
+        request.session['payment_amount'] = final_price
+        request.session['payment_time'] = int(time.time())
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template('pretix_eth/pending.html')
@@ -186,32 +193,16 @@ class Ethereum(BasePaymentProvider):
             return template.render(ctx)
 
         wallet_address = WalletAddress.objects.get_for_order_payment(payment).hex_address
-        currency_type = payment.info_data['currency_type']
+        currency_type = request.session['payment_currency_type']
         payment_amount = payment.info_data['amount']
-
         amount_in_ether_or_dai = from_wei(payment_amount, 'ether')
 
-        if currency_type == 'ETH':
-            erc_681_url = f'ethereum:{wallet_address}?value={payment_amount}'
-            amount_manual = f'{amount_in_ether_or_dai} ETH'
-            uniswap_url = f'https://uniswap.exchange/send?exactField=output&exactAmount={amount_in_ether_or_dai}&inputCurrency=0x6b175474e89094c44da98b954eedeac495271d0f&outputCurrency=ETH&recipient={wallet_address}'  # noqa: E501
-        elif currency_type == 'DAI':
-            erc_681_url = f'ethereum:{DAI_MAINNET_ADDRESS}/transfer?address={wallet_address}&uint256={payment_amount}'  # noqa: E501
-            amount_manual = f'{amount_in_ether_or_dai} DAI'
-            uniswap_url = f'https://uniswap.exchange/send?exactField=output&exactAmount={amount_in_ether_or_dai}&outputCurrency=0x6b175474e89094c44da98b954eedeac495271d0f&recipient={wallet_address}'  # noqa: E501
-
-        else:
-            raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
-
-        web3modal_url = f'https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether_or_dai}&to={wallet_address}'  # noqa: E501
-
-        ctx.update({
-            'erc_681_url': erc_681_url,
-            'uniswap_url': uniswap_url,
-            'web3modal_url': web3modal_url,
-            'amount_manual': amount_manual,
-            'wallet_address': wallet_address,
-        })
+        # Get payment instructions based on the network type:
+        network = request.session['payment_network']
+        network_class: INetwork = networks_dict[network]
+        instructions = network_class.payment_instructions(wallet_address, payment_amount, amount_in_ether_or_dai, currency_type)  # noqa: E501  
+        
+        ctx.update(instructions)
 
         return template.render(ctx)
 
