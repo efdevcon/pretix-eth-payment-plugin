@@ -60,6 +60,36 @@ class Rinkeby(INetwork):
     """ Implementation for Rinkeby Testnet """
     def __init__(self):
         super(Rinkeby, self).__init__("Rinkeby")
+        self.CHAIN_ID = 4
+        self.DAI_ADDRESS = '0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735'
+
+    def payment_instructions(self, wallet_address, payment_amount, amount_in_ether_or_dai, currency_type):
+        """
+        Instructions for paying ETH or DAI in L1 Ethereum. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
+        """
+        if currency_type == 'ETH':
+            erc_681_url = make_erc_681_url(wallet_address, payment_amount, self.CHAIN_ID)
+            amount_manual = f'{amount_in_ether_or_dai} ETH'
+            uniswap_url = make_uniswap_url(
+                ETH, wallet_address, amount_in_ether_or_dai, self.DAI_ADDRESS)
+        elif currency_type == 'DAI':
+            erc_681_url = make_erc_681_url(wallet_address, payment_amount, self.CHAIN_ID, is_token=True, token_address=self.DAI_ADDRESS)
+            amount_manual = f'{amount_in_ether_or_dai} DAI'
+            uniswap_url = make_uniswap_url(
+                self.DAI_ADDRESS, wallet_address, amount_in_ether_or_dai)
+        else:
+            raise ImproperlyConfigured(f'Unrecognized currency: {currency_type}')  # noqa: E501
+       
+        web3modal_url = f'https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether_or_dai}&to={wallet_address}'  # noqa: E501
+
+        return {
+            'erc_681_url': erc_681_url,
+            'uniswap_url': uniswap_url,
+            'web3modal_url': web3modal_url,
+            'amount_manual': amount_manual,
+            'wallet_address': wallet_address,
+        }
+
 
 class L1(INetwork):
     """ Implementation for Ethereum L1 """
