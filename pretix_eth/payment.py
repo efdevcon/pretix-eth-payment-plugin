@@ -220,6 +220,7 @@ class Ethereum(BasePaymentProvider):
         instructions = network.payment_instructions(wallet_address, payment_amount, amount_in_ether_or_dai, currency_type)  # noqa: E501  
         
         ctx.update(instructions)
+        ctx["network_name"] = network.verbose_name
 
         return template.render(ctx)
 
