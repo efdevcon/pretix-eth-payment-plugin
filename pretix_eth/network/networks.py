@@ -39,14 +39,17 @@ class INetwork(object):
     """Interface that creates basic functionality to plug network into payments.py"""
 
     identifier = None
+    verbose_name = None
     eth_currency_choice = ()
     dai_currency_choice = ()
 
     def __init__(self):
-        if not self.identifier:
-            raise ValueError("identifier class variable must be specified.")
-        eth_currency = f"{ETH}-{self.identifier}"
-        dai_currency = f"{DAI}-{self.identifier}"
+        if not (self.identifier and self.verbose_name):
+            raise ValueError(
+                "identifier and verbose_name class variable must be specified."
+            )
+        eth_currency = f"{ETH}-{self.verbose_name}"
+        dai_currency = f"{DAI}-{self.verbose_name}"
         self.eth_currency_choice = ((eth_currency, _(eth_currency)),)
         self.dai_currency_choice = ((dai_currency, _(dai_currency)),)
 
@@ -74,6 +77,7 @@ class Rinkeby(INetwork):
     """Implementation for Rinkeby Testnet"""
 
     identifier = "Rinkeby"
+    verbose_name = "Rinkeby Ethereum Testnet"
     CHAIN_ID = 4
     DAI_ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
 
@@ -123,6 +127,7 @@ class L1(INetwork):
     """Implementation for Ethereum L1"""
 
     identifier = "L1"
+    verbose_name = "Ethereum"
     DAI_ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
 
     def payment_instructions(
@@ -166,5 +171,14 @@ class L1(INetwork):
 class ZkSync(INetwork):
     """Implementation for ZkSync"""
 
-    def __init__(self):
-        super(ZkSync, self).__init__("ZkSync")
+    identifier = "ZkSync"
+    verbose_name = "ZkSync"
+
+
+all_networks = [L1, Rinkeby, ZkSync]
+all_network_ids_to_networks = {}
+all_network_verbose_names_to_ids = {}
+
+for network in all_networks:
+    all_network_ids_to_networks[network.identifier] = network()
+    all_network_verbose_names_to_ids[network.verbose_name] = network.identifier
