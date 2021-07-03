@@ -10,7 +10,7 @@
   <p>{% trans "Choose one of the following payment options:" %}</p>
   <ol>
     <li class="payment-options">
-      <p>{% blocktrans trimmed %}Manually pay {{ amount_manual }} to 
+      <p>{% blocktrans trimmed %}Manually pay {{ amount_manual }} on {{ network_name }} to 
         <span id="address">{{ wallet_address }}</span>{% endblocktrans %}
         <img tabindex="0" src="{% static "icons/clipboard-icon.jpg" %}" id="clipboard" alt="copy to clipboard" data-toggle="tooltip" data-placement="right" data-trigger="click" title="Copied to clipboard"/></p>
 
