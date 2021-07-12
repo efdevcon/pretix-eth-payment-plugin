@@ -50,7 +50,7 @@ class Ethereum(BasePaymentProvider):
                         label=_("ETH rate"),
                         help_text=_(
                             "The Ethereum exchange rate in ETH per unit fiat. Leave out if you do not want to accept ETH"
-                        ),  # noqa: E501
+                        ),
                         required=False,
                     ),
                 ),
@@ -60,7 +60,7 @@ class Ethereum(BasePaymentProvider):
                         label=_("DAI rate"),
                         help_text=_(
                             "The DAI exchange rate in DAI per unit fiat. Leave out if you do not want to accept DAI"
-                        ),  # noqa: E501
+                        ),
                         required=False,
                     ),
                 ),
@@ -75,12 +75,21 @@ class Ethereum(BasePaymentProvider):
                                 network_verbose_name,
                             )
                             for network_verbose_name in all_network_verbose_names_to_ids
-                        ],  # noqa: E501
+                        ],
                         help_text=_(
                             "The networks to be configured for crypto payments"
                         ),
                         widget=forms.CheckboxSelectMultiple(
                             attrs={"class": "scrolling-multiple-choice"}
+                        ),
+                    ),
+                ),
+                (
+                    "NETWORK_RPC_URL",
+                    forms.JSONField(
+                        label=_("RPC URLs for networks"),
+                        help_text=_(
+                            "JSON field with key=<Network name>_RPC_URL and value = RPC URL"
                         ),
                     ),
                 ),
@@ -102,11 +111,20 @@ class Ethereum(BasePaymentProvider):
         at_least_one_unused_address = (
             WalletAddress.objects.all().unused().for_event(request.event).exists()
         )
+        at_least_one_network_configured = all(
+            (
+                len(json.loads(self.settings._NETWORKS)) > 0,
+                # TODO: Check that NETWORK_RPC_URL mappings contain all networks selected
+                # TODO: Check that NETWORK_RPC_URL conforms to a schema
+                len(self.settings.NETWORK_RPC_URL) > 0,
+            )
+        )
 
         return all(
             (
                 one_or_more_currencies_configured,
                 at_least_one_unused_address,
+                at_least_one_network_configured,
                 super().is_allowed(request),
             )
         )
@@ -196,7 +214,7 @@ class Ethereum(BasePaymentProvider):
                 "payment_network" in request.session,
                 "payment_time" in request.session,
                 "payment_amount" in request.session,
-                request.session["payment_network"] 
+                request.session["payment_network"]
                 in all_network_ids_to_networks.keys(),
             )
         )
@@ -208,7 +226,7 @@ class Ethereum(BasePaymentProvider):
                 "time" in payment.info_data,
                 "amount" in payment.info_data,
                 payment.info_data["currency_type"].split("-")[1]
-                in all_network_ids_to_networks.keys(),  # noqa: E501
+                in all_network_ids_to_networks.keys(),
             )
         )
 
@@ -218,7 +236,7 @@ class Ethereum(BasePaymentProvider):
             request.session["payment_currency_type"]
             + "-"
             + request.session["payment_network"]
-        )  # noqa: E501
+        )
         payment_timestamp = request.session["payment_time"]
         payment_amount = request.session["payment_amount"]
 
@@ -275,7 +293,7 @@ class Ethereum(BasePaymentProvider):
         network = all_network_ids_to_networks[network_id]
         instructions = network.payment_instructions(
             wallet_address, payment_amount, amount_in_ether_or_dai, currency_type
-        )  # noqa: E501
+        )
 
         ctx.update(instructions)
         ctx["network_name"] = network.verbose_name
