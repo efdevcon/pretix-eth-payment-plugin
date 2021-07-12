@@ -1,7 +1,19 @@
 from django.utils.translation import ugettext_lazy as _
+from web3 import Web3
+from web3.providers.auto import load_provider_from_uri
 
 ETH = "ETH"
 DAI = "DAI"
+
+TOKEN_ABI = [
+    {
+        "constant": True,
+        "inputs": [{"name": "_owner", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"name": "balance", "type": "uint256"}],
+        "type": "function",
+    },
+]
 
 
 def make_erc_681_url(
@@ -12,7 +24,7 @@ def make_erc_681_url(
         if token_address == None:
             raise ValueError(
                 "if is_token is true, then you must pass contract address of the token."
-            )  # noqa: E501
+            ) 
 
         return f"ethereum:{token_address}@{chain_id}/transfer?address={to_address}&uint256={payment_amount}"  # noqa: E501
     # if ETH (not token)
@@ -40,6 +52,7 @@ class INetwork(object):
 
     identifier = None
     verbose_name = None
+    DAI_ADDRESS = None
     eth_currency_choice = ()
     dai_currency_choice = ()
 
@@ -71,6 +84,24 @@ class INetwork(object):
         raise NotImplementedError(
             "This method has not yet been implemented for the network"
         )
+
+    def get_currency_balance(self, hex_wallet_address, rpc_url):
+        """
+        Get ETH, DAI balance of a wallet in an EVM like network with ETH as base crypto.
+        Override this implementation for non EVM like networks or where ETH is a token like DAI.
+
+        :param hex_wallet_address: ethereum wallet address
+        :param rpc_url: used to make balance query calls
+        :returns tuple with ETH and DAI balance
+        """
+        w3 = Web3(load_provider_from_uri(rpc_url))
+        checksum_address = w3.toChecksumAddress(hex_wallet_address)
+        token_contract = w3.eth.contract(abi=TOKEN_ABI, address=self.DAI_ADDRESS)
+
+        eth_amount = w3.eth.getBalance(checksum_address)
+        token_amount = token_contract.functions.balanceOf(checksum_address).call()
+
+        return (eth_amount, token_amount)
 
 
 class Rinkeby(INetwork):
@@ -108,9 +139,7 @@ class Rinkeby(INetwork):
                 self.DAI_ADDRESS, wallet_address, amount_in_ether_or_dai
             )
         else:
-            raise ImproperlyConfigured(
-                f"Unrecognized currency: {currency_type}"
-            )  # noqa: E501
+            raise ImproperlyConfigured(f"Unrecognized currency: {currency_type}")
 
         web3modal_url = f"https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether_or_dai}&to={wallet_address}"  # noqa: E501
 
@@ -132,7 +161,7 @@ class L1(INetwork):
 
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_ether_or_dai, currency_type
-    ):  # noqa: E501
+    ):
         """
         Instructions for paying ETH or DAI in L1 Ethereum. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
         """
