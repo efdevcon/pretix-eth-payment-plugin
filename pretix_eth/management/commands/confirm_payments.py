@@ -5,13 +5,14 @@ from django.core.management.base import (
     BaseCommand,
 )
 from django_scopes import scope
+
 from pretix.base.models.event import (
     Event,
 )
+
 from pretix_eth.models import (
     WalletAddress,
 )
-
 from pretix_eth.network.networks import all_network_ids_to_networks
 
 logger = logging.getLogger(__name__)
