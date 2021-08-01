@@ -108,6 +108,23 @@ class L1(INetwork):
         return evm_like_payment_instructions(wallet_address, payment_amount, currency_type, self.DAI_ADDRESS, amount_in_ether_or_token=amount_in_ether_or_token, use_uniswap=True)
 
 
+class KovanOptimism(INetwork):
+    """Implementation for Rinkeby Testnet"""
+
+    identifier = "KovanOptimism"
+    verbose_name = "Kovan Optimism Testnet"
+    CHAIN_ID = 69
+    DAI_ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+
+    def payment_instructions(
+        self, wallet_address, payment_amount, amount_in_ether_or_token, currency_type
+    ):
+        """
+        Instructions for paying ETH or DAI in Kovan on Optimism. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
+        """
+        return evm_like_payment_instructions(wallet_address, payment_amount, currency_type, self.DAI_ADDRESS, self.CHAIN_ID, amount_in_ether_or_token, use_uniswap=True)
+
+
 class ZkSync(INetwork):
     """Implementation for ZkSync"""
 
@@ -115,7 +132,7 @@ class ZkSync(INetwork):
     verbose_name = "ZkSync"
 
 
-all_networks = [L1, Rinkeby, ZkSync]
+all_networks = [L1, Rinkeby, KovanOptimism, ZkSync]
 all_network_ids_to_networks = {}
 all_network_verbose_names_to_ids = {}
 
