@@ -42,10 +42,15 @@ def make_checkout_web3modal_url(
     return f"https://checkout.web3modal.com/?currency={currency_type}&amount={amount_in_ether_or_token}&to={wallet_address}&chainId={chainId}"  # noqa: E501
 
 
-# Useful to create a separate token payment isntruction function since 
+# Useful to create a separate token payment isntruction function since
 # in the future, we will support multiple token
 def token_in_evm_payment_instructions(
-    wallet_address, payment_amount, token_contract_address, chain_id=1, use_uniswap=True, amount_in_ether_or_token=None
+    wallet_address,
+    payment_amount,
+    token_contract_address,
+    chain_id=1,
+    use_uniswap=True,
+    amount_in_ether_or_token=None,
 ):
     """
     :param wallet_address: address to pay to
@@ -57,9 +62,11 @@ def token_in_evm_payment_instructions(
     :returns erc_681_url, uniswap_url (can be None)
     """
 
-    if use_uniswap and amount_in_ether_or_token==None:
-        raise ValueError("Must supply amount_in_ether_or_token (from_wei(payment_amount)) if using uniswap")
-    
+    if use_uniswap and amount_in_ether_or_token == None:
+        raise ValueError(
+            "Must supply amount_in_ether_or_token (from_wei(payment_amount)) if using uniswap"
+        )
+
     erc_681_url = make_erc_681_url(
         wallet_address,
         payment_amount,
@@ -69,16 +76,24 @@ def token_in_evm_payment_instructions(
     )
     uniswap_url = None
     if use_uniswap:
-        uniswap_url = make_uniswap_url(token_contract_address, wallet_address, amount_in_ether_or_token)
+        uniswap_url = make_uniswap_url(
+            token_contract_address, wallet_address, amount_in_ether_or_token
+        )
 
     return erc_681_url, uniswap_url
 
 
 def evm_like_payment_instructions(
-    wallet_address, payment_amount, currency_type, chain_token_address, chain_id=1, amount_in_ether_or_token=None, use_uniswap=True
+    wallet_address,
+    payment_amount,
+    currency_type,
+    chain_token_address,
+    chain_id=1,
+    amount_in_ether_or_token=None,
+    use_uniswap=True,
 ):
     """
-    Instructions for paying ETH or a token (e.g. DAI) on an ethereum chain. 
+    Instructions for paying ETH or a token (e.g. DAI) on an ethereum chain.
     Instructions to pay manually, via a web3 modal, ERC 681 (QR Code) or uniswap url.
 
     :param wallet_address: address to pay to
@@ -100,7 +115,7 @@ def evm_like_payment_instructions(
 
     if currency_type == "ETH":
         erc_681_url = make_erc_681_url(wallet_address, payment_amount, chain_id)
-        
+
         if use_uniswap:
             uniswap_url = make_uniswap_url(
                 "ETH", wallet_address, amount_in_ether_or_token, chain_token_address
@@ -108,7 +123,12 @@ def evm_like_payment_instructions(
 
     elif currency_type == "DAI":
         erc_681_url, uniswap_url = token_in_evm_payment_instructions(
-            wallet_address, payment_amount, chain_token_address, chain_id, use_uniswap, amount_in_ether_or_token
+            wallet_address,
+            payment_amount,
+            chain_token_address,
+            chain_id,
+            use_uniswap,
+            amount_in_ether_or_token,
         )
 
     else:

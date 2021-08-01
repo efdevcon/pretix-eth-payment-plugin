@@ -2,7 +2,7 @@ from django.utils.translation import ugettext_lazy as _
 from web3 import Web3
 from web3.providers.auto import load_provider_from_uri
 
-from .helpers import evm_like_payment_instructions, token_in_evm_payment_instructions  
+from .helpers import evm_like_payment_instructions, token_in_evm_payment_instructions
 
 ETH = "ETH"
 DAI = "DAI"
@@ -89,7 +89,15 @@ class Rinkeby(INetwork):
         """
         Instructions for paying ETH or DAI in Rinkeby. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
         """
-        return evm_like_payment_instructions(wallet_address, payment_amount, currency_type, self.DAI_ADDRESS, self.CHAIN_ID, amount_in_ether_or_token, use_uniswap=True)
+        return evm_like_payment_instructions(
+            wallet_address,
+            payment_amount,
+            currency_type,
+            self.DAI_ADDRESS,
+            self.CHAIN_ID,
+            amount_in_ether_or_token,
+            use_uniswap=True,
+        )
 
 
 class L1(INetwork):
@@ -105,7 +113,14 @@ class L1(INetwork):
         """
         Instructions for paying ETH or DAI in L1 Ethereum. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
         """
-        return evm_like_payment_instructions(wallet_address, payment_amount, currency_type, self.DAI_ADDRESS, amount_in_ether_or_token=amount_in_ether_or_token, use_uniswap=True)
+        return evm_like_payment_instructions(
+            wallet_address,
+            payment_amount,
+            currency_type,
+            self.DAI_ADDRESS,
+            amount_in_ether_or_token=amount_in_ether_or_token,
+            use_uniswap=True,
+        )
 
 
 class KovanOptimism(INetwork):
@@ -122,7 +137,15 @@ class KovanOptimism(INetwork):
         """
         Instructions for paying ETH or DAI in Kovan on Optimism. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
         """
-        return evm_like_payment_instructions(wallet_address, payment_amount, currency_type, self.DAI_ADDRESS, self.CHAIN_ID, amount_in_ether_or_token, use_uniswap=True)
+        return evm_like_payment_instructions(
+            wallet_address,
+            payment_amount,
+            currency_type,
+            self.DAI_ADDRESS,
+            self.CHAIN_ID,
+            amount_in_ether_or_token,
+            use_uniswap=True,
+        )
 
 
 class ZkSync(INetwork):
