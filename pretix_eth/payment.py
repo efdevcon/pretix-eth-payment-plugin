@@ -286,13 +286,13 @@ class Ethereum(BasePaymentProvider):
         ).hex_address
         currency_type = request.session["payment_currency_type"]
         payment_amount = payment.info_data["amount"]
-        amount_in_ether_or_dai = from_wei(payment_amount, "ether")
+        amount_in_ether_or_token = from_wei(payment_amount, "ether")
 
         # Get payment instructions based on the network type:
         network_id = request.session["payment_network"]
         network = all_network_ids_to_networks[network_id]
         instructions = network.payment_instructions(
-            wallet_address, payment_amount, amount_in_ether_or_dai, currency_type
+            wallet_address, payment_amount, amount_in_ether_or_token, currency_type
         )
 
         ctx.update(instructions)
