@@ -86,10 +86,10 @@ def token_in_evm_payment_instructions(
 def evm_like_payment_instructions(
     wallet_address,
     payment_amount,
+    amount_in_ether_or_token,
     currency_type,
     chain_token_address,
     chain_id=1,
-    amount_in_ether_or_token=None,
     use_uniswap=True,
 ):
     """
@@ -98,10 +98,10 @@ def evm_like_payment_instructions(
 
     :param wallet_address: address to pay to
     :param payment_amount: amount to pay (in wei)
+    :param amount_in_ether_or_token: amount to pay (from_wei(payment_amount))
     :param currency_type: ETH or token_name e.g. DAI
     :param token_contract_address: smart contract address of the token for the chain
     :param chain_id: of the chain to transact on. by default 1 (ETH L1)
-    :param amount_in_ether_or_token: amount to pay (from_wei(payment_amount)). Used only if uniswap is used.
     :param use_uniswap: does the chain have uniswap? boolean.
     :returns dictionary: {
         "erc_681_url": erc_681_url,

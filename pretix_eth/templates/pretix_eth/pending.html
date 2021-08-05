@@ -38,17 +38,19 @@
       </ul>
     </li>
 
-    <li class="payment-options">
-      <img src="{% static "icons/uniswap-logo-32.svg" %}" alt="Uniswap logo" />
-      <a target="blank" rel="noreferrer noopener" href="{{ uniswap_url }}">
-        <button class="btn btn-primary" id="uniswap_btn">{% trans "Uniswap" %}</button>
-      </a>
-      <ul class="payment-info">
-        <li>{% trans "Allows you to pay with any uniswap supported token." %}
-          <strong>{% trans "Please do not change the output amount or output currency!" %}</strong>
-        </li>
-      </ul>
-    </li>  
+    {% if uniswap_url %}
+      <li class="payment-options">
+        <img src="{% static "icons/uniswap-logo-32.svg" %}" alt="Uniswap logo" />
+        <a target="blank" rel="noreferrer noopener" href="{{ uniswap_url }}">
+          <button class="btn btn-primary" id="uniswap_btn">{% trans "Uniswap" %}</button>
+        </a>
+        <ul class="payment-info">
+          <li>{% trans "Allows you to pay with any uniswap supported token." %}
+            <strong>{% trans "Please do not change the output amount or output currency!" %}</strong>
+          </li>
+        </ul>
+      </li>  
+    {% endif %}
   </ol>
   <script type="text/javascript" src="{% static "pretix_eth/pending.js" %}"></script>
   <p>
