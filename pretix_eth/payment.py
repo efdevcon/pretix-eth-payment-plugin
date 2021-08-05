@@ -19,9 +19,9 @@ from pretix.base.payment import BasePaymentProvider
 from eth_utils import to_wei, from_wei
 
 from .models import WalletAddress
-from .network.networks import (
-    all_network_ids_to_networks,
-    all_network_verbose_names_to_ids,
+from .network.tokens import (
+    registry,
+    all_network_verbose_names_to_ids
 )
 
 logger = logging.getLogger(__name__)
@@ -45,23 +45,12 @@ class Ethereum(BasePaymentProvider):
             list(super().settings_form_fields.items())
             + [
                 (
-                    "ETH_RATE",
-                    forms.DecimalField(
-                        label=_("ETH rate"),
+                    "TOKEN_RATE",
+                    forms.JSONField(
+                        label=_("Token Rate"),
                         help_text=_(
-                            "The Ethereum exchange rate in ETH per unit fiat. Leave out if you do not want to accept ETH"
+                            "JSON field with key=<TOKEN_SYMBOL>_RATE and value = amount for each token to be configured"
                         ),
-                        required=False,
-                    ),
-                ),
-                (
-                    "DAI_RATE",
-                    forms.DecimalField(
-                        label=_("DAI rate"),
-                        help_text=_(
-                            "The DAI exchange rate in DAI per unit fiat. Leave out if you do not want to accept DAI"
-                        ),
-                        required=False,
                     ),
                 ),
                 # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works...
@@ -96,18 +85,12 @@ class Ethereum(BasePaymentProvider):
             ]
         )
 
-        form_fields.move_to_end("ETH_RATE", last=True)
-        form_fields.move_to_end("DAI_RATE", last=True)
-
         return form_fields
 
     def is_allowed(self, request, **kwargs):
-        one_or_more_currencies_configured = any(
-            (
-                self.settings.ETH_RATE,
-                self.settings.DAI_RATE,
-            )
-        )
+        one_or_more_currencies_configured = len(json.loads(self.settings.TOKEN_RATE)) > 0
+        # TODO: Check that TOKEN_RATE conforms to a schema.
+
         at_least_one_unused_address = (
             WalletAddress.objects.all().unused().for_event(request.event).exists()
         )
@@ -132,19 +115,11 @@ class Ethereum(BasePaymentProvider):
     @property
     def payment_form_fields(self):
         currency_type_choices = ()
-        network_ids_selected = json.loads(self.settings._NETWORKS)
 
-        if self.settings.DAI_RATE:
-            for network_id in network_ids_selected:
-                currency_type_choices += all_network_ids_to_networks[
-                    network_id
-                ].dai_currency_choice
-        if self.settings.ETH_RATE:
-            for network_id in network_ids_selected:
-                currency_type_choices += all_network_ids_to_networks[
-                    network_id
-                ].eth_currency_choice
-
+        for token in registry:
+            if token.is_allowed(rates=json.loads(self.settings.TOKEN_RATE)):
+                currency_type_choices += token.TOKEN_VERBOSE_NAME_TRANSLATED
+        
         if len(currency_type_choices) == 0:
             raise ImproperlyConfigured("No currencies configured")
 
