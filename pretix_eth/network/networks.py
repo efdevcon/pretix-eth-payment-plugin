@@ -67,7 +67,8 @@ class INetwork(object):
         """
         w3 = Web3(load_provider_from_uri(rpc_url))
         checksum_address = w3.toChecksumAddress(hex_wallet_address)
-        token_contract = w3.eth.contract(abi=TOKEN_ABI, address=self.DAI_ADDRESS)
+        dai_checksum_address = w3.toChecksumAddress(self.DAI_ADDRESS)
+        token_contract = w3.eth.contract(abi=TOKEN_ABI, address=dai_checksum_address)
 
         eth_amount = w3.eth.getBalance(checksum_address)
         token_amount = token_contract.functions.balanceOf(checksum_address).call()
@@ -92,11 +93,10 @@ class Rinkeby(INetwork):
         return evm_like_payment_instructions(
             wallet_address,
             payment_amount,
+            amount_in_ether_or_token,
             currency_type,
             self.DAI_ADDRESS,
-            self.CHAIN_ID,
-            amount_in_ether_or_token,
-            use_uniswap=True,
+            self.CHAIN_ID
         )
 
 
@@ -116,15 +116,14 @@ class L1(INetwork):
         return evm_like_payment_instructions(
             wallet_address,
             payment_amount,
+            amount_in_ether_or_token,
             currency_type,
-            self.DAI_ADDRESS,
-            amount_in_ether_or_token=amount_in_ether_or_token,
-            use_uniswap=True,
+            self.DAI_ADDRESS
         )
 
 
 class KovanOptimism(INetwork):
-    """Implementation for Rinkeby Testnet"""
+    """Implementation for Kovan Optimism Testnet"""
 
     identifier = "KovanOptimism"
     verbose_name = "Kovan Optimism Testnet"
@@ -140,11 +139,10 @@ class KovanOptimism(INetwork):
         return evm_like_payment_instructions(
             wallet_address,
             payment_amount,
+            amount_in_ether_or_token,
             currency_type,
             self.DAI_ADDRESS,
             self.CHAIN_ID,
-            amount_in_ether_or_token,
-            use_uniswap=True,
         )
 
 
