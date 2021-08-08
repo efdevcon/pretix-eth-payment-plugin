@@ -1,4 +1,3 @@
-import decimal
 import logging
 import time
 from collections import OrderedDict
@@ -16,12 +15,15 @@ from pretix.base.models import (
 )
 from pretix.base.payment import BasePaymentProvider
 
-from eth_utils import to_wei, from_wei
+from eth_utils import from_wei
 
 from .models import WalletAddress
 from .network.tokens import (
+    IToken,
     registry,
-    all_network_verbose_names_to_ids
+    all_network_verbose_names_to_ids,
+    all_token_and_network_ids_to_tokens,
+    token_verbose_name_to_token_network_id
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,6 @@ RESERVED_ORDER_DIGITS = 5
 def truncate_wei_value(value: int, digits: int) -> int:
     multiplier = 10 ** digits
     return int(round(value / multiplier) * multiplier)
-
 
 class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
@@ -45,7 +46,7 @@ class Ethereum(BasePaymentProvider):
             list(super().settings_form_fields.items())
             + [
                 (
-                    "TOKEN_RATE",
+                    "TOKEN_RATES",
                     forms.JSONField(
                         label=_("Token Rate"),
                         help_text=_(
@@ -88,8 +89,8 @@ class Ethereum(BasePaymentProvider):
         return form_fields
 
     def is_allowed(self, request, **kwargs):
-        one_or_more_currencies_configured = len(json.loads(self.settings.TOKEN_RATE)) > 0
-        # TODO: Check that TOKEN_RATE conforms to a schema.
+        one_or_more_currencies_configured = len(json.loads(self.settings.TOKEN_RATES)) > 0
+        # TODO: Check that TOKEN_RATES conforms to a schema.
 
         at_least_one_unused_address = (
             WalletAddress.objects.all().unused().for_event(request.event).exists()
@@ -116,8 +117,11 @@ class Ethereum(BasePaymentProvider):
     def payment_form_fields(self):
         currency_type_choices = ()
 
+        rates = json.loads(self.settings.TOKEN_RATES)
+        network_ids = set(json.loads(self.settings._NETWORKS))
+
         for token in registry:
-            if token.is_allowed(rates=json.loads(self.settings.TOKEN_RATE)):
+            if token.is_allowed(rates, network_ids):
                 currency_type_choices += token.TOKEN_VERBOSE_NAME_TRANSLATED
         
         if len(currency_type_choices) == 0:
@@ -150,15 +154,9 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            # currency_info = "ETH-Ethereum Mainnet" or "DAI-ZkSync" etc.
-            currency_info = form.cleaned_data["currency_type"].split("-")
-
-            if not currency_info[1] in all_network_verbose_names_to_ids.keys():
-                return False
-            request.session["payment_currency_type"] = currency_info[0]
-            request.session["payment_network"] = all_network_verbose_names_to_ids[
-                currency_info[1]
-            ]
+            # currency_info = "ETH-Ethereum Mainnet" etc.
+            request.session["payment_currency_type"] = \
+                token_verbose_name_to_token_network_id(form.cleaned_data["currency_type"])
             self._update_session_payment_amount(request, cart["total"])
             return True
 
@@ -169,78 +167,48 @@ class Ethereum(BasePaymentProvider):
 
         if form.is_valid():
             # currency_info = "ETH-Ethereum Mainnet" or "DAI-ZkSync" etc.
-            currency_info = form.cleaned_data["currency_type"].split("-")
-
-            if not currency_info[1] in all_network_verbose_names_to_ids.keys():
-                return False
-            request.session["payment_currency_type"] = currency_info[0]
-            request.session["payment_network"] = all_network_verbose_names_to_ids[
-                currency_info[1]
-            ]
+            request.session["payment_currency_type"] = \
+                token_verbose_name_to_token_network_id(form.cleaned_data["currency_type"])
             self._update_session_payment_amount(request, payment.amount)
             return True
 
         return False
 
     def payment_is_valid_session(self, request):
+        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
         return all(
             (
-                "payment_currency_type" in request.session,
-                "payment_network" in request.session,
+                "payment_currency_type" in request.session, 
                 "payment_time" in request.session,
                 "payment_amount" in request.session,
-                request.session["payment_network"]
-                in all_network_ids_to_networks.keys(),
             )
         )
 
     def _payment_is_valid_info(self, payment: OrderPayment) -> bool:
+        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
         return all(
             (
                 "currency_type" in payment.info_data,
                 "time" in payment.info_data,
                 "amount" in payment.info_data,
-                payment.info_data["currency_type"].split("-")[1]
-                in all_network_ids_to_networks.keys(),
             )
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        # TODO: For now, payment.currency_type = "ETH-L1" instead of separating the network part.
-        currency_type = (
-            request.session["payment_currency_type"]
-            + "-"
-            + request.session["payment_network"]
-        )
-        payment_timestamp = request.session["payment_time"]
-        payment_amount = request.session["payment_amount"]
-
         payment.info_data = {
-            "currency_type": currency_type,
-            "time": payment_timestamp,
-            "amount": payment_amount,
+            "currency_type": request.session["payment_currency_type"],
+            "time": request.session["payment_time"],
+            "amount": request.session["payment_amount"],
         }
         payment.save(update_fields=["info"])
 
-    def _get_final_price(self, total, currency_type):
-        rounding_base = decimal.Decimal("1.00000")
-
-        if currency_type == "ETH":
-            chosen_currency_rate = decimal.Decimal(self.settings.ETH_RATE)
-        elif currency_type == "DAI":
-            chosen_currency_rate = decimal.Decimal(self.settings.DAI_RATE)
-        else:
-            raise ImproperlyConfigured(f"Unrecognized currency type: {currency_type}")
-
-        rounded_price = (total * chosen_currency_rate).quantize(rounding_base)
-        final_price = to_wei(rounded_price, "ether")
-
-        return final_price
-
     def _update_session_payment_amount(self, request: HttpRequest, total):
-        final_price = self._get_final_price(
-            total, request.session["payment_currency_type"]
+        token: IToken = \
+            all_token_and_network_ids_to_tokens[request.session["payment_currency_type"]]
+        final_price = token.get_ticket_price_in_token(
+            total, json.loads(self.settings.TOKEN_RATES)
         )
+
         request.session["payment_amount"] = final_price
         request.session["payment_time"] = int(time.time())
 
@@ -256,22 +224,19 @@ class Ethereum(BasePaymentProvider):
         if not payment_is_valid:
             return template.render(ctx)
 
-        wallet_address = WalletAddress.objects.get_for_order_payment(
-            payment
-        ).hex_address
+        wallet_address = WalletAddress.objects.get_for_order_payment(payment).hex_address
         currency_type = request.session["payment_currency_type"]
         payment_amount = payment.info_data["amount"]
         amount_in_ether_or_token = from_wei(payment_amount, "ether")
 
         # Get payment instructions based on the network type:
-        network_id = request.session["payment_network"]
-        network = all_network_ids_to_networks[network_id]
-        instructions = network.payment_instructions(
-            wallet_address, payment_amount, amount_in_ether_or_token, currency_type
+        token: IToken = all_token_and_network_ids_to_tokens[currency_type]
+        instructions = token.payment_instructions(
+            wallet_address, payment_amount, amount_in_ether_or_token
         )
 
         ctx.update(instructions)
-        ctx["network_name"] = network.verbose_name
+        ctx["network_name"] = token.NETWORK_VERBOSE_NAME
 
         return template.render(ctx)
 
