@@ -13,7 +13,7 @@ from pretix.base.models.event import (
 from pretix_eth.models import (
     WalletAddress,
 )
-from pretix_eth.network.networks import all_network_ids_to_networks
+from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +58,8 @@ class Command(BaseCommand):
             full_id = order_payment.full_id
 
             info = order_payment.info_data
-            currency_info = info["currency_type"].split("-")
-            expected_currency_type = currency_info[0]
-            expected_network_id = currency_info[1]
+            token: IToken = all_token_and_network_ids_to_tokens[info["currency_type"]]
+            expected_network_id = token.NETWORK_IDENTIFIER
             expected_network_rpc_url_key = f"{expected_network_id}_RPC_URL"
             network_rpc_url = None
 
@@ -68,47 +67,23 @@ class Command(BaseCommand):
                 network_rpc_url = rpc_urls[expected_network_rpc_url_key]
             else:
                 # TODO: Give an option for caller to add rpc url at run time.
-                logger.error(f"RPC URL not configured for {expected_network_id}")
+                logger.error(f"RPC URL not configured for {expected_network_id}. Skipping...")
                 continue
 
-            expected_network = all_network_ids_to_networks[expected_network_id]
             expected_amount = info["amount"]
 
-            # Get eth, token balance.
-            eth_amount, token_amount = expected_network.get_currency_balance(
-                hex_address, network_rpc_url
-            )
+            # Get balance.
+            balance = token.get_balance_of_address(hex_address, network_rpc_url)
 
-            if eth_amount > 0 or token_amount > 0:
+            if balance > 0:
                 logger.info(f"Payments found for {full_id} at {hex_address}:")
-
-                if expected_currency_type == "ETH":
-                    if token_amount > 0:
-                        logger.warning(
-                            f"  * Found unexpected payment of {token_amount} DAI"
-                        )
-                    if eth_amount < expected_amount:
-                        logger.warning(
-                            f"  * Expected payment of at least {expected_amount} ETH"
-                        )
-                        logger.warning(f"  * Given payment was {eth_amount} ETH")
-                        logger.warning(f"  * Skipping")  # noqa: F541
-                        continue
-                elif expected_currency_type == "DAI":
-                    if eth_amount > 0:
-                        logger.warning(
-                            f"  * Found unexpected payment of {eth_amount} ETH"
-                        )
-                    if token_amount < expected_amount:
-                        logger.warning(
-                            f"  * Expected payment of at least {expected_amount} DAI"
-                        )  
-                        logger.warning(
-                            f"  * Given payment was {token_amount} DAI"
-                        )  
-                        logger.warning(f"  * Skipping")  # noqa: F541
-                        continue
-
+                if balance < expected_amount:
+                    logger.warning(
+                        f"  * Expected payment of at least {expected_amount} {token.TOKEN_SYMBOL}"
+                    )
+                    logger.warning(f"  * Given payment was {eth_amount} {token.TOKEN_SYMBOL}")
+                    logger.warning(f"  * Skipping")  # noqa: F541
+                    continue
                 if no_dry_run:
                     logger.info(f"  * Confirming order payment {full_id}")
                     with scope(organizer=None):
