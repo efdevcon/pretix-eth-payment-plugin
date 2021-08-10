@@ -50,7 +50,7 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("Token Rate"),
                         help_text=_(
-                            "JSON field with key=<TOKEN_SYMBOL>_RATE and value = amount for each token to be configured"
+                            "JSON field with key=<TOKEN_SYMBOL>_RATE and value = amount for each token to be configured. Value is in USD."
                         ),
                     ),
                 ),
