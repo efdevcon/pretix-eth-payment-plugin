@@ -73,6 +73,17 @@ class IToken(object):
             self.NETWORK_IDENTIFIER in network_ids
         )
 
+    def get_ticket_price_in_token(self, total, rates):
+        if not(self.TOKEN_SYMBOL + "_RATE" in rates):
+            raise ImproperlyConfigured(f"Token Symbol not defined in TOKEN_RATES admin settings: {self.TOKEN_SYMBOL}")
+
+        rounding_base = decimal.Decimal("1.00000")
+        chosen_currency_rate = decimal.Decimal(rates[self.TOKEN_SYMBOL + "_RATE"])
+        rounded_price = (total * chosen_currency_rate).quantize(rounding_base)
+        final_price = to_wei(rounded_price, "ether")
+
+        return final_price
+
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_token_base_unit
     ):
@@ -248,9 +259,44 @@ class DaiL1(L1):
         }
 
 
+class DogeL1(L1):
+    TOKEN_SYMBOL = "DOGE"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
+
+    def payment_instructions(
+        self, wallet_address, payment_amount, amount_in_token_base_unit
+    ):
+        """
+        Instructions for paying DAI on L1. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
+        """
+        erc_681_url = make_erc_681_url(
+            wallet_address, payment_amount, is_token=True, token_address=self.ADDRESS
+        )
+        uniswap_url = make_uniswap_url(
+            self.ADDRESS, wallet_address, amount_in_token_base_unit
+        )
+        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
+        web3modal_url = make_checkout_web3modal_url(
+            self.TOKEN_SYMBOL, amount_in_token_base_unit, wallet_address
+        )
+
+        return {
+            "erc_681_url": erc_681_url,
+            "uniswap_url": uniswap_url,
+            "web3modal_url": web3modal_url,
+            "amount_manual": amount_manual,
+            "wallet_address": wallet_address,
+        }
+
 """ Optimism Kovan Network """
 
-registry = [EthRinkebyL1(), DaiRinkebyL1(), EthL1(), DaiL1()]
+class OptimismKovan(IToken):
+    NETWORK_IDENTIFIER = "OptimismKovan"
+    NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
+    CHAIN_ID = 69
+
+registry = [EthL1(), DaiL1(), EthRinkebyL1(), DaiRinkebyL1(), DogeL1()]
 all_network_verbose_names_to_ids = {}
 for token in registry:
     if not token.NETWORK_VERBOSE_NAME in all_network_verbose_names_to_ids:
