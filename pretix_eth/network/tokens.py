@@ -140,7 +140,7 @@ class L1(IToken):
             token_address=self.ADDRESS,
         )
         uniswap_url = make_uniswap_url(
-            output_currency=self.TOKEN_SYMBOL,
+            output_currency=self.TOKEN_SYMBOL if self.IS_NATIVE_ASSET or self.ADDRESS,
             recipient_address=wallet_address,
             exact_amount=amount_in_token_base_unit,
             input_currency=None,
