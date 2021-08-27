@@ -122,172 +122,94 @@ class IToken(object):
             return token_contract.functions.balanceOf(checksum_address).call()
 
 
-""" Rinkeby L1 Network """
+class L1(IToken):
+    def payment_instructions(
+        self, wallet_address, payment_amount, amount_in_token_base_unit
+    ):
+        """
+        Generic instructions for paying on all L1 networks (eg Rinkeby an Mainnet),
+        both for native tokens and custom tokens.
+
+        Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
+        """
+        erc_681_url = make_erc_681_url(
+            to_address=wallet_address,
+            payment_amount=payment_amount,
+            chain_id=self.CHAIN_ID,
+            is_token=self.IS_NATIVE_ASSET,
+            token_address=self.ADDRESS,
+        )
+        uniswap_url = make_uniswap_url(
+            output_currency=self.TOKEN_SYMBOL if self.IS_NATIVE_ASSET or self.ADDRESS,
+            recipient_address=wallet_address,
+            exact_amount=amount_in_token_base_unit,
+            input_currency=None,
+        )
+        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
+        web3modal_url = make_checkout_web3modal_url(
+            currency_type=self.TOKEN_SYMBOL,
+            amount_in_ether_or_token=amount_in_token_base_unit,
+            wallet_address=wallet_address,
+            chainId=self.CHAIN_ID,
+        )
+
+        return {
+            "erc_681_url": erc_681_url,
+            "uniswap_url": uniswap_url,
+            "web3modal_url": web3modal_url,
+            "amount_manual": amount_manual,
+            "wallet_address": wallet_address,
+        }
 
 
-class RinkebyL1(IToken):
+class EthRinkebyL1(L1):
+    """
+    Ethereum on Rinkeby L1 Network
+    """
+    TOKEN_SYMBOL = "ETH"
     NETWORK_IDENTIFIER = "Rinkeby"
     NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
     CHAIN_ID = 4
 
-
-class EthRinkebyL1(RinkebyL1):
-    TOKEN_SYMBOL = "ETH"
-
-    def payment_instructions(
-        self, wallet_address, payment_amount, amount_in_token_base_unit
-    ):
-        """
-        Instructions for paying ETH on Rinkeby. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
-        """
-        erc_681_url = make_erc_681_url(wallet_address, payment_amount, self.CHAIN_ID)
-        uniswap_url = make_uniswap_url(
-            self.TOKEN_SYMBOL, wallet_address, amount_in_token_base_unit
-        )
-        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
-        web3modal_url = make_checkout_web3modal_url(
-            self.TOKEN_SYMBOL, amount_in_token_base_unit, wallet_address, self.CHAIN_ID
-        )
-
-        return {
-            "erc_681_url": erc_681_url,
-            "uniswap_url": uniswap_url,
-            "web3modal_url": web3modal_url,
-            "amount_manual": amount_manual,
-            "wallet_address": wallet_address,
-        }
-
-
-class DaiRinkebyL1(RinkebyL1):
+class DaiRinkebyL1(L1):
+    """
+    DAI on Rinkeby L1 Network
+    """
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
-
-    def payment_instructions(
-        self, wallet_address, payment_amount, amount_in_token_base_unit
-    ):
-        """
-        Instructions for paying DAI on Rinkeby. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
-        """
-        erc_681_url = make_erc_681_url(
-            wallet_address,
-            payment_amount,
-            self.CHAIN_ID,
-            is_token=True,
-            token_address=self.ADDRESS,
-        )
-        uniswap_url = make_uniswap_url(
-            self.ADDRESS, wallet_address, amount_in_token_base_unit
-        )
-        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
-        web3modal_url = make_checkout_web3modal_url(
-            self.TOKEN_SYMBOL, amount_in_token_base_unit, wallet_address, self.CHAIN_ID
-        )
-
-        return {
-            "erc_681_url": erc_681_url,
-            "uniswap_url": uniswap_url,
-            "web3modal_url": web3modal_url,
-            "amount_manual": amount_manual,
-            "wallet_address": wallet_address,
-        }
-
-
-""" Ethereum L1 Mainnet network """
-
-
-class L1(IToken):
-    NETWORK_IDENTIFIER = "L1"
-    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
-
+    NETWORK_IDENTIFIER = "Rinkeby"
+    NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
+    CHAIN_ID = 4
 
 class EthL1(L1):
+    """
+    Ethereum on Mainnet L1 Network
+    """
     TOKEN_SYMBOL = "ETH"
-
-    def payment_instructions(
-        self, wallet_address, payment_amount, amount_in_token_base_unit
-    ):
-        """
-        Instructions for paying ETH on L1. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
-        """
-        erc_681_url = make_erc_681_url(wallet_address, payment_amount)
-        uniswap_url = make_uniswap_url(
-            self.TOKEN_SYMBOL, wallet_address, amount_in_token_base_unit
-        )
-        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
-        web3modal_url = make_checkout_web3modal_url(
-            self.TOKEN_SYMBOL, amount_in_token_base_unit, wallet_address
-        )
-
-        return {
-            "erc_681_url": erc_681_url,
-            "uniswap_url": uniswap_url,
-            "web3modal_url": web3modal_url,
-            "amount_manual": amount_manual,
-            "wallet_address": wallet_address,
-        }
-
+    NETWORK_IDENTIFIER = "L1"
+    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
+    CHAIN_ID = 1
 
 class DaiL1(L1):
+    """
+    DAI on Mainnet L1 Network
+    """
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
-
-    def payment_instructions(
-        self, wallet_address, payment_amount, amount_in_token_base_unit
-    ):
-        """
-        Instructions for paying DAI on L1. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
-        """
-        erc_681_url = make_erc_681_url(
-            wallet_address, payment_amount, is_token=True, token_address=self.ADDRESS
-        )
-        uniswap_url = make_uniswap_url(
-            self.ADDRESS, wallet_address, amount_in_token_base_unit
-        )
-        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
-        web3modal_url = make_checkout_web3modal_url(
-            self.TOKEN_SYMBOL, amount_in_token_base_unit, wallet_address
-        )
-
-        return {
-            "erc_681_url": erc_681_url,
-            "uniswap_url": uniswap_url,
-            "web3modal_url": web3modal_url,
-            "amount_manual": amount_manual,
-            "wallet_address": wallet_address,
-        }
-
+    NETWORK_IDENTIFIER = "L1"
+    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
+    CHAIN_ID = 1
 
 class DogeL1(L1):
     TOKEN_SYMBOL = "DOGE"
     IS_NATIVE_ASSET = False
     ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
+    NETWORK_IDENTIFIER = "L1"
+    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
+    CHAIN_ID = 1
 
-    def payment_instructions(
-        self, wallet_address, payment_amount, amount_in_token_base_unit
-    ):
-        """
-        Instructions for paying DAI on L1. Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
-        """
-        erc_681_url = make_erc_681_url(
-            wallet_address, payment_amount, is_token=True, token_address=self.ADDRESS
-        )
-        uniswap_url = make_uniswap_url(
-            self.ADDRESS, wallet_address, amount_in_token_base_unit
-        )
-        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
-        web3modal_url = make_checkout_web3modal_url(
-            self.TOKEN_SYMBOL, amount_in_token_base_unit, wallet_address
-        )
-
-        return {
-            "erc_681_url": erc_681_url,
-            "uniswap_url": uniswap_url,
-            "web3modal_url": web3modal_url,
-            "amount_manual": amount_manual,
-            "wallet_address": wallet_address,
-        }
 
 """ Optimism Kovan Network """
 
@@ -295,6 +217,7 @@ class OptimismKovan(IToken):
     NETWORK_IDENTIFIER = "OptimismKovan"
     NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
     CHAIN_ID = 69
+
 
 registry = [EthL1(), DaiL1(), EthRinkebyL1(), DaiRinkebyL1(), DogeL1()]
 all_network_verbose_names_to_ids = {}
