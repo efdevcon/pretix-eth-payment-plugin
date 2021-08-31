@@ -15,7 +15,7 @@ from pretix.base.models import (
 from pretix_eth.models import (
     WalletAddress,
 )
-from pretix_eth.network.networks import all_network_ids_to_networks
+from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +58,8 @@ class Command(BaseCommand):
             full_id = order_refund.full_id
 
             info = order_refund.info_data
-            currency_info = info["currency_type"].split("-")
-            expected_currency_type = currency_info[0]
-            expected_network_id = currency_info[1]
+            token: IToken = all_token_and_network_ids_to_tokens[info["currency_type"]]
+            expected_network_id = token.NETWORK_IDENTIFIER
             expected_network_rpc_url_key = f"{expected_network_id}_RPC_URL"
             network_rpc_url = None
 
@@ -68,22 +67,14 @@ class Command(BaseCommand):
                 network_rpc_url = rpc_urls[expected_network_rpc_url_key]
             else:
                 # TODO: Give an option for caller to add rpc url at run time.
-                logger.error(f"RPC URL not configured for {expected_network_id}")
+                logger.error(f"RPC URL not configured for {expected_network_id}. Skipping...")
                 continue
 
-            expected_network = all_network_ids_to_networks[expected_network_id]
-            expected_amount = info["amount"]
+            # Get balance.
+            balance = token.get_balance_of_address(hex_address, network_rpc_url)
 
-            # Get eth, token balance.
-            eth_amount, token_amount = expected_network.get_currency_balance(
-                hex_address, network_rpc_url
-            )
-
-            if (eth_amount == 0 and expected_currency_type == "ETH") or (
-                token_amount == 0 and expected_currency_type == "DAI"
-            ):
+            if (balance == 0):
                 logger.info(f"Refund found for {full_id} at {hex_address}:")
-
                 if no_dry_run:
                     logger.info(f"  * Confirming refund payment {full_id}")
                     with scope(organizer=None):
