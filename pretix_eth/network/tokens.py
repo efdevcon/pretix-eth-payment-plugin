@@ -57,12 +57,12 @@ class IToken(object):
             )
 
     def _set_other_token_constants(self):
-        self.TOKEN_VERBOSE_NAME = f"{self.TOKEN_SYMBOL}-{self.NETWORK_VERBOSE_NAME}"
+        self.TOKEN_VERBOSE_NAME = f"{self.TOKEN_SYMBOL} - {self.NETWORK_VERBOSE_NAME}"
         self.TOKEN_VERBOSE_NAME_TRANSLATED = (
             (self.TOKEN_VERBOSE_NAME, _(self.TOKEN_VERBOSE_NAME)),
         )
         self.TOKEN_AND_NETWORK_ID_COMBINED = (
-            f"{self.TOKEN_SYMBOL}-{self.NETWORK_IDENTIFIER}"
+            f"{self.TOKEN_SYMBOL} - {self.NETWORK_IDENTIFIER}"
         )
 
     def is_allowed(self, rates: dict, network_ids: set):
@@ -121,13 +121,18 @@ class IToken(object):
             )
             return token_contract.functions.balanceOf(checksum_address).call()
 
+""" L1 Networks """
 
 class L1(IToken):
+    NETWORK_IDENTIFIER = "L1"
+    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
+    CHAIN_ID = 1
+
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_token_base_unit
     ):
         """
-        Generic instructions for paying on all L1 networks (eg Rinkeby an Mainnet),
+        Generic instructions for paying on all L1 networks (eg Rinkeby and Mainnet),
         both for native tokens and custom tokens.
 
         Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
@@ -161,36 +166,34 @@ class L1(IToken):
             "wallet_address": wallet_address,
         }
 
-
-class EthRinkebyL1(L1):
+class RinkebyL1(L1):
     """
-    Ethereum on Rinkeby L1 Network
+    Constants for Rinkeby Ethereum Testnet
     """
-    TOKEN_SYMBOL = "ETH"
     NETWORK_IDENTIFIER = "Rinkeby"
     NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
     CHAIN_ID = 4
 
-class DaiRinkebyL1(L1):
+class EthRinkebyL1(RinkebyL1):
+    """
+    Ethereum on Rinkeby L1 Network
+    """
+    TOKEN_SYMBOL = "ETH"
+    
+class DaiRinkebyL1(RinkebyL1):
     """
     DAI on Rinkeby L1 Network
     """
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
-    NETWORK_IDENTIFIER = "Rinkeby"
-    NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
-    CHAIN_ID = 4
-
+    
 class EthL1(L1):
     """
     Ethereum on Mainnet L1 Network
     """
     TOKEN_SYMBOL = "ETH"
-    NETWORK_IDENTIFIER = "L1"
-    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
-    CHAIN_ID = 1
-
+    
 class DaiL1(L1):
     """
     DAI on Mainnet L1 Network
@@ -198,28 +201,116 @@ class DaiL1(L1):
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
-    NETWORK_IDENTIFIER = "L1"
-    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
-    CHAIN_ID = 1
 
-class DogeL1(L1):
-    TOKEN_SYMBOL = "DOGE"
-    IS_NATIVE_ASSET = False
-    ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
-    NETWORK_IDENTIFIER = "L1"
-    NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
-    CHAIN_ID = 1
+""" Optimism Networks """
 
+class Optimism(L1):
+    """
+    Constants for the Optimism Mainnet
+    """
+    NETWORK_IDENTIFIER = "Optimism"
+    NETWORK_VERBOSE_NAME = "Optimism Mainnet"
+    CHAIN_ID = 10
 
-""" Optimism Kovan Network """
-
-class OptimismKovan(IToken):
-    NETWORK_IDENTIFIER = "OptimismKovan"
+class KovanOptimism(Optimism):
+    """
+    Constants for the Optimism Kovan Testnet
+    """
+    NETWORK_IDENTIFIER = "KovanOptimism"
     NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
     CHAIN_ID = 69
 
+class EthKovanOptimism(KovanOptimism):
+    """
+    Ethereum on Kovan Testnet Optimism Network
+    """
+    TOKEN_SYMBOL = "ETH"
 
-registry = [EthL1(), DaiL1(), EthRinkebyL1(), DaiRinkebyL1(), DogeL1()]
+class DaiKovanOptimism(KovanOptimism):
+    """
+    DAI on Kovan Testnet Optimism Network
+    """
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+
+class EthOptimism(Optimism):
+    """
+    Ethereum on Optimism Mainnet
+    """
+    TOKEN_SYMBOL = "ETH"
+    
+class DaiOptimism(Optimism):
+    """
+    DAI on Optimism Mainnet
+    """
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+    
+""" Arbitrum Networks """
+
+class Arbitrum(L1):
+    """
+    Implementation for Arbitrum networks
+    """
+    NETWORK_IDENTIFIER = "Arbitrum"
+    NETWORK_VERBOSE_NAME = "Arbitrum Mainnet"
+    CHAIN_ID = 42161
+
+    def payment_instructions(
+        self, wallet_address, payment_amount, amount_in_token_base_unit
+    ):
+        """
+        Generic instructions for paying on all Arbitrum networks (eg Rinkeby and Mainnet),
+        both for native tokens and custom tokens.
+
+        Pay via a web3 modal, ERC 681 (QR Code) or manually.
+        """
+        erc_681_url = make_erc_681_url(
+            to_address=wallet_address,
+            payment_amount=payment_amount,
+            chain_id=self.CHAIN_ID,
+            is_token=not self.IS_NATIVE_ASSET,
+            token_address=self.ADDRESS,
+        )
+        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
+        web3modal_url = make_checkout_web3modal_url(
+            currency_type=self.TOKEN_SYMBOL,
+            amount_in_ether_or_token=amount_in_token_base_unit,
+            wallet_address=wallet_address,
+            chainId=self.CHAIN_ID,
+        )
+
+        return {
+            "erc_681_url": erc_681_url,
+            # "uniswap_url": None,
+            "web3modal_url": web3modal_url,
+            "amount_manual": amount_manual,
+            "wallet_address": wallet_address,
+        }
+
+class RinkebyArbitrum(Arbitrum):
+    """
+    Constants for the Optimism Mainnet
+    """
+    NETWORK_IDENTIFIER = "RinkebyArbitrum"
+    NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
+    CHAIN_ID = 421611
+
+class ETHRinkebyArbitrum(RinkebyArbitrum):
+    """
+    Ethereum on Arbitrum Rinkeby Network
+    """
+    TOKEN_SYMBOL = "ETH"
+
+class ETHArbitrum(Arbitrum):
+    """
+    Ethereum on Arbitrum mainnet Network
+    """
+    TOKEN_SYMBOL = "ETH"
+
+registry = [EthL1(), DaiL1(), EthRinkebyL1(), DaiRinkebyL1(), EthOptimism(), DaiOptimism(),EthKovanOptimism(), DaiKovanOptimism(), ETHArbitrum(), ETHRinkebyArbitrum()]
 all_network_verbose_names_to_ids = {}
 for token in registry:
     if not token.NETWORK_VERBOSE_NAME in all_network_verbose_names_to_ids:
