@@ -66,9 +66,29 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
    username `admin@localhost` and password `admin` to log in.
 1. Enter "Admin mode" by clicking the "Admin mode" text in the upper-right
    corner of the admin interface to create a test organization and event.
+1. Follow instructions in [Event Setup Instructions](#event-setup-instructions)
+
+## Event Setup Instructions
 1. Under the event, go to Settings -> Plugins -> Payment Providers -> click on Enable under "Pretix Ethereum Payment Provider" 
-1. Next, under Settings, go to Payments -> "ETH or DAI" -> Settings -> click on "enable payment option". Next, scroll down and set the values for the fields "ETH_RATE" and "DAI_RATE"
-1. Under Event, go to Settings -> Upload Wallet Addresses - upload some ethereum addresses 
+2. Next, under Settings, go to Payments -> "ETH or DAI" -> Settings -> click on "enable payment option". 
+3. Next, scroll down and set the values for the following:
+  - "TOKEN_RATE" - This is a JSON e.g. 
+    ```
+    {"ETH_RATE": 4000, "DAI_RATE": 1}
+    ```
+    i.e. `KEY` = `<CRYPTO_SMBOL>_RATE` and `VALUE` = value of 1 unit in USD. Above example is for 1 ETH = 4000$
+  - Select the networks you want under the "Networks" option - Choose from Ethereum Mainnet, Optimism, Arbitrum and their testnets.
+  - "NETWORK_RPC_URLS" - This is a JSON e.g.
+    ```
+    {
+      "L1_RPC_URL": "https://mainnet.infura.io/v3/somekeyhere",
+      "Rinkeby_RPC_URL": "...",
+      "RinkebyArbitrum_RPC_URL": "..."  
+    }
+    ```
+    i.e. `KEY` = `<Network ID>_RPC_URL` and `VALUE` = RPC URL. Network IDs can be found [in tokens.py](pretix_eth/network/tokens.py)
+4. Under Event, go to Settings -> Upload Wallet Addresses - upload some ethereum addresses 
+
 
 You can now play with the event by clicking on the "Go to Shop" button at the top left (next to the event name)
 
