@@ -120,6 +120,7 @@ def get_order_and_payment(django_db_reset_sequences, event, get_organizer_scope)
             final_payment_kwargs = {
                 'amount': '100.00',
                 'state': OrderPayment.PAYMENT_STATE_PENDING,
+                'provider': 'ethereum'
             }
             if payment_kwargs is not None:
                 final_payment_kwargs.update(payment_kwargs)

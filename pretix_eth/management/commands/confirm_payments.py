@@ -81,7 +81,7 @@ class Command(BaseCommand):
                     logger.warning(
                         f"  * Expected payment of at least {expected_amount} {token.TOKEN_SYMBOL}"
                     )
-                    logger.warning(f"  * Given payment was {eth_amount} {token.TOKEN_SYMBOL}")
+                    logger.warning(f"  * Given payment was {balance} {token.TOKEN_SYMBOL}")
                     logger.warning(f"  * Skipping")  # noqa: F541
                     continue
                 if no_dry_run:

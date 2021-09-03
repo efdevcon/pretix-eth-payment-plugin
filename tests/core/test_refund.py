@@ -32,7 +32,7 @@ def test_refund_created(event, organizer, create_admin_client, get_organizer_sco
 
     order, payment = get_order_and_payment(
         payment_kwargs={'state': OrderPayment.PAYMENT_STATE_CONFIRMED, 'provider': 'ethereum'},
-        info_data={'amount': '100', 'currency_type': 'ETH'}
+        info_data={'amount': '100', 'currency_type': 'ETH - L1'}
     )
 
     WalletAddress.objects.create(event=event,
@@ -51,7 +51,7 @@ def test_refund_created(event, organizer, create_admin_client, get_organizer_sco
         assert refund.payment == payment
         assert refund.state == OrderRefund.REFUND_STATE_CREATED
         assert refund.info_data == {
-            'currency_type': 'ETH',
+            'currency_type': 'ETH - L1',
             'amount': '100',
             'wallet_address': '0x0000000000000000000000000000000000000001',
         }
@@ -76,7 +76,7 @@ def test_refund_wallets_filtered_correctly(event, organizer, create_admin_client
     for _ in range(len(WALLET_ADDRESSES)):
         order, payment = get_order_and_payment(
             payment_kwargs={'state': OrderPayment.PAYMENT_STATE_CONFIRMED, 'provider': 'ethereum'},
-            info_data={'amount': '100', 'currency_type': 'ETH'}
+            info_data={'amount': '100', 'currency_type': 'ETH - L1'}
         )
         WalletAddress.objects.get_for_order_payment(payment)
         make_refund(client, event, order, payment, organizer)
