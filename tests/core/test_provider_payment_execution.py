@@ -5,7 +5,7 @@ from django.test import RequestFactory
 import pytest
 
 def set_right_provider_form_field_settings(provider):
-    provider.settings.set('TOKEN_RATES', {"ETH_RATE": 0.004, "DAI_RATE": 1})
+    provider.settings.set('TOKEN_RATES', {"ETH_RATE": 4000, "DAI_RATE": 1})
     provider.settings.set('_NETWORKS', ["L1"])
     return provider
 

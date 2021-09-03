@@ -4,7 +4,7 @@ import pytest
 
 from pretix_eth.models import WalletAddress
 
-TEST_ETH_RATE = '0.004'
+TEST_ETH_RATE = '4000.0'
 TEST_DAI_RATE = '1.0'
 FORM_FIELDS_SETTINGS = ('TOKEN_RATES', '_NETWORKS', 'NETWORK_RPC_URL')
 
@@ -49,7 +49,7 @@ def test_provider_is_allowed(event, provider):
     assert not provider.is_allowed(request)
 
     # now test with right values:
-    provider.settings.set("TOKEN_RATES", {"ETH_RATE": "0.004"})
+    provider.settings.set("TOKEN_RATES", {"ETH_RATE": TEST_ETH_RATE})
     provider.settings.set("_NETWORKS", ["L1"])
     provider.settings.set("NETWORK_RPC_URL", {"L1_RPC_URL": "https://mainnet.infura.io/v3/somekeyvaluehere"})
     assert provider.is_allowed(request)
