@@ -43,9 +43,9 @@ def test_provider_is_allowed(event, provider):
     )
 
     # test that incorrect settings lead to provider being disallowed.
-    provider.settings.set("TOKEN_RATES", str(dict()))
-    provider.settings.set("_NETWORKS", '[]')
-    provider.settings.set("NETWORK_RPC_URL", str(dict()))
+    provider.settings.set("TOKEN_RATES", dict())
+    provider.settings.set("_NETWORKS", [])
+    provider.settings.set("NETWORK_RPC_URL", dict())
     assert not provider.is_allowed(request)
 
     # now test with right values:

@@ -1,7 +1,6 @@
 import logging
 import time
 from collections import OrderedDict
-import json
 
 from django import forms
 from django.core.exceptions import ImproperlyConfigured
@@ -88,8 +87,13 @@ class Ethereum(BasePaymentProvider):
 
         return form_fields
 
+    def get_token_rates_from_admin_settings(self):
+        return self.settings.get("TOKEN_RATES", as_type=dict, default={})
+    def get_networks_chosen_from_admin_settings(self):
+        return set(self.settings.get("_NETWORKS", as_type=list, default=[]))
+
     def is_allowed(self, request, **kwargs):
-        one_or_more_currencies_configured = len(json.loads(self.settings.TOKEN_RATES)) > 0
+        one_or_more_currencies_configured = len(self.get_token_rates_from_admin_settings()) > 0
         # TODO: Check that TOKEN_RATES conforms to a schema.
 
         at_least_one_unused_address = (
@@ -97,7 +101,7 @@ class Ethereum(BasePaymentProvider):
         )
         at_least_one_network_configured = all(
             (
-                len(json.loads(self.settings._NETWORKS)) > 0,
+                len(self.get_networks_chosen_from_admin_settings()) > 0,
                 # TODO: Check that NETWORK_RPC_URL mappings contain all networks selected
                 # TODO: Check that NETWORK_RPC_URL conforms to a schema
                 len(self.settings.NETWORK_RPC_URL) > 0,
@@ -117,9 +121,9 @@ class Ethereum(BasePaymentProvider):
     def payment_form_fields(self):
         currency_type_choices = ()
 
-        rates = json.loads(self.settings.TOKEN_RATES)
-        network_ids = set(json.loads(self.settings._NETWORKS))
-
+        rates = self.get_token_rates_from_admin_settings()
+        network_ids = self.get_networks_chosen_from_admin_settings()
+        
         for token in registry:
             if token.is_allowed(rates, network_ids):
                 currency_type_choices += token.TOKEN_VERBOSE_NAME_TRANSLATED
