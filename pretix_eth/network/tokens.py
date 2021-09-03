@@ -174,6 +174,14 @@ class RinkebyL1(L1):
     NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
     CHAIN_ID = 4
 
+class GoerliL1(L1):
+    """
+    Constants for Goerli Ethereum Testnet
+    """
+    NETWORK_IDENTIFIER = "Goerli"
+    NETWORK_VERBOSE_NAME = "Goerli Ethereum Testnet"
+    CHAIN_ID = 5
+
 class EthRinkebyL1(RinkebyL1):
     """
     Ethereum on Rinkeby L1 Network
@@ -187,7 +195,21 @@ class DaiRinkebyL1(RinkebyL1):
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
+
+class EthGoerliL1(GoerliL1):
+    """
+    Ethereum on Goerli L1 Network
+    """
+    TOKEN_SYMBOL = "ETH"
     
+class DaiGoerliL1(GoerliL1):
+    """
+    DAI on Goerli L1 Network
+    """
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0x73967c6a0904aa032c103b4104747e88c566b1a2"
+
 class EthL1(L1):
     """
     Ethereum on Mainnet L1 Network
@@ -310,7 +332,7 @@ class ETHArbitrum(Arbitrum):
     """
     TOKEN_SYMBOL = "ETH"
 
-registry = [EthL1(), DaiL1(), EthRinkebyL1(), DaiRinkebyL1(), EthOptimism(), DaiOptimism(),EthKovanOptimism(), DaiKovanOptimism(), ETHArbitrum(), ETHRinkebyArbitrum()]
+registry = [EthL1(), DaiL1(), EthRinkebyL1(), DaiRinkebyL1(), EthGoerliL1(), DaiGoerliL1(), EthOptimism(), DaiOptimism(),EthKovanOptimism(), DaiKovanOptimism(), ETHArbitrum(), ETHRinkebyArbitrum()]
 all_network_verbose_names_to_ids = {}
 for token in registry:
     if not token.NETWORK_VERBOSE_NAME in all_network_verbose_names_to_ids:
