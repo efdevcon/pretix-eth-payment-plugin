@@ -1,4 +1,5 @@
 import logging
+import json
 
 from django.core.management.base import (
     BaseCommand,
@@ -55,6 +56,9 @@ class Command(BaseCommand):
             hex_address = wallet_address.hex_address
 
             order_refund = OrderRefund.objects.get(payment=wallet_address.order_payment)
+            rpc_urls = json.loads(
+                order_refund.payment_provider.settings.NETWORK_RPC_URL
+            )
             full_id = order_refund.full_id
 
             info = order_refund.info_data

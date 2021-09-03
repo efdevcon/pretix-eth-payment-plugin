@@ -18,7 +18,7 @@ hex_addresses = [
 def get_request_and_payment(get_order_and_payment):
     def _create_request_and_payment():
         info_data = {
-            'currency_type': 'ETH',
+            'currency_type': 'ETH - L1',
             'time': int(time.time()),
             'amount': 1
         }
@@ -26,6 +26,11 @@ def get_request_and_payment(get_order_and_payment):
 
         factory = RequestFactory()
         request = factory.get('/checkout')
+        request.session = {
+            "payment_currency_type": "ETH - L1", 
+            "payment_time"         : int(time.time()),
+            "payment_amount"       : 1,
+        }
 
         return request, payment
     return _create_request_and_payment

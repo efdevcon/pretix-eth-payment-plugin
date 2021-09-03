@@ -43,7 +43,7 @@ def create_payment_with_address(get_order_and_payment, event, provider):
                 'provider': 'ethereum'
             },
             info_data={
-                'currency_type': 'ETH',
+                'currency_type': 'ETH - L1',
                 'amount': '100.0'
             },
             hex_address='0x0000000000000000000000000000000000000000'):
@@ -86,7 +86,7 @@ def test_payment_data_present(organizer, event, create_admin_client, create_paym
     file_content = ''.join(str(row) for row in response.streaming_content)
 
     assert '0x0000000000000000000000000000000000000000' in file_content
-    assert 'ETH' in file_content
+    assert 'ETH - L1' in file_content
     assert 'Payment' in file_content
     assert '100.0' in file_content
 
@@ -128,6 +128,6 @@ def test_refund_data_present(organizer, event, create_admin_client,
     file_content = ''.join(str(row) for row in response.streaming_content)
 
     assert 'Refund' in file_content
-    assert 'ETH' in file_content
+    assert 'ETH - L1' in file_content
     assert '0x0000000000000000000000000000000000000000' in file_content
     assert '100.0' in file_content
