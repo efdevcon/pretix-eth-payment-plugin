@@ -49,7 +49,7 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("Token Rate"),
                         help_text=_(
-                            "JSON field with key=<TOKEN_SYMBOL>_RATE and value = amount for a token in USD. E.g. 'ETH_RATE':4000."
+                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in USD. E.g. 'ETH_RATE':4000."
                         ),
                     ),
                 ),
@@ -78,7 +78,7 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("RPC URLs for networks"),
                         help_text=_(
-                            "JSON field with key=<Network name>_RPC_URL and value = RPC URL"
+                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url of the network RPC endpoint you are using"
                         ),
                     ),
                 ),
