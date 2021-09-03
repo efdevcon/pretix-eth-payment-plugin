@@ -79,7 +79,7 @@ class IToken(object):
 
         rounding_base = decimal.Decimal("1.00000")
         chosen_currency_rate = decimal.Decimal(rates[self.TOKEN_SYMBOL + "_RATE"])
-        rounded_price = (total * chosen_currency_rate).quantize(rounding_base)
+        rounded_price = (total / chosen_currency_rate).quantize(rounding_base)
         final_price = to_wei(rounded_price, "ether")
 
         return final_price
