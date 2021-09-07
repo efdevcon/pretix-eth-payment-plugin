@@ -158,7 +158,8 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            # currency_info = "ETH-Ethereum Mainnet" etc.
+            # currency_type = "<token_symbol> - <network verbose name>" etc.
+            # But request.session would store "<token_symbol> - <network id>"
             request.session["payment_currency_type"] = \
                 token_verbose_name_to_token_network_id(form.cleaned_data["currency_type"])
             self._update_session_payment_amount(request, cart["total"])
@@ -170,7 +171,8 @@ class Ethereum(BasePaymentProvider):
         form = self.payment_form(request)
 
         if form.is_valid():
-            # currency_info = "ETH-Ethereum Mainnet" or "DAI-ZkSync" etc.
+            # currency_type = "<token_symbol> - <network verbose name>" etc.
+            # But request.session would store "<token_symbol> - <network id>"
             request.session["payment_currency_type"] = \
                 token_verbose_name_to_token_network_id(form.cleaned_data["currency_type"])
             self._update_session_payment_amount(request, payment.amount)
@@ -210,7 +212,7 @@ class Ethereum(BasePaymentProvider):
         token: IToken = \
             all_token_and_network_ids_to_tokens[request.session["payment_currency_type"]]
         final_price = token.get_ticket_price_in_token(
-            total, json.loads(self.settings.TOKEN_RATES)
+            total, self.get_token_rates_from_admin_settings()
         )
 
         request.session["payment_amount"] = final_price

@@ -100,8 +100,6 @@ actually modifying them.  Here's an example invocation of this command:
 ```bash
 python -mpretix confirm_payments \
     --event-slug=devcon-5 \
-    --token-address=0x6b175474e89094c44da98b954eedeac495271d0f \  # dai address
-    --web3-provider-uri=https://mainnet.infura.io/v3/<project-id> \
     --no-dry-run
 ```
 Above, the `confirm_payments` command uses the `--event-slug` argument to
