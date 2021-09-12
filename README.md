@@ -46,6 +46,7 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
 
 ### Recently added features
 
+* L2s added! 
 * A panel was added in the web admin interface to upload a list of addresses to
   be associated with each ticket order.
 * During the checkout process, an address is chosen for each order from the
@@ -97,28 +98,21 @@ You can now play with the event by clicking on the "Go to Shop" button at the to
 This plugin includes a [django management
 command](https://docs.djangoproject.com/en/2.2/howto/custom-management-commands/#module-django.core.management)
 that can be used to automatically confirm orders from the Ethereum address
-associated with each order.  By default, this command will perform a dry run
+associated with each order across all events. By default, this command will perform a dry run
 which only displays payment records that would be modified and why but without
-actually modifying them.  Here's an example invocation of this command:
+actually modifying them.  
+
+Here's an example invocation of this command:
 ```bash
 python -mpretix confirm_payments \
-    --event-slug=devcon-5 \
     --no-dry-run
 ```
-Above, the `confirm_payments` command uses the `--event-slug` argument to
-determine the list of unconfirmed payments to check (those associated with that
-event).  It then inspects the address that was associated with each order (at
+Note that this doesn't require you to pass any event slug, since it runs for all events at once. It inspects the address that was associated with each order (at
 the time the ticket was reserved) to determine if sufficient payments were made
 for the order.  It may check for an ethereum payment or some kind of token
-payment depending on what was chosen during the checkout process.  Token
-payments will be checked using the given token address provided via the
-`--token-address` CLI flag.  The `--no-dry-run` flag directs the command to
+payment depending on what was chosen during the checkout process. It checks using the RPC URLs that were configured in the admin settings while setting up the event. If no rpc urls were set, then the command gives yet another chance to type in a rpc url (like infura). The `--no-dry-run` flag directs the command to
 update order statuses based on the checks that are performed.  Without this
-flag, the command will only display how records would be modified.  All
-interactions with the blockchain are performed via web3.py and the node
-identified by the web3 provider URI given in by the `--web3-provider-uri` CLI
-flag.  For more information on the format of web3 provider URIs, see
-[here](https://web3py.readthedocs.io/en/stable/providers.html#provider-via-environment-variable).
+flag, the command will only display how records would be modified. 
 
 For more details about the `confirm_payments` command and its options, the
 command may be invoked with `--help`:

@@ -90,7 +90,6 @@ def test_confirm_payment_enough(provider, event, get_request_order_payment, pyte
 
     call_command(
         'confirm_payments',
-        '--event-slug', event.slug,
         '--no-dry-run'
     )
 
@@ -121,7 +120,6 @@ def test_confirm_payment_dry_run(provider, event, get_request_order_payment, pyt
 
     call_command(
         'confirm_payments',
-        '--event-slug', event.slug
     )
 
     for order in orders:
@@ -159,7 +157,6 @@ def test_confirm_payment_lower_amount(provider, event, get_request_order_payment
 
     call_command(
         'confirm_payments',
-        '--event-slug', event.slug,
         '--no-dry-run'
     )
 
@@ -198,7 +195,6 @@ def test_confirm_payment_wrong_currency(provider, event, get_request_order_payme
 
     call_command(
         'confirm_payments',
-        '--event-slug', event.slug,
         '--no-dry-run'
     )
 
