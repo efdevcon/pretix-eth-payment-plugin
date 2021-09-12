@@ -29,11 +29,6 @@ class Command(BaseCommand):
 
     def add_arguments(self, parser):
         parser.add_argument(
-            "-s",
-            "--event-slug",
-            help="The slug of the event for which refunds should be confirmed.",
-        )
-        parser.add_argument(
             "-n",
             "--no-dry-run",
             help="Modify database records to confirm refunds.",
@@ -41,14 +36,16 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
-        slug = options["event_slug"]
         no_dry_run = options["no_dry_run"]
 
-        try:
-            with scope(organizer=None):
-                event = Event.objects.get(slug=slug)
-        except Event.DoesNotExist:
-            raise ValueError(f'Event with slug "{slug}" not found')
+        with scope(organizer=None):
+            events = Event.objects.all()
+
+        for event in events:
+            self.confirm_refunds_for_event(event, no_dry_run)
+
+    def confirm_refunds_for_event(self, event: Event, no_dry_run):
+        logger.info(f"Event name - {event.name}")
 
         unconfirmed_addresses = WalletAddress.objects.all().for_event(event).unconfirmed_refunds()
 
@@ -70,9 +67,9 @@ class Command(BaseCommand):
             if expected_network_rpc_url_key in rpc_urls:
                 network_rpc_url = rpc_urls[expected_network_rpc_url_key]
             else:
-                # TODO: Give an option for caller to add rpc url at run time.
-                logger.error(f"RPC URL not configured for {expected_network_id}. Skipping...")
-                continue
+                network_rpc_url = input(f"No RPC URL configured for {expected_network_id}. Please enter one or hit enter to skip: ")
+                if not network_rpc_url:
+                    continue
 
             # Get balance.
             balance = token.get_balance_of_address(hex_address, network_rpc_url)

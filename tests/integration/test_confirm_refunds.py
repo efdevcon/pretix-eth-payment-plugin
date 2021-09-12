@@ -27,13 +27,13 @@ def check_web3_provider(pytesconfig):
     __tracebackhide__ = True
 
     web3_required = pytesconfig.getoption('--require-web3')
-    if not web3_required:
-        pytest.skip(
-            '--require-web3 flag is not set')
+    # if not web3_required:
+    #     pytest.skip(
+    #         '--require-web3 flag is not set')
 
-    if WEB3_PROVIDER_URI is None:
-        pytest.fail(
-            '--require-web3 flag is set, but WEB3_PROVIDER_URI is None')
+    # if WEB3_PROVIDER_URI is None:
+    #     pytest.fail(
+    #         '--require-web3 flag is set, but WEB3_PROVIDER_URI is None')
 
 
 @pytest.fixture
@@ -131,7 +131,6 @@ def test_confirm_refund_successful(provider, event, get_request_order_payment,
     with scopes_disabled():
         call_command(
             'confirm_refunds',
-            '--event-slug', event.slug,
             '--no-dry-run'
         )
 
@@ -170,7 +169,6 @@ def test_confirm_refund_dry_run(provider, event, get_request_order_payment,
     with scopes_disabled():
         call_command(
             'confirm_refunds',
-            '--event-slug', event.slug,
         )
 
     for payment in payments:
@@ -216,7 +214,6 @@ def test_confirm_refunds_not_refunded_yet(provider, event, get_request_order_pay
     with scopes_disabled():
         call_command(
             'confirm_refunds',
-            '--event-slug', event.slug,
             '--no-dry-run'
         )
 
