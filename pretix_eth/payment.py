@@ -231,7 +231,7 @@ class Ethereum(BasePaymentProvider):
             return template.render(ctx)
 
         wallet_address = WalletAddress.objects.get_for_order_payment(payment).hex_address
-        currency_type = request.session["payment_currency_type"]
+        currency_type = payment.info_data["currency_type"]
         payment_amount = payment.info_data["amount"]
         amount_in_ether_or_token = from_wei(payment_amount, "ether")
 
