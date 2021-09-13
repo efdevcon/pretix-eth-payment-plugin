@@ -64,9 +64,8 @@ class Command(BaseCommand):
             if expected_network_rpc_url_key in rpc_urls:
                 network_rpc_url = rpc_urls[expected_network_rpc_url_key]
             else:
-                network_rpc_url = input(f"No RPC URL configured for {expected_network_id}. Please enter one or hit enter to skip: ")
-                if not network_rpc_url:
-                    continue
+                logger.warning(f"No RPC URL configured for {expected_network_id}. Skipping...")
+                continue
 
             expected_amount = info["amount"]
 
