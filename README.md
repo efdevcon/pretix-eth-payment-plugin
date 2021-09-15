@@ -41,6 +41,8 @@ support. If you want to dig a bit into the problems that emerged short before
 the launch you can have a look at [this
 issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 
+For DEVcon6 the plugin was extended with some more features like [Layer2 support by Rahul](https://github.com/rahul-kothari). Layer2 will play a significant [role in Ethereum](https://ethereum-magicians.org/t/a-rollup-centric-ethereum-roadmap/4698). Unfortunately DEVcon6 was delayed due to covid - but we could test it for [LisCon](https://liscon.org).
+
 ### Recently added features
 
 * A panel was added in the web admin interface to upload a list of addresses to
