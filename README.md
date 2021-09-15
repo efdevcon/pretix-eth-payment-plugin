@@ -42,6 +42,7 @@ the launch you can have a look at [this
 issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 
 For DEVcon6 the plugin was extended with some more features like [Layer2 support by Rahul](https://github.com/rahul-kothari). Layer2 will play a significant [role in Ethereum](https://ethereum-magicians.org/t/a-rollup-centric-ethereum-roadmap/4698). Unfortunately DEVcon6 was delayed due to covid - but we could test it for [LisCon](https://liscon.org).
+In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/) / [Checkout](https://github.com/Web3Modal/web3modal-checkout) that we depend on was improved.
 
 ### Recently added features
 
