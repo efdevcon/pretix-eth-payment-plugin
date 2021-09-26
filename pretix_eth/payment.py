@@ -22,7 +22,7 @@ from .network.tokens import (
     registry,
     all_network_verbose_names_to_ids,
     all_token_and_network_ids_to_tokens,
-    token_verbose_name_to_token_network_id
+    token_verbose_name_to_token_network_id,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +33,7 @@ RESERVED_ORDER_DIGITS = 5
 def truncate_wei_value(value: int, digits: int) -> int:
     multiplier = 10 ** digits
     return int(round(value / multiplier) * multiplier)
+
 
 class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
@@ -49,11 +50,11 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("Token Rate"),
                         help_text=_(
-                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in USD. E.g. 'ETH_RATE':4000."
+                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in USD. E.g. 'ETH_RATE':4000."  # noqa: E501
                         ),
                     ),
                 ),
-                # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works...
+                # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works... # noqa: E501
                 (
                     "_NETWORKS",
                     forms.MultipleChoiceField(
@@ -78,7 +79,7 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("RPC URLs for networks"),
                         help_text=_(
-                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url of the network RPC endpoint you are using"
+                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url of the network RPC endpoint you are using"  # noqa: E501
                         ),
                     ),
                 ),
@@ -89,11 +90,14 @@ class Ethereum(BasePaymentProvider):
 
     def get_token_rates_from_admin_settings(self):
         return self.settings.get("TOKEN_RATES", as_type=dict, default={})
+
     def get_networks_chosen_from_admin_settings(self):
         return set(self.settings.get("_NETWORKS", as_type=list, default=[]))
 
     def is_allowed(self, request, **kwargs):
-        one_or_more_currencies_configured = len(self.get_token_rates_from_admin_settings()) > 0
+        one_or_more_currencies_configured = (
+            len(self.get_token_rates_from_admin_settings()) > 0
+        )
         # TODO: Check that TOKEN_RATES conforms to a schema.
 
         at_least_one_unused_address = (
@@ -123,11 +127,11 @@ class Ethereum(BasePaymentProvider):
 
         rates = self.get_token_rates_from_admin_settings()
         network_ids = self.get_networks_chosen_from_admin_settings()
-        
+
         for token in registry:
             if token.is_allowed(rates, network_ids):
                 currency_type_choices += token.TOKEN_VERBOSE_NAME_TRANSLATED
-        
+
         if len(currency_type_choices) == 0:
             raise ImproperlyConfigured("No currencies configured")
 
@@ -160,8 +164,11 @@ class Ethereum(BasePaymentProvider):
         if form.is_valid():
             # currency_type = "<token_symbol> - <network verbose name>" etc.
             # But request.session would store "<token_symbol> - <network id>"
-            request.session["payment_currency_type"] = \
-                token_verbose_name_to_token_network_id(form.cleaned_data["currency_type"])
+            request.session[
+                "payment_currency_type"
+            ] = token_verbose_name_to_token_network_id(
+                form.cleaned_data["currency_type"]
+            )
             self._update_session_payment_amount(request, cart["total"])
             return True
 
@@ -173,8 +180,11 @@ class Ethereum(BasePaymentProvider):
         if form.is_valid():
             # currency_type = "<token_symbol> - <network verbose name>" etc.
             # But request.session would store "<token_symbol> - <network id>"
-            request.session["payment_currency_type"] = \
-                token_verbose_name_to_token_network_id(form.cleaned_data["currency_type"])
+            request.session[
+                "payment_currency_type"
+            ] = token_verbose_name_to_token_network_id(
+                form.cleaned_data["currency_type"]
+            )
             self._update_session_payment_amount(request, payment.amount)
             return True
 
@@ -184,7 +194,7 @@ class Ethereum(BasePaymentProvider):
         # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
         return all(
             (
-                "payment_currency_type" in request.session, 
+                "payment_currency_type" in request.session,
                 "payment_time" in request.session,
                 "payment_amount" in request.session,
             )
@@ -209,8 +219,9 @@ class Ethereum(BasePaymentProvider):
         payment.save(update_fields=["info"])
 
     def _update_session_payment_amount(self, request: HttpRequest, total):
-        token: IToken = \
-            all_token_and_network_ids_to_tokens[request.session["payment_currency_type"]]
+        token: IToken = all_token_and_network_ids_to_tokens[
+            request.session["payment_currency_type"]
+        ]
         final_price = token.get_ticket_price_in_token(
             total, self.get_token_rates_from_admin_settings()
         )
@@ -230,7 +241,9 @@ class Ethereum(BasePaymentProvider):
         if not payment_is_valid:
             return template.render(ctx)
 
-        wallet_address = WalletAddress.objects.get_for_order_payment(payment).hex_address
+        wallet_address = WalletAddress.objects.get_for_order_payment(
+            payment
+        ).hex_address
         currency_type = payment.info_data["currency_type"]
         payment_amount = payment.info_data["amount"]
         amount_in_ether_or_token = from_wei(payment_amount, "ether")

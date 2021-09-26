@@ -61,7 +61,7 @@ def test_network_creation_when_basic_constants_set():
             testToken.TOKEN_AND_NETWORK_ID_COMBINED
             == testToken.TOKEN_SYMBOL + " - " + testToken.NETWORK_IDENTIFIER
         )
-    except:
+    except Exception:
         pytest.fail("Should not throw an error")
 
 
@@ -74,7 +74,7 @@ def test_token_init_address_and_native_asset_setup():
         ADDRESS = "0xsmth"
         IS_NATIVE_ASSET = True
 
-    with pytest.raises(Exception) as execinfo:
+    with pytest.raises(Exception):
         Test()
 
     # Not native asset but also no token address specified.
@@ -85,7 +85,7 @@ def test_token_init_address_and_native_asset_setup():
         ADDRESS = None
         IS_NATIVE_ASSET = False
 
-    with pytest.raises(Exception) as execinfo:
+    with pytest.raises(Exception):
         Test()
 
 

@@ -44,7 +44,9 @@ class Command(BaseCommand):
     def confirm_payments_for_event(self, event: Event, no_dry_run):
         logger.info(f"Event name - {event.name}")
 
-        unconfirmed_addresses = WalletAddress.objects.all().for_event(event).unconfirmed_orders()
+        unconfirmed_addresses = (
+            WalletAddress.objects.all().for_event(event).unconfirmed_orders()
+        )
 
         for wallet_address in unconfirmed_addresses:
             hex_address = wallet_address.hex_address
@@ -64,7 +66,9 @@ class Command(BaseCommand):
             if expected_network_rpc_url_key in rpc_urls:
                 network_rpc_url = rpc_urls[expected_network_rpc_url_key]
             else:
-                logger.warning(f"No RPC URL configured for {expected_network_id}. Skipping...")
+                logger.warning(
+                    f"No RPC URL configured for {expected_network_id}. Skipping..."
+                )
                 continue
 
             expected_amount = info["amount"]
@@ -78,7 +82,9 @@ class Command(BaseCommand):
                     logger.warning(
                         f"  * Expected payment of at least {expected_amount} {token.TOKEN_SYMBOL}"
                     )
-                    logger.warning(f"  * Given payment was {balance} {token.TOKEN_SYMBOL}")
+                    logger.warning(
+                        f"  * Given payment was {balance} {token.TOKEN_SYMBOL}"
+                    )
                     logger.warning(f"  * Skipping")  # noqa: F541
                     continue
                 if no_dry_run:

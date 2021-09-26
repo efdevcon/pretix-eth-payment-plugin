@@ -67,15 +67,18 @@ class IToken(object):
 
     def is_allowed(self, rates: dict, network_ids: set):
         """
-        1. Check that there is a key of the format TOKEN_SYMBOL_RATE e.g. ETH_RATE defined in the dictionary rates.
+        1. Check that there is a key of the format TOKEN_SYMBOL_RATE
+        e.g. ETH_RATE defined in the dictionary rates.
         2. Check that the network is selected."""
         return (self.TOKEN_SYMBOL + "_RATE" in rates) and (
             self.NETWORK_IDENTIFIER in network_ids
         )
 
     def get_ticket_price_in_token(self, total, rates):
-        if not(self.TOKEN_SYMBOL + "_RATE" in rates):
-            raise ImproperlyConfigured(f"Token Symbol not defined in TOKEN_RATES admin settings: {self.TOKEN_SYMBOL}")
+        if not (self.TOKEN_SYMBOL + "_RATE" in rates):
+            raise ImproperlyConfigured(
+                f"Token Symbol not defined in TOKEN_RATES admin settings: {self.TOKEN_SYMBOL}"
+            )
 
         rounding_base = decimal.Decimal("1.00000")
         chosen_currency_rate = decimal.Decimal(rates[self.TOKEN_SYMBOL + "_RATE"])
@@ -121,7 +124,9 @@ class IToken(object):
             )
             return token_contract.functions.balanceOf(checksum_address).call()
 
+
 """ L1 Networks """
+
 
 class L1(IToken):
     NETWORK_IDENTIFIER = "L1"
@@ -166,116 +171,148 @@ class L1(IToken):
             "wallet_address": wallet_address,
         }
 
+
 class RinkebyL1(L1):
     """
     Constants for Rinkeby Ethereum Testnet
     """
+
     NETWORK_IDENTIFIER = "Rinkeby"
     NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
     CHAIN_ID = 4
+
 
 class GoerliL1(L1):
     """
     Constants for Goerli Ethereum Testnet
     """
+
     NETWORK_IDENTIFIER = "Goerli"
     NETWORK_VERBOSE_NAME = "Goerli Ethereum Testnet"
     CHAIN_ID = 5
+
 
 class EthRinkebyL1(RinkebyL1):
     """
     Ethereum on Rinkeby L1 Network
     """
+
     TOKEN_SYMBOL = "ETH"
-    
+
+
 class DaiRinkebyL1(RinkebyL1):
     """
     DAI on Rinkeby L1 Network
     """
+
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
+
 
 class EthGoerliL1(GoerliL1):
     """
     Ethereum on Goerli L1 Network
     """
+
     TOKEN_SYMBOL = "ETH"
-    
+
+
 class DaiGoerliL1(GoerliL1):
     """
     DAI on Goerli L1 Network
     """
+
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0x73967c6a0904aa032c103b4104747e88c566b1a2"
+
 
 class EthL1(L1):
     """
     Ethereum on Mainnet L1 Network
     """
+
     TOKEN_SYMBOL = "ETH"
-    
+
+
 class DaiL1(L1):
     """
     DAI on Mainnet L1 Network
     """
+
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
 
+
 """ Optimism Networks """
+
 
 class Optimism(L1):
     """
     Constants for the Optimism Mainnet
     """
+
     NETWORK_IDENTIFIER = "Optimism"
     NETWORK_VERBOSE_NAME = "Optimism Mainnet"
     CHAIN_ID = 10
+
 
 class KovanOptimism(Optimism):
     """
     Constants for the Optimism Kovan Testnet
     """
+
     NETWORK_IDENTIFIER = "KovanOptimism"
     NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
     CHAIN_ID = 69
+
 
 class EthKovanOptimism(KovanOptimism):
     """
     Ethereum on Kovan Testnet Optimism Network
     """
+
     TOKEN_SYMBOL = "ETH"
+
 
 class DaiKovanOptimism(KovanOptimism):
     """
     DAI on Kovan Testnet Optimism Network
     """
+
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+
 
 class EthOptimism(Optimism):
     """
     Ethereum on Optimism Mainnet
     """
+
     TOKEN_SYMBOL = "ETH"
-    
+
+
 class DaiOptimism(Optimism):
     """
     DAI on Optimism Mainnet
     """
+
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
-    
+
+
 """ Arbitrum Networks """
+
 
 class Arbitrum(L1):
     """
     Implementation for Arbitrum networks
     """
+
     NETWORK_IDENTIFIER = "Arbitrum"
     NETWORK_VERBOSE_NAME = "Arbitrum Mainnet"
     CHAIN_ID = 42161
@@ -312,30 +349,50 @@ class Arbitrum(L1):
             "wallet_address": wallet_address,
         }
 
+
 class RinkebyArbitrum(Arbitrum):
     """
     Constants for the Optimism Mainnet
     """
+
     NETWORK_IDENTIFIER = "RinkebyArbitrum"
     NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
     CHAIN_ID = 421611
+
 
 class ETHRinkebyArbitrum(RinkebyArbitrum):
     """
     Ethereum on Arbitrum Rinkeby Network
     """
+
     TOKEN_SYMBOL = "ETH"
+
 
 class ETHArbitrum(Arbitrum):
     """
     Ethereum on Arbitrum mainnet Network
     """
+
     TOKEN_SYMBOL = "ETH"
 
-registry = [EthL1(), DaiL1(), EthRinkebyL1(), DaiRinkebyL1(), EthGoerliL1(), DaiGoerliL1(), EthOptimism(), DaiOptimism(),EthKovanOptimism(), DaiKovanOptimism(), ETHArbitrum(), ETHRinkebyArbitrum()]
+
+registry = [
+    EthL1(),
+    DaiL1(),
+    EthRinkebyL1(),
+    DaiRinkebyL1(),
+    EthGoerliL1(),
+    DaiGoerliL1(),
+    EthOptimism(),
+    DaiOptimism(),
+    EthKovanOptimism(),
+    DaiKovanOptimism(),
+    ETHArbitrum(),
+    ETHRinkebyArbitrum(),
+]
 all_network_verbose_names_to_ids = {}
 for token in registry:
-    if not token.NETWORK_VERBOSE_NAME in all_network_verbose_names_to_ids:
+    if token.NETWORK_VERBOSE_NAME not in all_network_verbose_names_to_ids:
         all_network_verbose_names_to_ids[
             token.NETWORK_VERBOSE_NAME
         ] = token.NETWORK_IDENTIFIER
@@ -349,7 +406,7 @@ for token in registry:
 
 def token_verbose_name_to_token_network_id(verbose_name):
     """E.g. "ETH-Ethereum Mainnet" to "ETH-L1". Fails if token not there"""
-    if not verbose_name in all_token_verbose_names_to_tokens:
+    if verbose_name not in all_token_verbose_names_to_tokens:
         raise ValueError(
             f"Token verbose name not registered in registry - {verbose_name}"
         )

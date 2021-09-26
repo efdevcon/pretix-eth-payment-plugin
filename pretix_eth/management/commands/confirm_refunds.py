@@ -47,7 +47,9 @@ class Command(BaseCommand):
     def confirm_refunds_for_event(self, event: Event, no_dry_run):
         logger.info(f"Event name - {event.name}")
 
-        unconfirmed_addresses = WalletAddress.objects.all().for_event(event).unconfirmed_refunds()
+        unconfirmed_addresses = (
+            WalletAddress.objects.all().for_event(event).unconfirmed_refunds()
+        )
 
         for wallet_address in unconfirmed_addresses:
             hex_address = wallet_address.hex_address
@@ -67,13 +69,15 @@ class Command(BaseCommand):
             if expected_network_rpc_url_key in rpc_urls:
                 network_rpc_url = rpc_urls[expected_network_rpc_url_key]
             else:
-                logger.warning(f"No RPC URL configured for {expected_network_id}. Skipping...")
+                logger.warning(
+                    f"No RPC URL configured for {expected_network_id}. Skipping..."
+                )
                 continue
 
             # Get balance.
             balance = token.get_balance_of_address(hex_address, network_rpc_url)
 
-            if (balance == 0):
+            if balance == 0:
                 logger.info(f"Refund found for {full_id} at {hex_address}:")
                 if no_dry_run:
                     logger.info(f"  * Confirming refund payment {full_id}")

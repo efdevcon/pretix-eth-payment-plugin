@@ -3,7 +3,7 @@ def make_erc_681_url(
 ):
     """Make ERC681 URL based on if transferring ETH or a token like DAI and the chain id"""
     if is_token:
-        if token_address == None:
+        if token_address is None:
             raise ValueError(
                 "if is_token is true, then you must pass contract address of the token."
             )
@@ -22,7 +22,7 @@ def make_uniswap_url(
     """
     url = f"https://uniswap.exchange/send?exactField=output&exactAmount={exact_amount}&outputCurrency={output_currency}&recipient={recipient_address}"  # noqa: E501
 
-    if input_currency == None:
+    if input_currency is None:
         return url
 
     # else - swap between a fixed currency to another:
@@ -33,7 +33,8 @@ def make_checkout_web3modal_url(
     currency_type, amount_in_ether_or_token, wallet_address, chainId=1
 ):
     """
-    Build a checkout.web3modal.com link that uses web3modal to create a tx to pay in ETH/DAI on a chain to a certain address.
+    Build a checkout.web3modal.com link that uses web3modal
+    to create a tx to pay in ETH/DAI on a chain to a certain address.
     Note: amount_in_ether_or_token is in decimals.
     """
     if currency_type not in {"ETH", "DAI"}:
