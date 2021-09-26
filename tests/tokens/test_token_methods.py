@@ -3,7 +3,7 @@ import pytest
 from pretix_eth.network.tokens import IToken
 from pretix_eth.network import helpers
 
-# get_ticket_price_in_token, is_allowed, helpers, tokenL1, tokenL2, ativeL1 nativeL2
+
 def create_token():
     class Test(IToken):
         NETWORK_IDENTIFIER = "Test"
@@ -55,7 +55,7 @@ def test_make_erc_681_url_for_token():
     )
     assert (
         erc681_url
-        == f"ethereum:{token_address}@{chain_id}/transfer?address={to_address}&uint256={payment_amount}"
+        == f"ethereum:{token_address}@{chain_id}/transfer?address={to_address}&uint256={payment_amount}"  # noqa: E501
     )
 
 
