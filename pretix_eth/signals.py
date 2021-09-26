@@ -2,12 +2,10 @@ from django.dispatch import receiver
 from django.urls import resolve, reverse
 from django.utils.translation import gettext_lazy as _
 from django.template.loader import get_template
-from django import forms
 
 from pretix.base.middleware import _parse_csp, _merge_csp, _render_csp
 from pretix.presale.signals import (
     html_head,
-    question_form_fields,
     process_response,
 )
 from pretix.base.signals import (
@@ -18,11 +16,6 @@ from pretix.base.signals import (
 
 from pretix.control.signals import nav_event_settings
 from .exporter import EthereumOrdersExporter
-
-
-NFT_QUESTION_IDENTIFIER = 'eth-payment-plugin-nft-address'
-PAYMENT_ETH_INFO_CLASS = 'payment_eth_info'
-PAYMENT_ETH_INFO_NAME = 'payment_eth_info'
 
 
 @receiver(process_response, dispatch_uid="payment_eth_add_question_type_csp")
@@ -56,25 +49,6 @@ def add_question_type_javascript(sender, request, **kwargs):
         'event': sender,
     }
     return template.render(context)
-
-
-@receiver(question_form_fields, dispatch_uid="payment_eth_add_question_type_form_field")
-def mark_question_type(sender, position, **kwargs):
-    questions = sender.questions.filter(identifier=NFT_QUESTION_IDENTIFIER)
-    question_ids = ['id_{p.id}-question_{q.id}'.format(p=position, q=q) for q in questions]
-    payment_eth_info_widget = forms.HiddenInput(attrs={
-        'value': ','.join(question_ids),
-        'class': PAYMENT_ETH_INFO_CLASS,
-    })
-    payment_eth_info_field = forms.CharField(
-        label='Payment ETH Info',
-        max_length=100,
-        widget=payment_eth_info_widget,
-        required=False,
-    )
-    return {
-        PAYMENT_ETH_INFO_NAME: payment_eth_info_field,
-    }
 
 
 @receiver(register_payment_providers, dispatch_uid="payment_eth")
