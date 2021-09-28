@@ -46,7 +46,7 @@ def test_make_erc_681_url_for_native_asset():
 def test_make_erc_681_url_for_token():
     to_address = "0xtest1"
     payment_amount = "10"
-    chain_id = 3
+    chain_id = 1
     is_token = True
     token_address = "0xtoken"
 
@@ -55,7 +55,7 @@ def test_make_erc_681_url_for_token():
     )
     assert (
         erc681_url
-        == f"ethereum:{token_address}@{chain_id}/transfer?address={to_address}&uint256={payment_amount}"  # noqa: E501
+        == f"ethereum:{token_address}/transfer?address={to_address}&uint256={payment_amount}"
     )
 
 

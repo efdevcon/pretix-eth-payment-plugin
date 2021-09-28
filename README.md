@@ -77,7 +77,7 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
     ```
     {"ETH_RATE": 4000, "DAI_RATE": 1}
     ```
-    i.e. `KEY` = `<CRYPTO_SMBOL>_RATE` and `VALUE` = value of 1 unit in USD. Above example is for 1 ETH = 4000$
+    i.e. `KEY` = `<CRYPTO_SMBOL>_RATE` and `VALUE` = value of 1 unit in your fiat currency e.g. USD. For USD, above example says 1 ETH = 4000$
   - Select the networks you want under the "Networks" option - Choose from Ethereum Mainnet, Optimism, Arbitrum and their testnets.
   - "NETWORK_RPC_URLS" - This is a JSON e.g.
     ```

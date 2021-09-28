@@ -153,7 +153,6 @@ class L1(IToken):
             output_currency=self.TOKEN_SYMBOL if self.IS_NATIVE_ASSET else self.ADDRESS,
             recipient_address=wallet_address,
             exact_amount=amount_in_token_base_unit,
-            input_currency=None,
         )
         amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
         web3modal_url = make_checkout_web3modal_url(

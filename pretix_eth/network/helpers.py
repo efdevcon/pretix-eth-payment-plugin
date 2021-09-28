@@ -2,31 +2,34 @@ def make_erc_681_url(
     to_address, payment_amount, chain_id=1, is_token=False, token_address=None
 ):
     """Make ERC681 URL based on if transferring ETH or a token like DAI and the chain id"""
+
+    base_url = "ethereum:"
+    chain_id_formatted_for_url = "" if chain_id == 1 else f"@{chain_id}"
+
     if is_token:
         if token_address is None:
             raise ValueError(
                 "if is_token is true, then you must pass contract address of the token."
             )
 
-        return f"ethereum:{token_address}@{chain_id}/transfer?address={to_address}&uint256={payment_amount}"  # noqa: E501
+        return (
+            base_url
+            + token_address
+            + chain_id_formatted_for_url
+            + f"/transfer?address={to_address}&uint256={payment_amount}"
+        )
     # if ETH (not token)
-    return f"ethereum:{to_address}@{chain_id}?value={payment_amount}"
+    return (
+        base_url + to_address + chain_id_formatted_for_url + f"?value={payment_amount}"
+    )
 
 
-def make_uniswap_url(
-    output_currency, recipient_address, exact_amount, input_currency=None
-):
+def make_uniswap_url(output_currency, recipient_address, exact_amount):
     """
-    Build uniswap url to swap exact_amount of one currency to another and send to a address.
-    Input currency may not be fixed but output_currency must be provided.
+    Build uniswap url to swap exact_amount of one currency to the required output currency
+    and send to a recipient address.
     """
-    url = f"https://uniswap.exchange/send?exactField=output&exactAmount={exact_amount}&outputCurrency={output_currency}&recipient={recipient_address}"  # noqa: E501
-
-    if input_currency is None:
-        return url
-
-    # else - swap between a fixed currency to another:
-    return url + f"&inputCurrency={input_currency}"
+    return f"https://uniswap.exchange/send?exactField=output&exactAmount={exact_amount}&outputCurrency={output_currency}&recipient={recipient_address}"  # noqa: E501
 
 
 def make_checkout_web3modal_url(
