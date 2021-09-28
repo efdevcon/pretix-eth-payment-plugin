@@ -23,8 +23,7 @@ logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = (
-        "Verify pending refunds from on-chain payments.  Performs a dry run "
-        "by default."
+        "Verify pending refunds from on-chain payments. Performs a dry run by default."
     )
 
     def add_arguments(self, parser):

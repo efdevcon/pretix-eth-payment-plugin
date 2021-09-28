@@ -20,8 +20,7 @@ logger = logging.getLogger(__name__)
 
 class Command(BaseCommand):
     help = (
-        "Verify pending orders from on-chain payments.  Performs a dry run "
-        "by default."
+        "Verify pending orders from on-chain payments. Performs a dry run by default."
     )
 
     def add_arguments(self, parser):
