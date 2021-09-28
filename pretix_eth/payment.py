@@ -86,6 +86,7 @@ class Ethereum(BasePaymentProvider):
             ]
         )
 
+        form_fields['_NETWORKS']._as_type = list
         return form_fields
 
     def get_token_rates_from_admin_settings(self):
