@@ -100,10 +100,15 @@ class Ethereum(BasePaymentProvider):
             len(self.get_token_rates_from_admin_settings()) > 0
         )
         # TODO: Check that TOKEN_RATES conforms to a schema.
+        if not one_or_more_currencies_configured:
+            logger.error("No currencies configured")
 
         at_least_one_unused_address = (
             WalletAddress.objects.all().unused().for_event(request.event).exists()
         )
+        if not at_least_one_unused_address:
+            logger.error("No unused wallet addresses left")
+
         at_least_one_network_configured = all(
             (
                 len(self.get_networks_chosen_from_admin_settings()) > 0,
@@ -112,6 +117,8 @@ class Ethereum(BasePaymentProvider):
                 len(self.settings.NETWORK_RPC_URL) > 0,
             )
         )
+        if not at_least_one_network_configured:
+            logger.error("No networks configured")
 
         return all(
             (
