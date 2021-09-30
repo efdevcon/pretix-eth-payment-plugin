@@ -19,8 +19,18 @@ UPLOAD_VALID_DURATION = timedelta(minutes=5)
 
 class WalletAddressUploadView(EventSettingsViewMixin, FormView):
     form_class = forms.WalletAddressUploadForm
-    template_name = 'pretix_eth/wallet_address_upload.html'
-    permission = 'can_change_event_settings'
+    template_name = "pretix_eth/wallet_address_upload.html"
+    permission = "can_change_event_settings"
+
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        existing_unused_addresses = (
+            models.WalletAddress.objects.get_queryset()
+            .unused()
+            .for_event(self.request.event)
+        )
+        ctx["existing_unused_addresses"] = len(existing_unused_addresses)
+        return ctx
 
     def form_valid(self, form):
         file_addresses = form.cleaned_data["wallet_addresses"]
@@ -35,8 +45,8 @@ class WalletAddressUploadView(EventSettingsViewMixin, FormView):
         messages.success(
             self.request,
             _(
-                'Successfully parsed {n} wallet addresses.  '
-                'You have until {expire_time} to confirm your address upload.'
+                "Successfully parsed {n} wallet addresses.  "
+                "You have until {expire_time} to confirm your address upload."
             ).format(
                 n=len(file_addresses.splitlines()),
                 expire_time=NaturalTimeFormatter.string_for(expire_time),
@@ -46,14 +56,19 @@ class WalletAddressUploadView(EventSettingsViewMixin, FormView):
         return super().form_valid(form)
 
     def form_invalid(self, form):
-        messages.error(self.request, _('We could not save your changes. See below for details.'))
+        messages.error(
+            self.request, _("We could not save your changes. See below for details.")
+        )
         return super().form_invalid(form)
 
     def get_success_url(self, **kwargs):
-        return reverse('plugins:pretix_eth:wallet_address_upload_confirm', kwargs={
-            'organizer': self.request.event.organizer.slug,
-            'event': self.request.event.slug,
-        })
+        return reverse(
+            "plugins:pretix_eth:wallet_address_upload_confirm",
+            kwargs={
+                "organizer": self.request.event.organizer.slug,
+                "event": self.request.event.slug,
+            },
+        )
 
 
 class AddressUploadSessionError(Exception):
@@ -64,8 +79,8 @@ class AddressUploadSessionError(Exception):
 
 class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
     form_class = forms.WalletAddressUploadConfirmForm
-    template_name = 'pretix_eth/wallet_address_upload_confirm.html'
-    permission = 'can_change_event_settings'
+    template_name = "pretix_eth/wallet_address_upload_confirm.html"
+    permission = "can_change_event_settings"
 
     def get(self, request, *args, **kwargs):
         try:
@@ -85,8 +100,12 @@ class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
         file_addresses = self.get_file_addresses()
         hex_addresses = file_addresses.splitlines()
         hex_address_set = set(hex_addresses)
-        existing_addresses = models.WalletAddress.objects.filter(hex_address__in=hex_address_set)
-        existing_address_set = set(existing_addresses.values_list("hex_address", flat=True))
+        existing_addresses = models.WalletAddress.objects.filter(
+            hex_address__in=hex_address_set
+        )
+        existing_address_set = set(
+            existing_addresses.values_list("hex_address", flat=True)
+        )
         new_addresses = hex_address_set - existing_address_set
 
         ctx["file_address_count"] = len(hex_addresses)
@@ -104,39 +123,45 @@ class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
         action = form.cleaned_data["action"]
 
         if action == "cancel":
-            messages.info(self.request, _('Wallet address upload cancelled.'))
+            messages.info(self.request, _("Wallet address upload cancelled."))
             return self.clear_and_start_over()
 
         file_addresses = self.get_file_addresses()
         hex_addresses = file_addresses.splitlines()
         hex_address_set = set(hex_addresses)
-        existing_addresses = models.WalletAddress.objects.filter(hex_address__in=hex_address_set)
-        existing_address_set = set(existing_addresses.values_list("hex_address", flat=True))
+        existing_addresses = models.WalletAddress.objects.filter(
+            hex_address__in=hex_address_set
+        )
+        existing_address_set = set(
+            existing_addresses.values_list("hex_address", flat=True)
+        )
         new_addresses = hex_address_set - existing_address_set
 
-        created = models.WalletAddress.objects.bulk_create([
-            models.WalletAddress(
-                hex_address=hex_address,
-                event=self.request.event,
-            )
-            for hex_address in new_addresses
-        ])
+        created = models.WalletAddress.objects.bulk_create(
+            [
+                models.WalletAddress(
+                    hex_address=hex_address,
+                    event=self.request.event,
+                )
+                for hex_address in new_addresses
+            ]
+        )
 
         self.request.event.log_action(
-            'pretix_eth.wallet_address_upload',
+            "pretix_eth.wallet_address_upload",
             user=self.request.user,
             data={
-                'file_addresses': file_addresses,
-                'file_address_count': len(hex_addresses),
-                'unique_address_count': len(hex_address_set),
-                'existing_address_count': existing_addresses.count(),
-                'new_address_count': len(new_addresses),
+                "file_addresses": file_addresses,
+                "file_address_count": len(hex_addresses),
+                "unique_address_count": len(hex_address_set),
+                "existing_address_count": existing_addresses.count(),
+                "new_address_count": len(new_addresses),
             },
         )
 
         messages.success(
             self.request,
-            _('Created {n} new wallet addresses!').format(n=len(created)),
+            _("Created {n} new wallet addresses!").format(n=len(created)),
         )
         return self.clear_and_start_over()
 
@@ -150,7 +175,9 @@ class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
             )
         signer = TimestampSigner()
         try:
-            file_addresses = signer.unsign(signed_file_addresses, max_age=UPLOAD_VALID_DURATION)
+            file_addresses = signer.unsign(
+                signed_file_addresses, max_age=UPLOAD_VALID_DURATION
+            )
         except BadSignature:
             raise AddressUploadSessionError(
                 "session key expired",
@@ -169,15 +196,20 @@ class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
         return redirect(self.get_success_url())
 
     def session_key_expired(self):
-        messages.error(self.request, _('Wallet address upload expired! Please try again.'))
+        messages.error(
+            self.request, _("Wallet address upload expired! Please try again.")
+        )
         return self.clear_and_start_over()
 
     def form_invalid(self, form):
-        messages.error(self.request, _('Unrecognized action. Please try again.'))
+        messages.error(self.request, _("Unrecognized action. Please try again."))
         return self.clear_and_start_over()
 
     def get_success_url(self, **kwargs):
-        return reverse('plugins:pretix_eth:wallet_address_upload', kwargs={
-            'organizer': self.request.event.organizer.slug,
-            'event': self.request.event.slug,
-        })
+        return reverse(
+            "plugins:pretix_eth:wallet_address_upload",
+            kwargs={
+                "organizer": self.request.event.organizer.slug,
+                "event": self.request.event.slug,
+            },
+        )
