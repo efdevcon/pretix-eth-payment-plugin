@@ -23,28 +23,25 @@ def payment_to_row(payment):
     else:
         completion_date = ''
 
-    if payment.info_data['currency_type']:
-        token = payment.info_data['currency_type']
-    else:
-        token = ''
+    token = payment.info_data.get("currency_type", "")
+    fiat_amount = payment.amount
+    token_amount = payment.info_data.get("amount", "")
 
-    if WalletAddress.objects.filter(order_payment=payment).first():
-        wallet_address = WalletAddress.objects.filter(
-            order_payment=payment).first().hex_address
-    else:
-        wallet_address = ''
+    wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
+    hex_wallet_address = wallet_address.hex_address if wallet_address else ""
 
     row = [
-        'Payment',
+        "Payment",
         payment.order.event.slug,
         payment.order.code,
         payment.full_id,
         date_to_string(time_zone, payment.created),
         completion_date,
         payment.state,
-        payment.amount,
+        fiat_amount,
+        token_amount,
         token,
-        wallet_address
+        hex_wallet_address,
     ]
     return row
 
@@ -56,28 +53,25 @@ def refund_to_row(refund):
     else:
         completion_date = ''
 
-    if refund.payment.info_data['currency_type']:
-        token = refund.payment.info_data['currency_type']
-    else:
-        token = ''
+    token = refund.info_data.get("currency_type", "")
+    fiat_amount = refund.amount
+    token_amount = refund.info_data.get("amount", "")
 
-    if WalletAddress.objects.filter(order_payment=refund.payment).first():
-        wallet_address = WalletAddress.objects.filter(
-            order_payment=refund.payment).first().hex_address
-    else:
-        wallet_address = ''
+    wallet_address = WalletAddress.objects.filter(order_payment=refund.payment).first()
+    hex_wallet_address = wallet_address.hex_address if wallet_address else ""
 
     row = [
-        'Refund',
+        "Refund",
         refund.order.event.slug,
         refund.order.code,
         refund.full_id,
         date_to_string(time_zone, refund.created),
         completion_date,
         refund.state,
-        refund.amount,
+        fiat_amount,
+        token_amount,
         token,
-        wallet_address
+        hex_wallet_address,
     ]
     return row
 
