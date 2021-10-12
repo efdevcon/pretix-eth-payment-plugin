@@ -86,7 +86,7 @@ class Ethereum(BasePaymentProvider):
             ]
         )
 
-        form_fields['_NETWORKS']._as_type = list
+        form_fields["_NETWORKS"]._as_type = list
         return form_fields
 
     def get_token_rates_from_admin_settings(self):
@@ -270,9 +270,10 @@ class Ethereum(BasePaymentProvider):
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")
 
-        ctx = {
-            "payment_info": payment.info_data,
-        }
+        wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
+        hex_wallet_address = wallet_address.hex_address if wallet_address else ""
+
+        ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address}
 
         return template.render(ctx)
 
