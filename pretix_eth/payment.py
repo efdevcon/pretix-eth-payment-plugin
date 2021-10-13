@@ -39,6 +39,7 @@ class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
     verbose_name = _("ETH or DAI")
     public_name = _("ETH or DAI")
+    test_mode_message = "Paying in Test Mode"
 
     @property
     def settings_form_fields(self):
