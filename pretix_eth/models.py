@@ -63,6 +63,8 @@ class WalletAddress(models.Model):
     hex_address = models.CharField(max_length=42, unique=True)
 
     event = models.ForeignKey(Event, on_delete=models.PROTECT)
-    order_payment = models.ForeignKey(OrderPayment, on_delete=models.PROTECT, null=True, blank=True)
+    order_payment = models.ForeignKey(
+        OrderPayment, on_delete=models.CASCADE, null=True, blank=True
+    )
 
     objects = WalletAddressManager()
