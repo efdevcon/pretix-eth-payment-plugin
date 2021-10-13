@@ -22,6 +22,16 @@ class WalletAddressUploadView(EventSettingsViewMixin, FormView):
     template_name = 'pretix_eth/wallet_address_upload.html'
     permission = 'can_change_event_settings'
 
+    def get_context_data(self, **kwargs):
+        ctx = super().get_context_data(**kwargs)
+        existing_unused_addresses = (
+            models.WalletAddress.objects.get_queryset()
+            .unused()
+            .for_event(self.request.event)
+        )
+        ctx["existing_unused_addresses"] = len(existing_unused_addresses)
+        return ctx
+
     def form_valid(self, form):
         file_addresses = form.cleaned_data["wallet_addresses"]
 
