@@ -14,8 +14,15 @@ from pretix.base.signals import (
     register_data_exporters,
 )
 
-from pretix.control.signals import nav_event_settings
+from pretix.control.signals import (
+    event_dashboard_widgets,
+    nav_event_settings,
+)
 from .exporter import EthereumOrdersExporter
+from . import models
+
+
+NUM_WIDGET = '<div class="numwidget"><span class="num">{num}</span><span class="text">{text}</span></div>'  # noqa: E501
 
 
 @receiver(process_response, dispatch_uid="payment_eth_add_question_type_csp")
@@ -49,6 +56,30 @@ def add_question_type_javascript(sender, request, **kwargs):
         'event': sender,
     }
     return template.render(context)
+
+
+@receiver(event_dashboard_widgets)
+def address_count_widget(sender, lazy=False, **kwargs):
+    total_address = len(models.WalletAddress.objects.all().for_event(sender))
+    unused_addresses = len(
+        models.WalletAddress.objects.get_queryset().unused().for_event(sender)
+    )
+    used_addresses = total_address - unused_addresses
+    return [
+        {
+            "content": None
+            if lazy
+            else NUM_WIDGET.format(
+                num="{}/{}".format(used_addresses, total_address),
+                text=_("Used/Total Addresses"),
+            ),
+            # value for lazy must be a fixed string.
+            # str(lazy) or any if-else statement won't work.
+            "lazy": "lazy",
+            "display_size": "small",
+            "priority": 100,
+        }
+    ]
 
 
 @receiver(register_payment_providers, dispatch_uid="payment_eth")
