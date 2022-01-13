@@ -1,29 +1,47 @@
+import logging
+import json
+
 from django.dispatch import receiver
 from django.urls import resolve, reverse
 from django.utils.translation import gettext_lazy as _
 from django.template.loader import get_template
+
+from django_scopes import scopes_disabled, scope
 
 from pretix.base.middleware import _parse_csp, _merge_csp, _render_csp
 from pretix.presale.signals import (
     html_head,
     process_response,
 )
+from pretix.base.models.event import Event
 from pretix.base.signals import (
     logentry_display,
     register_payment_providers,
     register_data_exporters,
+    periodic_task,
 )
-
 from pretix.control.signals import (
     event_dashboard_widgets,
     nav_event_settings,
 )
+from pretix.helpers.periodic import minimum_interval
 from .exporter import EthereumOrdersExporter
 from . import models
+from .network.tokens import IToken, all_token_and_network_ids_to_tokens
 
 
 NUM_WIDGET = '<div class="numwidget"><span class="num">{num}</span><span class="text">{text}</span></div>'  # noqa: E501
 
+
+@receiver(periodic_task)
+@scopes_disabled()
+@minimum_interval(minutes_after_success=1)
+def confirm_payments(sender, **kwargs):
+    with scope(organizer=None):
+        events = Event.objects.all()
+
+    for event in events:
+        confirm_payments_for_event(event)
 
 @receiver(process_response, dispatch_uid="payment_eth_add_question_type_csp")
 def signal_process_response(sender, request, response, **kwargs):
@@ -125,3 +143,58 @@ def wallet_address_upload_logentry_display(sender, logentry, **kwargs):
 @receiver(register_data_exporters, dispatch_uid='single_event_eth_orders')
 def register_data_exporter(sender, **kwargs):
     return EthereumOrdersExporter
+
+# helper methods
+logger = logging.getLogger(__name__)
+
+def confirm_payments_for_event(event: Event):
+    logger.info(f"Event name - {event.name}")
+
+    unconfirmed_addresses = (
+        models.WalletAddress.objects.all().for_event(event).unconfirmed_orders()
+    )
+
+    for wallet_address in unconfirmed_addresses:
+        hex_address = wallet_address.hex_address
+
+        order_payment = wallet_address.order_payment
+        rpc_urls = json.loads(
+            order_payment.payment_provider.settings.NETWORK_RPC_URL
+        )
+        full_id = order_payment.full_id
+
+        info = order_payment.info_data
+        token: IToken = all_token_and_network_ids_to_tokens[info["currency_type"]]
+        expected_network_id = token.NETWORK_IDENTIFIER
+        expected_network_rpc_url_key = f"{expected_network_id}_RPC_URL"
+        network_rpc_url = None
+
+        if expected_network_rpc_url_key in rpc_urls:
+            network_rpc_url = rpc_urls[expected_network_rpc_url_key]
+        else:
+            logger.warning(
+                f"No RPC URL configured for {expected_network_id}. Skipping..."
+            )
+            continue
+
+        expected_amount = info["amount"]
+
+        # Get balance.
+        balance = token.get_balance_of_address(hex_address, network_rpc_url)
+
+        if balance > 0:
+            logger.info(f"Payments found for {full_id} at {hex_address}:")
+            if balance < expected_amount:
+                logger.warning(
+                    f"  * Expected payment of at least {expected_amount} {token.TOKEN_SYMBOL}"
+                )
+                logger.warning(
+                    f"  * Given payment was {balance} {token.TOKEN_SYMBOL}"
+                )
+                logger.warning(f"  * Skipping")  # noqa: F541
+                continue
+            logger.info(f"  * Confirming order payment {full_id}")
+            with scope(organizer=None):
+                order_payment.confirm()
+        else:
+            logger.info(f"No payments found for {full_id}")
