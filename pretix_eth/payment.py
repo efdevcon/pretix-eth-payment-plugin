@@ -51,7 +51,7 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("Token Rate"),
                         help_text=_(
-                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in USD. E.g. 'ETH_RATE':4000."  # noqa: E501
+                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in the fiat currency you have chosen. E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."  # noqa: E501
                         ),
                     ),
                 ),
