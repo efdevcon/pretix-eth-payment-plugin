@@ -26,7 +26,7 @@ extras_require = {
         'pytest-django>=3.5,<4',
     ],
     'lint': [
-        'flake8>=3.7,<4',
+        'flake8>=3.7,<5',
         'mypy==0.931',
     ],
     'dev': [
