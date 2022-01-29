@@ -54,7 +54,7 @@ setup(
     install_requires=[
         "pretix>=3.8.0",
         "web3>=5.7.0",
-        "eth-abi>=2.1.1,<3",
+        "eth-abi>=2.1.1,<4",
         "eth-typing>=2.2.1,<4",
         "eth-utils>=1.8.4,<2",
         "eth-hash[pycryptodome]>=0.3.1,<0.4",
