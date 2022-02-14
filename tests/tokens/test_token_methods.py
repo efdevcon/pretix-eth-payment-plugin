@@ -10,6 +10,7 @@ def create_token():
         NETWORK_VERBOSE_NAME = "Test Network"
         TOKEN_SYMBOL = "T"
         CHAIN_ID = 1
+        NETWORK_UNISWAP_NAME = "mainnet"
 
     return Test()
 
@@ -82,11 +83,19 @@ def test_make_erc_681_url_for_L2():
     assert erc681_url == "ethereum:0xtoken@3/transfer?address=0xtest1&uint256=10"
 
 
-def test_uniswap_link():
+def test_uniswap_link_default_chain():
     uniswap_link = helpers.make_uniswap_url("ETH", "0xtest1", 1000)
     assert (
         uniswap_link
         == "https://uniswap.exchange/send?exactField=output&exactAmount=1000&outputCurrency=ETH&recipient=0xtest1"  # noqa: E501
+    )
+
+
+def test_uniswap_link_with_chain_parameter():
+    uniswap_link = helpers.make_uniswap_url("ETH", "0xtest1", 1000, "arbitrum")
+    assert (
+        uniswap_link
+        == "https://uniswap.exchange/send?exactField=output&exactAmount=1000&outputCurrency=ETH&recipient=0xtest1&chain=arbitrum"  # noqa: E501
     )
 
 
