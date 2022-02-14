@@ -332,38 +332,6 @@ class Arbitrum(L1):
     CHAIN_ID = 42161
     NETWORK_UNISWAP_NAME = "arbitrum"
 
-    def payment_instructions(
-        self, wallet_address, payment_amount, amount_in_token_base_unit
-    ):
-        """
-        Generic instructions for paying on all Arbitrum networks (eg Rinkeby and Mainnet),
-        both for native tokens and custom tokens.
-
-        Pay via a web3 modal, ERC 681 (QR Code) or manually.
-        """
-        erc_681_url = make_erc_681_url(
-            to_address=wallet_address,
-            payment_amount=payment_amount,
-            chain_id=self.CHAIN_ID,
-            is_token=not self.IS_NATIVE_ASSET,
-            token_address=self.ADDRESS,
-        )
-        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
-        web3modal_url = make_checkout_web3modal_url(
-            currency_type=self.TOKEN_SYMBOL,
-            amount_in_ether_or_token=amount_in_token_base_unit,
-            wallet_address=wallet_address,
-            chainId=self.CHAIN_ID,
-        )
-
-        return {
-            "erc_681_url": erc_681_url,
-            # "uniswap_url": None,
-            "web3modal_url": web3modal_url,
-            "amount_manual": amount_manual,
-            "wallet_address": wallet_address,
-        }
-
 
 class RinkebyArbitrum(Arbitrum):
     """
