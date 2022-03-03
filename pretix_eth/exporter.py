@@ -10,6 +10,7 @@ from pretix.base.models import (
 from pretix_eth.models import WalletAddress
 
 import pytz
+import json
 
 
 def date_to_string(time_zone, date):
@@ -24,8 +25,14 @@ def payment_to_row(payment):
         completion_date = ''
 
     token = payment.info_data.get("currency_type", "")
+    # token = "DAI-L1". Get "DAI" (token_currency_name) so it can be used to get fiat_rate
+    token_currency_name = token.split("-")[0].strip()
     fiat_amount = payment.amount
     token_amount = payment.info_data.get("amount", "")
+    token_rates = json.loads(payment.payment_provider.settings.TOKEN_RATES)
+    # show the fiat to token price conversion  
+    # set by event admin at the time of the order. eg fiat_rate=1$ or 4000$ etc.
+    fiat_rate = token_rates.get(f"{token_currency_name}_RATE")
 
     wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
     hex_wallet_address = wallet_address.hex_address if wallet_address else ""
@@ -41,6 +48,7 @@ def payment_to_row(payment):
         fiat_amount,
         token_amount,
         token,
+        fiat_rate,
         hex_wallet_address,
     ]
     return row
@@ -54,8 +62,14 @@ def refund_to_row(refund):
         completion_date = ''
 
     token = refund.info_data.get("currency_type", "")
+    # token = "DAI-L1". Get "DAI" (token_currency_name) so it can be used to get fiat_rate
+    token_currency_name = token.split("-")[0].strip()
     fiat_amount = refund.amount
     token_amount = refund.info_data.get("amount", "")
+    token_rates = json.loads(refund.payment_provider.settings.TOKEN_RATES)
+    # show the fiat to token price conversion  
+    # set by event admin at the time of the order. eg fiat_rate=1$ or 4000$ etc.
+    fiat_rate = token_rates.get(token_currency_name+"_RATE")
 
     wallet_address = WalletAddress.objects.filter(order_payment=refund.payment).first()
     hex_wallet_address = wallet_address.hex_address if wallet_address else ""
@@ -71,6 +85,7 @@ def refund_to_row(refund):
         fiat_amount,
         token_amount,
         token,
+        fiat_rate,
         hex_wallet_address,
     ]
     return row
@@ -82,7 +97,8 @@ class EthereumOrdersExporter(ListExporter):
 
     headers = (
         'Type', 'Event slug', 'Order', 'Payment ID', 'Creation date',
-        'Completion date', 'Status', 'Amount', 'Token', 'Wallet address'
+        'Completion date', 'Status', 'Fiat Amount', 'Token Amount', 
+        'Token Name', 'Token Rate in Fiat', 'Wallet address'
     )
 
     @property
