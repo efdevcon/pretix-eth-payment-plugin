@@ -375,6 +375,16 @@ class ETHArbitrum(Arbitrum):
     TOKEN_SYMBOL = "ETH"
 
 
+class DaiArbitrum(Arbitrum):
+    """
+    DAI on Arbitrum Mainnet
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+
+
 registry = [
     EthL1(),
     DaiL1(),
@@ -388,6 +398,7 @@ registry = [
     DaiKovanOptimism(),
     ETHArbitrum(),
     ETHRinkebyArbitrum(),
+    DaiArbitrum(),
 ]
 all_network_verbose_names_to_ids = {}
 for token in registry:
