@@ -46,12 +46,12 @@ class IToken(object):
         self._set_other_token_constants()
 
     def _validate_class_variables(self):
-        if not (
-            self.NETWORK_IDENTIFIER
-            and self.NETWORK_VERBOSE_NAME
-            and self.NETWORK_UNISWAP_NAME
-            and self.TOKEN_SYMBOL
-        ):
+        if not all([
+            self.NETWORK_IDENTIFIER,
+            self.NETWORK_VERBOSE_NAME,
+            self.NETWORK_UNISWAP_NAME,
+            self.TOKEN_SYMBOL
+        ]):
             raise ValueError(
                 "Please provide network_identifier, verbose name, "
                 + "uniswap url name, token symbol for this class"
