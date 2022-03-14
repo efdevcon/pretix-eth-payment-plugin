@@ -60,7 +60,7 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
 1. Clone this repository, e.g. to `local/pretix-eth-payment-plugin`.
 1. Create and activate a virtual environment.
 1. Execute `pip install -e .[dev]` within the `pretix-eth-payment-plugin` repo
-   directory.
+   directory. If pip install takes too long, run it with `--use-deprecated=legacy-resolver`.
 1. Setup a local database by running `make devmigrate`.
 1. Fire up a local dev server by running `make devserver`.
 1. Visit http://localhost:8000/control/login in a browser windows and enter
