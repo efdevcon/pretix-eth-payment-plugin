@@ -8,10 +8,10 @@ jobs:
     strategy:
       matrix:
         include:
-          - python-version: 3.6
-            toxenv: py36-core
-          - python-version: 3.6
-            toxenv: py36-integration
+          #- python-version: 3.6
+          #  toxenv: py36-core
+          #- python-version: 3.6
+          #  toxenv: py36-integration
           - python-version: 3.7
             toxenv: py37-core
           - python-version: 3.7
