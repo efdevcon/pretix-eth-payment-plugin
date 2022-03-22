@@ -62,7 +62,7 @@ setup(
         # requests gets its act together.
         "urllib3<1.27.0",
     ],
-    python_requires='>=3.6, <4',
+    python_requires='>=3.7, <4',
     extras_require=extras_require,
     packages=find_packages(exclude=['tests', 'tests.*']),
     include_package_data=True,
