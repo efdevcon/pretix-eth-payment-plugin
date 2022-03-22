@@ -69,5 +69,6 @@ data/
 
 # Editor / IDE
 .vscode
+/.idea
 
 venv
