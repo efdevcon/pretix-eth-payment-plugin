@@ -36,7 +36,7 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         python -m pip install --upgrade pip wheel setuptools
-        pip install -e .[dev] --use-deprecated=legacy-resolver
+        pip install -e .[dev]
 
     - name: ${{ matrix.toxenv }}
       run: tox 
