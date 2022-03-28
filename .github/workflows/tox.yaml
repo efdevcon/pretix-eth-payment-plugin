@@ -38,6 +38,9 @@ jobs:
         python -m pip install --upgrade pip wheel setuptools
         pip install -e .[dev]
 
+    - name: Pip Check
+      run: pip check
+
     - name: ${{ matrix.toxenv }}
       run: tox 
       env: 
