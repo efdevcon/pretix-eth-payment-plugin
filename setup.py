@@ -54,9 +54,9 @@ setup(
     install_requires=[
         "pretix>=3.8.0",
         "web3>=5.7.0",
-        "eth-abi>=2.1.1,<4",
-        "eth-typing>=2.2.1,<4",
-        "eth-utils>=1.8.4,<3",
+        "eth-abi>=2.1.1,<3",
+        "eth-typing>=2.2.1,<3",
+        "eth-utils>=1.8.4,<2",
         "eth-hash[pycryptodome]>=0.3.1,<0.4",
         # Requests requires urllib3 <1.26.0.  Can delete this later after
         # requests gets its act together.
