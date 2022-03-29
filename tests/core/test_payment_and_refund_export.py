@@ -19,6 +19,10 @@ def test_headers_are_present(organizer, event, create_admin_client):
         "Creation date",
         "Completion date",
         "Status",
+        "Fiat Amount",
+        "Token Amount",
+        "Token Name",
+        "Token Rate in Fiat",
         "Amount",
         "Token",
         "Wallet address",
@@ -51,7 +55,11 @@ def create_payment_with_address(get_order_and_payment, event, provider):
             "amount": "100.0",
             "provider": "ethereum",
         },
-        info_data={"currency_type": "ETH - L1", "amount": "100.0"},
+        info_data={
+            "currency_type": "ETH - L1",
+            "amount": "100.0",
+            "token_rates": {"ETH_RATE": 3000},
+        },
         hex_address="0x0000000000000000000000000000000000000000",
     ):
 

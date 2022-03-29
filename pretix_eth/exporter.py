@@ -10,7 +10,6 @@ from pretix.base.models import (
 from pretix_eth.models import WalletAddress
 
 import pytz
-import json
 
 
 def date_to_string(time_zone, date):
@@ -29,10 +28,13 @@ def payment_to_row(payment):
     token_currency_name = token.split("-")[0].strip()
     fiat_amount = payment.amount
     token_amount = payment.info_data.get("amount", "")
-    token_rates = json.loads(payment.payment_provider.settings.TOKEN_RATES)
-    # show the fiat to token price conversion  
-    # set by event admin at the time of the order. eg fiat_rate=1$ or 4000$ etc.
-    fiat_rate = token_rates.get(f"{token_currency_name}_RATE")
+
+    # Show fiat to token price conversion on exports.
+    # get token rates from order.info_data. But default to admin settings (if info not present)
+    token_rates = payment.info_data.get("token_rates", {})
+    fiat_rate = token_rates.get(
+        f"{token_currency_name}_RATE", "Error fetching from order data"
+    )
 
     wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
     hex_wallet_address = wallet_address.hex_address if wallet_address else ""
@@ -66,10 +68,13 @@ def refund_to_row(refund):
     token_currency_name = token.split("-")[0].strip()
     fiat_amount = refund.amount
     token_amount = refund.info_data.get("amount", "")
-    token_rates = json.loads(refund.payment_provider.settings.TOKEN_RATES)
-    # show the fiat to token price conversion  
-    # set by event admin at the time of the order. eg fiat_rate=1$ or 4000$ etc.
-    fiat_rate = token_rates.get(token_currency_name+"_RATE")
+
+    # Show fiat to token price conversion on exports.
+    # get token rates from refund.info. But default to admin settings (if info not present)
+    token_rates = refund.info_data.get("token_rates", {})
+    fiat_rate = token_rates.get(
+        f"{token_currency_name}_RATE", "Error fetching from order data"
+    )
 
     wallet_address = WalletAddress.objects.filter(order_payment=refund.payment).first()
     hex_wallet_address = wallet_address.hex_address if wallet_address else ""
@@ -97,7 +102,7 @@ class EthereumOrdersExporter(ListExporter):
 
     headers = (
         'Type', 'Event slug', 'Order', 'Payment ID', 'Creation date',
-        'Completion date', 'Status', 'Fiat Amount', 'Token Amount', 
+        'Completion date', 'Status', 'Fiat Amount', 'Token Amount',
         'Token Name', 'Token Rate in Fiat', 'Wallet address'
     )
 
