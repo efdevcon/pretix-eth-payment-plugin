@@ -16,6 +16,10 @@ jobs:
             toxenv: py38-core
           - python-version: 3.8
             toxenv: py38-integration
+          - python-version: 3.9
+            toxenv: py39-core
+          - python-version: 3.9
+            toxenv: py39-integration
           - python-version: 3.8
             toxenv: lint
           
