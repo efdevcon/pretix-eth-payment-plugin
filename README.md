@@ -71,7 +71,7 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
 
 ## Event Setup Instructions
 1. Under the event, go to Settings -> Plugins -> Payment Providers -> click on Enable under "Pretix Ethereum Payment Provider" 
-2. Next, under Settings, go to Payments -> "ETH or DAI" -> Settings -> click on "enable payment option". 
+2. Next, under Settings, go to Payments -> "ETH or DAI" -> Settings -> click on "enable payment method". 
 3. Next, scroll down and set the values for the following:
   - "TOKEN_RATE" - This is a JSON e.g. 
     ```
