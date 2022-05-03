@@ -12,11 +12,11 @@ def assert_error_when_init_variables_not_passed(Test: IToken):
         Test()
     assert (
         execinfo.value.args[0]
-        == "Please provide network_identifier, verbose name, token symbol for this class"
+        == "Please provide network_identifier, verbose name, uniswap url name, token symbol for this class"  # noqa: E501
     )
 
 
-def test_error_if_no_network_constants_not_set():
+def test_error_if_no_network_constants_set():
     class Test(IToken):
         pass
 
@@ -24,23 +24,31 @@ def test_error_if_no_network_constants_not_set():
 
 
 def test_error_if_some_network_constants_not_set():
-    # Network ID, but no network verbose name, token symbol
+    # Network ID, but no network verbose name, token symbol, uniswap network name
     class Test(IToken):
         NETWORK_IDENTIFIER = "Test"
 
     assert_error_when_init_variables_not_passed(Test)
 
-    # Network ID and token symbol but no network verbose name,
+    # Network ID and token symbol but no network verbose name, uniswap network name
     class Test(IToken):
         NETWORK_IDENTIFIER = "Test"
         TOKEN_SYMBOL = "T"
 
     assert_error_when_init_variables_not_passed(Test)
 
-    # Network ID and network verbose name, but no token symbol
+    # Network ID and network verbose name, but no token symbol, uniswap network name
     class Test(IToken):
         NETWORK_IDENTIFIER = "Test"
         NETWORK_VERBOSE_NAME = "Test Network"
+
+    assert_error_when_init_variables_not_passed(Test)
+
+    # Network ID, network verbose name and token symbol, but no uniswap network name
+    class Test(IToken):
+        NETWORK_IDENTIFIER = "Test"
+        NETWORK_VERBOSE_NAME = "Test Network"
+        TOKEN_SYMBOL = "T"
 
     assert_error_when_init_variables_not_passed(Test)
 
@@ -50,6 +58,7 @@ def test_network_creation_when_basic_constants_set():
         NETWORK_IDENTIFIER = "Test"
         NETWORK_VERBOSE_NAME = "Test Network"
         TOKEN_SYMBOL = "T"
+        NETWORK_UNISWAP_NAME = "test"
 
     try:
         testToken = Test()

@@ -28,6 +28,11 @@ TOKEN_ABI = [
 class IToken(object):
     NETWORK_IDENTIFIER = None  # E.g. "L1"
     NETWORK_VERBOSE_NAME = None  # E.g. "Ethereum Mainnet"
+    NETWORK_UNISWAP_NAME = None
+    # ^ this is the url param in uniswap url to identify the network
+    # can find this name here:
+    # https://github.com/Uniswap/interface/blob/main/src/constants/chains.ts#L21
+
     TOKEN_SYMBOL = None  # E.g. "ETH"
     TOKEN_VERBOSE_NAME = None  # {TOKEN_SYMBOL}-{NETWORK_VERBOSE_NAME}
     TOKEN_VERBOSE_NAME_TRANSLATED = None  # using django translation module
@@ -41,11 +46,15 @@ class IToken(object):
         self._set_other_token_constants()
 
     def _validate_class_variables(self):
-        if not (
-            self.NETWORK_IDENTIFIER and self.NETWORK_VERBOSE_NAME and self.TOKEN_SYMBOL
-        ):
+        if not all([
+            self.NETWORK_IDENTIFIER,
+            self.NETWORK_VERBOSE_NAME,
+            self.NETWORK_UNISWAP_NAME,
+            self.TOKEN_SYMBOL
+        ]):
             raise ValueError(
-                "Please provide network_identifier, verbose name, token symbol for this class"
+                "Please provide network_identifier, verbose name, "
+                + "uniswap url name, token symbol for this class"
             )
         if not self.IS_NATIVE_ASSET and not self.ADDRESS:
             raise ValueError(
@@ -132,6 +141,7 @@ class L1(IToken):
     NETWORK_IDENTIFIER = "L1"
     NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
     CHAIN_ID = 1
+    NETWORK_UNISWAP_NAME = "mainnet"
 
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_token_base_unit
@@ -153,6 +163,7 @@ class L1(IToken):
             output_currency=self.TOKEN_SYMBOL if self.IS_NATIVE_ASSET else self.ADDRESS,
             recipient_address=wallet_address,
             exact_amount=amount_in_token_base_unit,
+            network_name=self.NETWORK_UNISWAP_NAME,
         )
         amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
         web3modal_url = make_checkout_web3modal_url(
@@ -179,6 +190,7 @@ class RinkebyL1(L1):
     NETWORK_IDENTIFIER = "Rinkeby"
     NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
     CHAIN_ID = 4
+    NETWORK_UNISWAP_NAME = "rinkeby"
 
 
 class GoerliL1(L1):
@@ -189,6 +201,7 @@ class GoerliL1(L1):
     NETWORK_IDENTIFIER = "Goerli"
     NETWORK_VERBOSE_NAME = "Goerli Ethereum Testnet"
     CHAIN_ID = 5
+    NETWORK_UNISWAP_NAME = "goerli"
 
 
 class EthRinkebyL1(RinkebyL1):
@@ -256,6 +269,7 @@ class Optimism(L1):
     NETWORK_IDENTIFIER = "Optimism"
     NETWORK_VERBOSE_NAME = "Optimism Mainnet"
     CHAIN_ID = 10
+    NETWORK_UNISWAP_NAME = "optimism"
 
 
 class KovanOptimism(Optimism):
@@ -266,6 +280,7 @@ class KovanOptimism(Optimism):
     NETWORK_IDENTIFIER = "KovanOptimism"
     NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
     CHAIN_ID = 69
+    NETWORK_UNISWAP_NAME = "optimistic_kovan"
 
 
 class EthKovanOptimism(KovanOptimism):
@@ -315,38 +330,7 @@ class Arbitrum(L1):
     NETWORK_IDENTIFIER = "Arbitrum"
     NETWORK_VERBOSE_NAME = "Arbitrum Mainnet"
     CHAIN_ID = 42161
-
-    def payment_instructions(
-        self, wallet_address, payment_amount, amount_in_token_base_unit
-    ):
-        """
-        Generic instructions for paying on all Arbitrum networks (eg Rinkeby and Mainnet),
-        both for native tokens and custom tokens.
-
-        Pay via a web3 modal, ERC 681 (QR Code) or manually.
-        """
-        erc_681_url = make_erc_681_url(
-            to_address=wallet_address,
-            payment_amount=payment_amount,
-            chain_id=self.CHAIN_ID,
-            is_token=not self.IS_NATIVE_ASSET,
-            token_address=self.ADDRESS,
-        )
-        amount_manual = f"{amount_in_token_base_unit} {self.TOKEN_SYMBOL}"
-        web3modal_url = make_checkout_web3modal_url(
-            currency_type=self.TOKEN_SYMBOL,
-            amount_in_ether_or_token=amount_in_token_base_unit,
-            wallet_address=wallet_address,
-            chainId=self.CHAIN_ID,
-        )
-
-        return {
-            "erc_681_url": erc_681_url,
-            # "uniswap_url": None,
-            "web3modal_url": web3modal_url,
-            "amount_manual": amount_manual,
-            "wallet_address": wallet_address,
-        }
+    NETWORK_UNISWAP_NAME = "arbitrum"
 
 
 class RinkebyArbitrum(Arbitrum):
@@ -357,6 +341,7 @@ class RinkebyArbitrum(Arbitrum):
     NETWORK_IDENTIFIER = "RinkebyArbitrum"
     NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
     CHAIN_ID = 421611
+    NETWORK_UNISWAP_NAME = "arbitrum_rinkeby"
 
 
 class ETHRinkebyArbitrum(RinkebyArbitrum):

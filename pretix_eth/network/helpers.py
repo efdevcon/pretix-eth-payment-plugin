@@ -24,12 +24,17 @@ def make_erc_681_url(
     )
 
 
-def make_uniswap_url(output_currency, recipient_address, exact_amount):
+def make_uniswap_url(output_currency, recipient_address, exact_amount, network_name=""):
     """
     Build uniswap url to swap exact_amount of one currency to the required output currency
     and send to a recipient address.
     """
-    return f"https://uniswap.exchange/send?exactField=output&exactAmount={exact_amount}&outputCurrency={output_currency}&recipient={recipient_address}"  # noqa: E501
+    uniswap_link = f"https://uniswap.exchange/send?exactField=output&exactAmount={exact_amount}&outputCurrency={output_currency}&recipient={recipient_address}"  # noqa: E501
+
+    if not network_name == "":
+        uniswap_link += f"&chain={network_name}"
+
+    return uniswap_link
 
 
 def make_checkout_web3modal_url(
