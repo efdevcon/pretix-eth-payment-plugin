@@ -17,7 +17,12 @@ hex_addresses = [
 @pytest.fixture
 def get_request_and_payment(get_order_and_payment):
     def _create_request_and_payment():
-        info_data = {"currency_type": "ETH - L1", "time": int(time.time()), "amount": 1}
+        info_data = {
+            "currency_type": "ETH - L1",
+            "time": int(time.time()),
+            "amount": 1,
+            "token_rates": {"ETH_RATE": 3000},
+        }
         _, payment = get_order_and_payment(info_data=info_data)
 
         factory = RequestFactory()

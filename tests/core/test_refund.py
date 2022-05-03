@@ -33,7 +33,7 @@ def test_refund_created(
             "state": OrderPayment.PAYMENT_STATE_CONFIRMED,
             "provider": "ethereum",
         },
-        info_data={"amount": "100", "currency_type": "ETH - L1"},
+        info_data={"amount": "100", "currency_type": "ETH - L1", "token_rates": {}},
     )
 
     WalletAddress.objects.create(
@@ -56,6 +56,7 @@ def test_refund_created(
             "currency_type": "ETH - L1",
             "amount": "100",
             "wallet_address": "0x0000000000000000000000000000000000000001",
+            "token_rates": {},
         }
 
 

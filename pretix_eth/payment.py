@@ -216,6 +216,7 @@ class Ethereum(BasePaymentProvider):
                 "currency_type" in payment.info_data,
                 "time" in payment.info_data,
                 "amount" in payment.info_data,
+                "token_rates" in payment.info_data,
             )
         )
 
@@ -224,6 +225,7 @@ class Ethereum(BasePaymentProvider):
             "currency_type": request.session["payment_currency_type"],
             "time": request.session["payment_time"],
             "amount": request.session["payment_amount"],
+            "token_rates": self.get_token_rates_from_admin_settings(),
         }
         payment.save(update_fields=["info"])
 
@@ -301,6 +303,7 @@ class Ethereum(BasePaymentProvider):
             "currency_type": refund.payment.info_data["currency_type"],
             "amount": refund.payment.info_data["amount"],
             "wallet_address": wallet_queryset.first().hex_address,
+            "token_rates": self.get_token_rates_from_admin_settings(),
         }
 
         refund.save(update_fields=["info"])
