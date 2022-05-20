@@ -1,0 +1,1 @@
+{"version":3,"file":"venly.d.ts","sourceRoot":"","sources":["../../../src/providers/connectors/venly.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,yBAAyB,EAAE,MAAM,eAAe,CAAC;AAE1D,MAAM,WAAW,sBAAuB,SAAQ,yBAAyB;IACvE,QAAQ,EAAE,MAAM,CAAC;IACjB,UAAU,CAAC,EAAE,MAAM,CAAC;IACpB,WAAW,CAAC,EAAE,MAAM,CAAC;CACtB;AAED,QAAA,MAAM,cAAc,UAAW,GAAG,QAAQ,sBAAsB,qBAsB/D,CAAC;AAEF,eAAe,cAAc,CAAC"}

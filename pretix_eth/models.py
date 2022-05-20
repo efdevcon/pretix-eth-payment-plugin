@@ -41,19 +41,27 @@ class WalletAddressManager(models.Manager):
         event = order_payment.order.event
         unused_addresses = self.select_for_update().unused().for_event(event)
 
-        with transaction.atomic():
-            if order_payment.walletaddress_set.exists():
-                address = order_payment.walletaddress_set.first()
-            else:
-                if not unused_addresses.exists():
-                    raise WalletAddressError(
-                        "No wallet addresses remain that haven't been used",
-                    )
-                address = unused_addresses.first()
-                address.order_payment = order_payment
-                address.save()
+        # todo
+        # order_payment.payment_provider.get_networks_chosen_from_admin_settings()order_payment.payment_provider.get_networks_chosen_from_admin_settings()
+        # return WalletAddress(hex_address="0x1234")  # todo hotfix
 
-        return address
+        if order_payment.payment_provider.is_single_receiver_mode:
+            pass
+
+        else:
+            with transaction.atomic():
+                if order_payment.walletaddress_set.exists():
+                    address = order_payment.walletaddress_set.first()
+                else:
+                    if not unused_addresses.exists():
+                        raise WalletAddressError(
+                            "No wallet addresses remain that haven't been used",
+                        )
+                    address = unused_addresses.first()
+                    address.order_payment = order_payment
+                    address.save()
+
+            return address
 
 
 class WalletAddress(models.Model):

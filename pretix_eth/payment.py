@@ -76,6 +76,13 @@ class Ethereum(BasePaymentProvider):
                     ),
                 ),
                 (
+                    "SINGLE_RECEIVER_ADDRESS",
+                    forms.CharField(
+                        label=_("Payment receiver address."),
+                        help_text=_("Caution: Must work on all networks configured.")
+                    )
+                ),
+                (
                     "NETWORK_RPC_URL",
                     forms.JSONField(
                         label=_("RPC URLs for networks"),
@@ -104,12 +111,6 @@ class Ethereum(BasePaymentProvider):
         if not one_or_more_currencies_configured:
             logger.error("No currencies configured")
 
-        at_least_one_unused_address = (
-            WalletAddress.objects.all().unused().for_event(request.event).exists()
-        )
-        if not at_least_one_unused_address:
-            logger.error("No unused wallet addresses left")
-
         at_least_one_network_configured = all(
             (
                 len(self.get_networks_chosen_from_admin_settings()) > 0,
@@ -121,11 +122,16 @@ class Ethereum(BasePaymentProvider):
         if not at_least_one_network_configured:
             logger.error("No networks configured")
 
+        single_receiver_mode_configured = len(self.settings.SINGLE_RECEIVER_ADDRESS) > 0
+
+        if not single_receiver_mode_configured:
+            logger.error("Single receiver addresses not configured properly")
+
         return all(
             (
                 one_or_more_currencies_configured,
-                at_least_one_unused_address,
                 at_least_one_network_configured,
+                single_receiver_mode_configured,
                 super().is_allowed(request),
             )
         )
@@ -267,6 +273,9 @@ class Ethereum(BasePaymentProvider):
         ctx["network_name"] = token.NETWORK_VERBOSE_NAME
 
         return template.render(ctx)
+
+    def payment_web3modal_render(self, request: HttpRequest, payment: OrderPayment):
+        raise NotImplementedError()
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")

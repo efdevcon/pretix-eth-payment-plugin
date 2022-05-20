@@ -1,0 +1,1 @@
+{"version":3,"file":"sequence.d.ts","sourceRoot":"","sources":["../../../src/providers/connectors/sequence.ts"],"names":[],"mappings":"AAAA,OAAO,EAAE,yBAAyB,EAAE,MAAM,eAAe,CAAC;AAE1D,MAAM,WAAW,yBAA0B,SAAQ,yBAAyB;IAC1E,OAAO,EAAE,MAAM,CAAC;IAChB,cAAc,CAAC,EAAE,MAAM,CAAC;CACzB;AAED,QAAA,MAAM,iBAAiB,aACX,GAAG,+DA+Bd,CAAC;AAEF,eAAe,iBAAiB,CAAC"}
