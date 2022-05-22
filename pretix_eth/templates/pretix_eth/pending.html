@@ -8,10 +8,9 @@
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
   <p>{% trans "Choose one of the following payment options:" %}</p>
-  <div id="web3modal-checkout"></div>
-  <script type="text/javascript" src="{% static "pretix_eth/pending.js" %}"></script>
 
-  {% include "web3modal-checkout/index.html" %}
+  {% include "pretix_eth/web3modal.html" %}
+
   <p>
     {% blocktrans trimmed %}
     Once you send your payment, our system will automatically check for

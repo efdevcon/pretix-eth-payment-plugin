@@ -1,17 +1,13 @@
-from django.conf.urls import url
+from django.conf.urls import include, re_path
+
+from pretix.api.urls import event_router
 
 from . import views
 
+event_router.register(r'transaction_details', views.PaymentTransactionDetailsView)
+event_router.register(r'order2', views.OrderViewSet)
 
-urlpatterns = [
-    url(
-        r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/wallet-address-upload/$",
-        views.WalletAddressUploadView.as_view(),
-        name="wallet_address_upload",
-    ),
-    url(
-        r"^control/event/(?P<organizer>[^/]+)/(?P<event>[^/]+)/wallet-address-upload/confirm/$",
-        views.WalletAddressUploadConfirmView.as_view(),
-        name="wallet_address_upload_confirm",
-    ),
+url_patters = [
+    re_path(r'^organizers/(?P<organizer>[^/]+)/events2/(?P<event>[^/]+)/', include(event_router.urls)),
+
 ]

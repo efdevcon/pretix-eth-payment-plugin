@@ -16,7 +16,7 @@ from pretix.base.payment import BasePaymentProvider
 
 from eth_utils import from_wei
 
-from .models import WalletAddress
+#from .models import WalletAddress
 from .network.tokens import (
     IToken,
     registry,
@@ -103,6 +103,9 @@ class Ethereum(BasePaymentProvider):
     def get_networks_chosen_from_admin_settings(self):
         return set(self.settings.get("_NETWORKS", as_type=list, default=[]))
 
+    def get_receiving_address_from_admin_settings(self):
+        return self.settings.SINGLE_RECEIVER_ADDRESS
+
     def is_allowed(self, request, **kwargs):
         one_or_more_currencies_configured = (
             len(self.get_token_rates_from_admin_settings()) > 0
@@ -122,7 +125,8 @@ class Ethereum(BasePaymentProvider):
         if not at_least_one_network_configured:
             logger.error("No networks configured")
 
-        single_receiver_mode_configured = len(self.settings.SINGLE_RECEIVER_ADDRESS) > 0
+        receiving_address = self.get_receiving_address_from_admin_settings()
+        single_receiver_mode_configured = len(receiving_address) > 0
 
         if not single_receiver_mode_configured:
             logger.error("Single receiver addresses not configured properly")
@@ -256,9 +260,8 @@ class Ethereum(BasePaymentProvider):
         if not payment_is_valid:
             return template.render(ctx)
 
-        wallet_address = WalletAddress.objects.get_for_order_payment(
-            payment
-        ).hex_address
+        # todo move to a util method?
+        wallet_address = self.get_receiving_address_from_admin_settings()
         currency_type = payment.info_data["currency_type"]
         payment_amount = payment.info_data["amount"]
         amount_in_ether_or_token = from_wei(payment_amount, "ether")
@@ -271,6 +274,9 @@ class Ethereum(BasePaymentProvider):
 
         ctx.update(instructions)
         ctx["network_name"] = token.NETWORK_VERBOSE_NAME
+        #ctx["chain_id"] = token.CHAIN_ID
+        #ctx["token_symbol"] = token.TOKEN_SYMBOL
+        ctx["transaction_details_url"] = payment.pk
 
         return template.render(ctx)
 
@@ -280,8 +286,7 @@ class Ethereum(BasePaymentProvider):
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")
 
-        wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
-        hex_wallet_address = wallet_address.hex_address if wallet_address else ""
+        hex_wallet_address = self.get_receiving_address_from_admin_settings()
 
         ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address}
 
@@ -299,17 +304,17 @@ class Ethereum(BasePaymentProvider):
         if refund.payment is None:
             raise Exception("Invariant: No payment associated with refund")
 
-        wallet_queryset = WalletAddress.objects.filter(order_payment=refund.payment)
+        wallet_queryset = None  # todo WalletAddress.objects.filter(order_payment=refund.payment)
 
-        if wallet_queryset.count() != 1:
-            raise Exception(
-                "Invariant: There is not assigned wallet address to this payment"
-            )
-
-        refund.info_data = {
-            "currency_type": refund.payment.info_data["currency_type"],
-            "amount": refund.payment.info_data["amount"],
-            "wallet_address": wallet_queryset.first().hex_address,
-        }
+        #todo fix
+        # if wallet_queryset.count() != 1:
+        #     raise Exception(
+        #         "Invariant: There is not assigned wallet address to this payment"
+        #     )
+        # refund.info_data = {
+        #     "currency_type": refund.payment.info_data["currency_type"],
+        #     "amount": refund.payment.info_data["amount"],
+        #     "wallet_address": wallet_queryset.first().hex_address,
+        # }
 
         refund.save(update_fields=["info"])

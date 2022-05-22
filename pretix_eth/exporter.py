@@ -7,7 +7,6 @@ from pretix.base.models import (
     OrderPayment,
     OrderRefund,
 )
-from pretix_eth.models import WalletAddress
 
 import pytz
 
@@ -27,7 +26,7 @@ def payment_to_row(payment):
     fiat_amount = payment.amount
     token_amount = payment.info_data.get("amount", "")
 
-    wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
+    wallet_address = None # todo WalletAddress.objects.filter(order_payment=payment).first()
     hex_wallet_address = wallet_address.hex_address if wallet_address else ""
 
     row = [
@@ -57,7 +56,7 @@ def refund_to_row(refund):
     fiat_amount = refund.amount
     token_amount = refund.info_data.get("amount", "")
 
-    wallet_address = WalletAddress.objects.filter(order_payment=refund.payment).first()
+    wallet_address = None  # todo WalletAddress.objects.filter(order_payment=refund.payment).first()
     hex_wallet_address = wallet_address.hex_address if wallet_address else ""
 
     row = [
