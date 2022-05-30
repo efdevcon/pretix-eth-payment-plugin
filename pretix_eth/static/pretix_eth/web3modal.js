@@ -8,29 +8,29 @@ var hasPaid = false;  // true if user has signed the transaction
 // todo display errors!
 // todo pay with DAI also!
 
-String.prototype.hexEncode = function(){
-    var hex, i;
-    var result = "";
-    for (i=0; i<this.length; i++) {
-        hex = this.charCodeAt(i).toString(16);
-        result += ("000"+hex).slice(-4);
-    }
-    return result
-}
-
 async function getPaymentTransactionData(walletAddress){
     // todo should say if we're waiting for another payment from that address
     const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
     const response = await fetch(url + '?' + new URLSearchParams({
         sender_address: walletAddress
     }));
+    if (response.status >= 400) {
+        throw "Failed to fetch order details. If this problem persists, please contact the organizer directly.";
+    }
     return await response.json();
 }
 
 function submitSignature(signedMessage, transactionHash) {
     const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
-    debugger;
-    // todo post to backend!
+    fetch(url, {
+      headers: { "Content-Type": "application/json; charset=utf-8" },
+      method: 'POST',
+      body: JSON.stringify({
+        signedMessage: signedMessage,
+        transactionHash: transactionHash,
+    })
+    }
+  )
 }
 
 function init() {
@@ -59,77 +59,82 @@ function showError(message) {
 * Called on "Connect wallet and pay" button click and every chain/account change
 */
 async function makePayment() {
-  /* todo wrap this in button disable and un-disable and a try-except block  */
+  async function _makePayment() {
+    /* todo wrap this in button disable and un-disable and a try-except block  */
 
-  // Get a Web3 instance for the wallet
-  const web3 = new Web3(provider);
-    const accounts = await web3.eth.getAccounts();
-  // MetaMask does not give you all accounts, only the selected account
-  selectedAccount = accounts[0];
+    // Get a Web3 instance for the wallet
+    const web3 = new Web3(provider);
+      const accounts = await web3.eth.getAccounts();
+    // MetaMask does not give you all accounts, only the selected account
+    selectedAccount = accounts[0];
 
+    const paymentDetails = await getPaymentTransactionData(selectedAccount);
+    if (paymentDetails['is_signature_submitted'] === true) {
+      showError("It seems that you have paid for this order already.")
+      return
+    }
 
-  const paymentDetails = await getPaymentTransactionData();
-  if (paymentDetails['is_signature_submitted'] === true) {
-    // todo raise instead?
-    showError("It seems that you have paid for this order already.")
-    return
-  }
+    // todo check that payment can be made form this wallet
 
-  // todo check that payment can be made form this wallet
+    // Make sure we're connected to the right chain
+    const currentChainId = await web3.eth.getChainId()
+    // var zerofilled = ('0000'+n).slice(-4);
+    if (paymentDetails['chain_id'] !== currentChainId) {
+      // let paddedChainId = '0x' + ('00'+paymentDetails['chain_id'].toString(16)).slice(-2);
+      let desiredChainId = '0x'+paymentDetails['chain_id'].toString(16);
+      window.ethereum.request(
+        {
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: desiredChainId}]
+        }
+      )
+    }
 
-  // Make sure we're connected to the right chain
-  if (paymentDetails['chain_id'] !== await web3.eth.getChainId()) {
-    web3.request(
-      {
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: paymentDetails['chain_id'].toString(16) }]
-      }
-    )
-  }
+    // sign the message
+    var signedMessage;
+    if (!hasSigned || selectedAccount !== signedByAccount) {
+      // todo sig payment secre
+      signedMessage = await web3.eth.accounts.sign(paymentDetails['message'], selectedAccount)
+      hasSigned = true
+      signedByAccount = selectedAccount
+    }
 
-  // sign the message
-
-  if (!hasSigned || selectedAccount !== signedByAccount) {
-    // todo sig payment secret?
-    let signedMessage = await web3.eth.accounts.sign(paymentDetails['message'])
-    hasSigned = true
-    signedByAccount = selectedAccount
-  }
-
-  if (hasSigned) {
-    var transactionHash;
-    // make payment
-    if (asset.contractAddress) { // erc20 transfer
-      const contract = new Contract(
-        asset.contractAddress,
-        ERC20.abi,
-        ethersProvider.getSigner()
-      );
-      const tx = await contract.transfer(
-        to,
-        utils.parseUnits(amount, BigNumber.from(asset.decimals))
-      );
-      transactionHash = tx.hash;
-      submitSignature(signedMessage, transactionHash);
+    if (hasSigned) {
+      var transactionHash;
+      // make payment
+      if (paymentDetails['erc20_contract_address'] !== null) { // erc20 transfer
+        const contract = new Contract(
+          asset.contractAddress,
+          ERC20.abi,
+          ethersProvider.getSigner()
+        );
+        const tx = await contract.transfer(
+          to,
+          utils.parseUnits(amount, BigNumber.from(asset.decimals))
+        );
+        transactionHash = tx.hash;
+        submitSignature(signedMessage, transactionHash);
       } else { // crypto transfer
-        try {
-          await web3.eth.sendTransaction(
-            {
-                from: selectedAccount,
-                to: paymentDetails['recipient_address'],
-                value: paymentDetails['amount'],
-            },
-            'ASDASDASD' // TODO ?
+        await web3.eth.sendTransaction(
+          {
+            from: selectedAccount,
+            to: paymentDetails['recipient_address'],
+            value: paymentDetails['amount'],
+          }
           ).on(
             'transactionHash',
             function (transactionHash) {
               submitSignature(signedMessage, transactionHash);
             }
           )
-        } catch (error) {
-            console.error(error); // tslint:disable-line
         }
+      }
     }
+  try {
+    await _makePayment();
+  } catch (error) {
+    console.error(error); // tslint:disable-line
+    showError(error);
   }
 }
 

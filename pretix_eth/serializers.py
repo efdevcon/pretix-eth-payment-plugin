@@ -11,6 +11,7 @@ from pretix_eth.utils import get_message_to_sign
 class TransactionDetailsSerializer(Serializer):
     chain_id = fields.IntegerField()
     currency = fields.CharField()
+    erc20_contract_address = fields.CharField(allow_null=True)  # contract address for non-native currencies like DAI
     recipient_address = fields.CharField()
     amount = fields.CharField()
     message = fields.CharField()
@@ -29,6 +30,7 @@ class TransactionDetailsSerializer(Serializer):
         return {
             "chain_id": token.CHAIN_ID,
             "currency": token.TOKEN_SYMBOL,
+            "erc20_contract_address":  None,  # todo
             "recipient_address": recipient_address,
             "amount": str(instance.info_data.get('amount')),
             "message": get_message_to_sign(
@@ -39,4 +41,5 @@ class TransactionDetailsSerializer(Serializer):
             ),
             "is_signature_submitted": instance.signed_messages.exists(),
             "has_other_unpaid_orders": None,  # todo
+
         }
