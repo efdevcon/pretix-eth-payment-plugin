@@ -43,6 +43,7 @@ class Command(BaseCommand):
     def confirm_payments_for_event(self, event: Event, no_dry_run):
         logger.info(f"Event name - {event.name}")
 
+        # todo pairing !!!!
         unconfirmed_addresses = (
             WalletAddress.objects.all().for_event(event).unconfirmed_orders()
         )

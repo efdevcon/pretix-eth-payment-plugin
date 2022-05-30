@@ -1,16 +1,15 @@
 <script src="/static/3rd_party/web3modal/index.js"></script>
-<script type="module" src="/static/web3modal.js"></script>
+<script type="module" src="/static/pretix_eth/web3modal.js"></script>
 <div id="prepare">
-    <button class="btn btn-primary" id="btn-connect">
-        Connect wallet
+    <button class="btn btn-primary" id="btn-connect" data-transaction-details-url="{% url 'plugins:pretix_eth:event.order.tranction_details' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret pk=payment.pk %}">
+        Connect wallet and pay
     </button>
+    <span id="message-error"></span>
 </div>
 
 <div id="connected">
-    <button class="btn btn-primary" id="btn-pay">
-        Pay
-    </button>
     <button class="btn btn-primary" id="btn-disconnect">
         Disconnect wallet
     </button>
+    <span id="message-success"></span>
 </div>

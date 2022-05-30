@@ -1,13 +1,11 @@
-from django.conf.urls import include, re_path
-
-from pretix.api.urls import event_router
+from django.urls import re_path
 
 from . import views
 
-event_router.register(r'transaction_details', views.PaymentTransactionDetailsView)
-event_router.register(r'order2', views.OrderViewSet)
-
-url_patters = [
-    re_path(r'^organizers/(?P<organizer>[^/]+)/events2/(?P<event>[^/]+)/', include(event_router.urls)),
-
+event_patterns = [
+    re_path(
+        r'^order/(?P<order>[^/]+)/(?P<secret>[A-Za-z0-9]+)/payment/(?P<pk>[0-9]+)/transaction_details/$',
+        views.PaymentTransactionDetailsView.as_view({'get': 'retrieve', 'post': 'submit_signed_transaction'}),
+        name='event.order.tranction_details'
+    ),
 ]

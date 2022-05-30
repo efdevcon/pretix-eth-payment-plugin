@@ -103,7 +103,7 @@ class Ethereum(BasePaymentProvider):
     def get_networks_chosen_from_admin_settings(self):
         return set(self.settings.get("_NETWORKS", as_type=list, default=[]))
 
-    def get_receiving_address_from_admin_settings(self):
+    def get_receiving_address(self):
         return self.settings.SINGLE_RECEIVER_ADDRESS
 
     def is_allowed(self, request, **kwargs):
@@ -125,7 +125,7 @@ class Ethereum(BasePaymentProvider):
         if not at_least_one_network_configured:
             logger.error("No networks configured")
 
-        receiving_address = self.get_receiving_address_from_admin_settings()
+        receiving_address = self.get_receiving_address()
         single_receiver_mode_configured = len(receiving_address) > 0
 
         if not single_receiver_mode_configured:
@@ -255,13 +255,14 @@ class Ethereum(BasePaymentProvider):
         ctx = {
             "payment_is_valid": payment_is_valid,
             "order": payment.order,
+            "payment": payment,
         }
 
         if not payment_is_valid:
             return template.render(ctx)
 
         # todo move to a util method?
-        wallet_address = self.get_receiving_address_from_admin_settings()
+        wallet_address = self.get_receiving_address()
         currency_type = payment.info_data["currency_type"]
         payment_amount = payment.info_data["amount"]
         amount_in_ether_or_token = from_wei(payment_amount, "ether")
@@ -280,13 +281,11 @@ class Ethereum(BasePaymentProvider):
 
         return template.render(ctx)
 
-    def payment_web3modal_render(self, request: HttpRequest, payment: OrderPayment):
-        raise NotImplementedError()
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")
 
-        hex_wallet_address = self.get_receiving_address_from_admin_settings()
+        hex_wallet_address = self.get_receiving_address()
 
         ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address}
 

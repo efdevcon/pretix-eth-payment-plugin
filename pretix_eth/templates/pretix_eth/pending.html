@@ -9,7 +9,8 @@
 
   <p>{% trans "Choose one of the following payment options:" %}</p>
 
-  {% include "pretix_eth/web3modal.html" %}
+
+  {% include "pretix_eth/web3modal.html" with payment=payment %}
 
   <p>
     {% blocktrans trimmed %}
