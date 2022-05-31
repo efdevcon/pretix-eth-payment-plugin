@@ -4,15 +4,16 @@ from pretix.base.models import Order, OrderPayment
 
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
+from rest_framework import permissions
 
-from pretix_eth import serializers, permissions
+from pretix_eth import serializers
 
 
 class PaymentTransactionDetailsView(GenericViewSet):
 
     queryset = OrderPayment.objects.none()
     serializer_class = serializers.TransactionDetailsSerializer
-    permission_classes = [permissions.CanAccessOrderPayment]
+    permission_classes = [permissions.AllowAny]
     # permission = 'can_view_orders'
     # write_permission = 'can_view_orders'
 

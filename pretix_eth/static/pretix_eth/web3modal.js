@@ -91,12 +91,12 @@ async function makePayment() {
     }
 
     // sign the message
-    var signedMessage;
+    var messageSignature;
     if (!hasSigned || selectedAccount !== signedByAccount) {
-      // todo sig payment secre
-      signedMessage = await web3.eth.accounts.sign(paymentDetails['message'], selectedAccount)
-      hasSigned = true
-      signedByAccount = selectedAccount
+      let message = paymentDetails['message'];
+      messageSignature = await web3.eth.personal.sign(message, selectedAccount);
+      hasSigned = true;
+      signedByAccount = selectedAccount;
     }
 
     if (hasSigned) {
@@ -113,7 +113,7 @@ async function makePayment() {
           utils.parseUnits(amount, BigNumber.from(asset.decimals))
         );
         transactionHash = tx.hash;
-        submitSignature(signedMessage, transactionHash);
+        submitSignature(messageSignature, transactionHash);
       } else { // crypto transfer
         await web3.eth.sendTransaction(
           {
@@ -124,7 +124,7 @@ async function makePayment() {
           ).on(
             'transactionHash',
             function (transactionHash) {
-              submitSignature(signedMessage, transactionHash);
+              submitSignature(messageSignature, transactionHash);
             }
           )
         }
