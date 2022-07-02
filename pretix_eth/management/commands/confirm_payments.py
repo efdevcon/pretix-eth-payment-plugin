@@ -10,9 +10,6 @@ from pretix.base.models.event import (
     Event,
 )
 
-from pretix_eth.models import (
-    WalletAddress,
-)
 from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
 
 logger = logging.getLogger(__name__)
@@ -44,9 +41,12 @@ class Command(BaseCommand):
         logger.info(f"Event name - {event.name}")
 
         # todo pairing !!!!
-        unconfirmed_addresses = (
-            WalletAddress.objects.all().for_event(event).unconfirmed_orders()
-        )
+        #unconfirmed_addresses = (
+        #    WalletAddress.objects.all().for_event(event).unconfirmed_orders()
+        #)
+
+        # todo
+        unconfirmed_addresses = []
 
         for wallet_address in unconfirmed_addresses:
             hex_address = wallet_address.hex_address

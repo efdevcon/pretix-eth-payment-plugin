@@ -29,6 +29,7 @@ class TransactionDetailsSerializer(Serializer):
 
         return {
             "chain_id": token.CHAIN_ID,
+            "network_identifier": token.NETWORK_IDENTIFIER,
             "currency": token.TOKEN_SYMBOL,
             "erc20_contract_address":  None,  # todo
             "recipient_address": recipient_address,

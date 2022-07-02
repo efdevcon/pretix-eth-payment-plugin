@@ -5,8 +5,10 @@ from collections import OrderedDict
 from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
+from django.template import RequestContext
 from django.template.loader import get_template
 from django.utils.translation import ugettext_lazy as _
+
 
 from pretix.base.models import (
     OrderPayment,
@@ -252,11 +254,11 @@ class Ethereum(BasePaymentProvider):
         template = get_template("pretix_eth/pending.html")
 
         payment_is_valid = self._payment_is_valid_info(payment)
-        ctx = {
+        ctx = RequestContext(request, {
             "payment_is_valid": payment_is_valid,
             "order": payment.order,
             "payment": payment,
-        }
+        })
 
         if not payment_is_valid:
             return template.render(ctx)
@@ -275,12 +277,11 @@ class Ethereum(BasePaymentProvider):
 
         ctx.update(instructions)
         ctx["network_name"] = token.NETWORK_VERBOSE_NAME
-        #ctx["chain_id"] = token.CHAIN_ID
-        #ctx["token_symbol"] = token.TOKEN_SYMBOL
+        ctx["chain_id"] = token.CHAIN_ID
+        ctx["token_symbol"] = token.TOKEN_SYMBOL
         ctx["transaction_details_url"] = payment.pk
 
-        return template.render(ctx)
-
+        return template.render(ctx.flatten())
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")

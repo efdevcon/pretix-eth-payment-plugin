@@ -8,6 +8,31 @@ var hasPaid = false;  // true if user has signed the transaction
 // todo display errors!
 // todo pay with DAI also!
 
+const web3 = new Web3(provider);
+
+function getCookie(name) {
+  // Add the = sign
+  name = name + '=';
+
+  // Get the decoded cookie
+  const decodedCookie = decodeURIComponent(document.cookie);
+
+  // Get all cookies, split on ; sign
+  const cookies = decodedCookie.split(';');
+
+  // Loop over the cookies
+  for (let i = 0; i < cookies.length; i++) {
+    // Define the single cookie, and remove whitespace
+    const cookie = cookies[i].trim();
+
+    // If this cookie has the name of what we are searching
+    if (cookie.indexOf(name) == 0) {
+      // Return everything after the cookies name
+      return cookie.substring(name.length, cookie.length);
+    }
+  }
+}
+
 async function getPaymentTransactionData(walletAddress){
     // todo should say if we're waiting for another payment from that address
     const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
@@ -20,15 +45,23 @@ async function getPaymentTransactionData(walletAddress){
     return await response.json();
 }
 
-function submitSignature(signedMessage, transactionHash) {
+async function submitSignature(signedMessage, transactionHash, selectedAccount) {
+    let csrf_cookie = getCookie('pretix_csrftoken')
     const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
-    fetch(url, {
-      headers: { "Content-Type": "application/json; charset=utf-8" },
-      method: 'POST',
-      body: JSON.stringify({
+    let searchParams = new URLSearchParams({
         signedMessage: signedMessage,
         transactionHash: transactionHash,
+        selectedAccount: selectedAccount,
+        csrfmiddlewaretoken: csrf_cookie
     })
+    fetch(url, {
+      headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          'X-CSRF-TOKEN': csrf_cookie,
+          'HTTP-X-CSRFTOKEN': csrf_cookie,
+      },
+      method: 'POST',
+      body: searchParams
     }
   )
 }
@@ -55,15 +88,47 @@ function showError(message) {
     document.querySelector("#message-error").innerHTML = message;
 }
 
+async function submit_transaction(paymentDetails, signature) {
+    // todo !!!
+    var transactionHash;
+    // make payment
+    if (paymentDetails['erc20_contract_address'] !== null) { // erc20 transfer
+      const contract = new Contract(
+        asset.contractAddress,
+        ERC20.abi,
+        ethersProvider.getSigner()
+      );
+      const tx = await contract.transfer(
+        to,
+        utils.parseUnits(amount, BigNumber.from(asset.decimals))
+      );
+      transactionHash = tx.hash;
+      submitSignature(messageSignature, transactionHash, selectedAccount);
+    } else { // crypto transfer
+      await web3.eth.sendTransaction(
+        {
+          from: selectedAccount,
+          to: paymentDetails['recipient_address'],
+          value: paymentDetails['amount'],
+        }
+        ).on(
+          'transactionHash',
+          function (transactionHash) {
+            submitSignature(messageSignature, transactionHash, selectedAccount);
+          }
+        )
+      }
+  }
+
 /*
 * Called on "Connect wallet and pay" button click and every chain/account change
 */
 async function makePayment() {
+
   async function _makePayment() {
     /* todo wrap this in button disable and un-disable and a try-except block  */
 
     // Get a Web3 instance for the wallet
-    const web3 = new Web3(provider);
       const accounts = await web3.eth.getAccounts();
     // MetaMask does not give you all accounts, only the selected account
     selectedAccount = accounts[0];
@@ -93,43 +158,28 @@ async function makePayment() {
     // sign the message
     var messageSignature;
     if (!hasSigned || selectedAccount !== signedByAccount) {
-      let message = paymentDetails['message'];
-      messageSignature = await web3.eth.personal.sign(message, selectedAccount);
+      let message = JSON.stringify(paymentDetails['message']);
+      debugger;
+      // messageSignature = await web3.eth.personal.sign(message, selectedAccount);
+      web3.currentProvider.sendAsync(
+        {
+            method: "eth_signTypedData_v3",
+            params: [selectedAccount, message],
+            from: selectedAccount
+        },
+        async function(err, result) {
+          if (err) {
+            debugger;
+            return console.log(err);
+          }
+          const signature = result.result;
+          await submit_transaction(paymentDetails, signature)
+        }
+      );
       hasSigned = true;
       signedByAccount = selectedAccount;
     }
-
-    if (hasSigned) {
-      var transactionHash;
-      // make payment
-      if (paymentDetails['erc20_contract_address'] !== null) { // erc20 transfer
-        const contract = new Contract(
-          asset.contractAddress,
-          ERC20.abi,
-          ethersProvider.getSigner()
-        );
-        const tx = await contract.transfer(
-          to,
-          utils.parseUnits(amount, BigNumber.from(asset.decimals))
-        );
-        transactionHash = tx.hash;
-        submitSignature(messageSignature, transactionHash);
-      } else { // crypto transfer
-        await web3.eth.sendTransaction(
-          {
-            from: selectedAccount,
-            to: paymentDetails['recipient_address'],
-            value: paymentDetails['amount'],
-          }
-          ).on(
-            'transactionHash',
-            function (transactionHash) {
-              submitSignature(messageSignature, transactionHash);
-            }
-          )
-        }
-      }
-    }
+  }
   try {
     await _makePayment();
   } catch (error) {
@@ -164,10 +214,9 @@ async function web3ModalOnConnect() {
     makePayment();
   });
 
-  document.querySelector("#btn-connect").setAttribute("disabled", "disabled")
+  document.querySelector("#btn-connect").setAttribute("disabled", "disabled");
   await makePayment(provider);
-  document.querySelector("#btn-connect").removeAttribute("disabled")
-
+  document.querySelector("#btn-connect").removeAttribute("disabled");
 }
 
 /**

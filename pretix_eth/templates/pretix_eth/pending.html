@@ -4,11 +4,7 @@
 <br/><br/>
 
 {% if payment_is_valid %}
-
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
-
-  <p>{% trans "Choose one of the following payment options:" %}</p>
-
 
   {% include "pretix_eth/web3modal.html" with payment=payment %}
 
