@@ -1,11 +1,11 @@
 from rest_framework.serializers import Serializer
 from rest_framework import fields
 
-from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
-from pretix_eth.utils import get_message_to_sign
+from pretix.base.models import OrderPayment
 
-# todo model for signatures?
-# todo address get param
+from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
+from pretix_eth.models import SignedMessage
+from pretix_eth.utils import get_message_to_sign
 
 
 class TransactionDetailsSerializer(Serializer):
@@ -41,6 +41,5 @@ class TransactionDetailsSerializer(Serializer):
                 order_code=instance.order.code
             ),
             "is_signature_submitted": instance.signed_messages.exists(),
-            "has_other_unpaid_orders": None,  # todo
-
+            "has_other_unpaid_orders": None,
         }

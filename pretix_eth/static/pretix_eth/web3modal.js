@@ -8,8 +8,6 @@ var hasPaid = false;  // true if user has signed the transaction
 // todo display errors!
 // todo pay with DAI also!
 
-const web3 = new Web3(provider);
-
 function getCookie(name) {
   // Add the = sign
   name = name + '=';
@@ -45,11 +43,11 @@ async function getPaymentTransactionData(walletAddress){
     return await response.json();
 }
 
-async function submitSignature(signedMessage, transactionHash, selectedAccount) {
+async function submitSignature(signature, transactionHash, selectedAccount) {
     let csrf_cookie = getCookie('pretix_csrftoken')
     const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
     let searchParams = new URLSearchParams({
-        signedMessage: signedMessage,
+        signedMessage: signature,
         transactionHash: transactionHash,
         selectedAccount: selectedAccount,
         csrfmiddlewaretoken: csrf_cookie
@@ -88,33 +86,32 @@ function showError(message) {
     document.querySelector("#message-error").innerHTML = message;
 }
 
-async function submit_transaction(paymentDetails, signature) {
-    // todo !!!
-    var transactionHash;
-    // make payment
-    if (paymentDetails['erc20_contract_address'] !== null) { // erc20 transfer
-      const contract = new Contract(
-        asset.contractAddress,
-        ERC20.abi,
-        ethersProvider.getSigner()
-      );
-      const tx = await contract.transfer(
-        to,
-        utils.parseUnits(amount, BigNumber.from(asset.decimals))
-      );
-      transactionHash = tx.hash;
-      submitSignature(messageSignature, transactionHash, selectedAccount);
-    } else { // crypto transfer
-      await web3.eth.sendTransaction(
-        {
-          from: selectedAccount,
-          to: paymentDetails['recipient_address'],
-          value: paymentDetails['amount'],
-        }
-        ).on(
-          'transactionHash',
+async function submitTransaction(paymentDetails, signature) {
+  var transactionHash;
+  // make payment
+  if (paymentDetails['erc20_contract_address'] !== null) { // erc20 transfer
+    const contract = new Contract(
+      asset.contractAddress,
+      ERC20.abi,
+      ethersProvider.getSigner()
+    );
+    const tx = await contract.transfer(
+      to,
+      utils.parseUnits(amount, BigNumber.from(asset.decimals))
+    );
+    transactionHash = tx.hash;
+    submitSignature(signature, transactionHash, selectedAccount);
+  } else { // crypto transfer
+    await window.web3.eth.sendTransaction(
+      {
+        from: selectedAccount,
+        to: paymentDetails['recipient_address'],
+        value: paymentDetails['amount'],
+      }
+      ).on(
+        'transactionHash',
           function (transactionHash) {
-            submitSignature(messageSignature, transactionHash, selectedAccount);
+            submitSignature(signature, transactionHash, selectedAccount);
           }
         )
       }
@@ -129,7 +126,7 @@ async function makePayment() {
     /* todo wrap this in button disable and un-disable and a try-except block  */
 
     // Get a Web3 instance for the wallet
-      const accounts = await web3.eth.getAccounts();
+      const accounts = await window.web3.eth.getAccounts();
     // MetaMask does not give you all accounts, only the selected account
     selectedAccount = accounts[0];
 
@@ -142,10 +139,8 @@ async function makePayment() {
     // todo check that payment can be made form this wallet
 
     // Make sure we're connected to the right chain
-    const currentChainId = await web3.eth.getChainId()
-    // var zerofilled = ('0000'+n).slice(-4);
+    const currentChainId = await window.web3.eth.getChainId()
     if (paymentDetails['chain_id'] !== currentChainId) {
-      // let paddedChainId = '0x' + ('00'+paymentDetails['chain_id'].toString(16)).slice(-2);
       let desiredChainId = '0x'+paymentDetails['chain_id'].toString(16);
       window.ethereum.request(
         {
@@ -156,12 +151,9 @@ async function makePayment() {
     }
 
     // sign the message
-    var messageSignature;
     if (!hasSigned || selectedAccount !== signedByAccount) {
       let message = JSON.stringify(paymentDetails['message']);
-      debugger;
-      // messageSignature = await web3.eth.personal.sign(message, selectedAccount);
-      web3.currentProvider.sendAsync(
+      window.web3.currentProvider.sendAsync(
         {
             method: "eth_signTypedData_v3",
             params: [selectedAccount, message],
@@ -173,7 +165,7 @@ async function makePayment() {
             return console.log(err);
           }
           const signature = result.result;
-          await submit_transaction(paymentDetails, signature)
+          await submitTransaction(paymentDetails, signature)
         }
       );
       hasSigned = true;
@@ -192,6 +184,7 @@ async function makePayment() {
  * Connect wallet button pressed.
  */
 async function web3ModalOnConnect() {
+  let provider;
   try {
     provider = await web3Modal.connect();
   } catch(e) {
@@ -213,6 +206,8 @@ async function web3ModalOnConnect() {
   provider.on("networkChanged", (networkId) => {
     makePayment();
   });
+
+  window.web3 = new Web3(provider);
 
   document.querySelector("#btn-connect").setAttribute("disabled", "disabled");
   await makePayment(provider);
@@ -242,7 +237,6 @@ async function web3ModalOnDisconnect() {
   document.querySelector("#connected").style.display = "none";
 }
 
-// debugger;
 window.addEventListener('load', async () => {
   init();
   document.querySelector("#btn-connect").addEventListener("click", web3ModalOnConnect);

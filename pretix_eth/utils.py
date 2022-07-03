@@ -1,11 +1,7 @@
 import json
 import logging
 
-from hexbytes import HexBytes
-
 from eth_account._utils.structured_data.validation import validate_structured_data
-from eth_account.messages import SignableMessage
-from eth_account._utils.structured_data.hashing import hash_domain, hash_message
 
 
 logger = logging.getLogger(__name__)
