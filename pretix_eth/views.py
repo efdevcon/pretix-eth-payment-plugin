@@ -41,7 +41,10 @@ class PaymentTransactionDetailsView(GenericViewSet):
 
         has_other_unpaid_orders = SignedMessage.objects.filter(
             sender_address=sender_address,
-            order_payment__state=OrderPayment.PAYMENT_STATE_PENDING
+            order_payment__state__in=(
+                OrderPayment.PAYMENT_STATE_CREATED,
+                OrderPayment.PAYMENT_STATE_PENDING
+            )
         ).exists()
 
         response_data = serializer.data
