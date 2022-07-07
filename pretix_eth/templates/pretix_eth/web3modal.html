@@ -1,16 +1,26 @@
 {% csrf_token %}
 <script src="/static/3rd_party/web3modal/index.js"></script>
 <script type="module" src="/static/pretix_eth/web3modal.js"></script>
-<div id="prepare">
-    <button class="btn btn-primary" id="btn-connect" data-transaction-details-url="{% url 'plugins:pretix_eth:event.order.tranction_details' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret pk=payment.pk %}">
-        Connect wallet and pay
-    </button>
-    <span id="message-error"></span>
-</div>
 
-<div id="connected">
-    <button class="btn btn-primary" id="btn-disconnect">
-        Disconnect wallet
-    </button>
-    <span id="message-success"></span>
+<div id="web3modal">
+    <div id="prepare" class="pretix-eth-payment-steps">
+        <button class="btn btn-primary" id="btn-connect" data-transaction-details-url="{% url 'plugins:pretix_eth:event.order.tranction_details' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret pk=payment.pk %}">
+            Connect wallet and pay
+        </button>
+    </div>
+    <div id="set-correct-network" class="pretix-eth-payment-steps">
+        <strong>Please change your network to <span id="payment-network-id">Mainnet</span>.</strong>
+    </div>
+    <div id="sign-a-message" class="pretix-eth-payment-steps">
+        <strong>Please sign a message in your wallet provider to propve ownership of the address.</strong>
+        <button id="retry-sign-a-message" onclick="signMessage();">Click to retry!</button>
+    </div>
+    <div id="send-transaction" class="pretix-eth-payment-steps">
+        <strong>Please confirm payment that came up in your wallet provider.</strong>
+        <button id="retry-send-transaction" onclick="submitTransaction();">Click to retry!</button>
+    </div>
+    <div id="success">
+        <strong>Your payment has been submitted in transaction <span id="pretix-eth-transaction-hash"></span>. Your ticket will be generated once the transaction has been confirmed on our side.</strong>
+    </div>
+    <div><strong><span id="message-error"></span></strong></div>
 </div>
