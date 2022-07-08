@@ -5,7 +5,7 @@ from pretix.base.models import OrderPayment
 
 class SignedMessage(models.Model):
     signature = models.CharField(max_length=132)
-    raw_message = models.CharField(max_length=256)
+    raw_message = models.TextField()
     sender_address = models.CharField(max_length=42)
     recipient_address = models.CharField(max_length=42)
     chain_id = models.SmallIntegerField()
