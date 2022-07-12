@@ -67,6 +67,14 @@ async function submitSignature(signature, transactionHash, selectedAccount) {
             method: 'POST',
             body: searchParams
         }
+    ).then((response) => {
+            if (response.ok) {
+                document.getElementById("pretix-eth-transaction-hash").innerText = transactionHash;
+                displayOnlyId("success");
+            } else {
+                showError("There was an error processing your payment, please contact support. Your payment was sent in transaction "+transactionHash+".")
+            }
+        }
     )
 }
 
@@ -173,6 +181,7 @@ async function makePayment() {
         if (paymentDetails['chain_id'] !== currentChainId) {
             // todo set-correct-network
             // Subscribe to chainId change
+            let provider = await web3Modal.connect();
             provider.on("chainChanged", (chainId) => {
                 signMessage();
             });
@@ -268,9 +277,11 @@ async function web3ModalOnConnect() {
 
     window.web3 = new Web3(provider);
 
-    document.querySelector("#btn-connect").setAttribute("disabled", "disabled");
+    document.getElementById("btn-connect").setAttribute("disabled", "disabled");
     await makePayment(provider);
-    document.querySelector("#btn-connect").removeAttribute("disabled");
+    document.getElementById("btn-connect").removeAttribute("disabled");
+    document.getElementById("retry-sign-a-message").onclick = signMessage();
+    document.getElementById("retry-send-transaction").onclick = submitTransaction();
 }
 
 window.addEventListener('load', async () => {
