@@ -18,6 +18,9 @@ from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_token
 logger = logging.getLogger(__name__)
 
 
+SAFETY_BLOCK_COUNT = 5
+
+
 class Command(BaseCommand):
     help = (
         "Verify pending orders from on-chain payments. Performs a dry run by default."
@@ -80,10 +83,16 @@ class Command(BaseCommand):
                 # native asset
                 if token.IS_NATIVE_ASSET:
                     transaction_details = w3.eth.getTransaction(signed_message.transaction_hash)
+                    block_number = transaction_details.blockNumber
                 else:
                     receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
+                    block_number = receipt.blockNumber
                     contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
                     transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
+
+                if block_number + SAFETY_BLOCK_COUNT > w3.eth.get_block_number():
+                    logger.warning(f"  * Transfer found in a block that is too young, waiting until at least {SAFETY_BLOCK_COUNT} more blocks are confirmed.")
+                    continue
 
                 payment_amount = transaction_details.value
                 correct_sender = getattr(transaction_details, 'from').lower() == signed_message.sender_address.lower()
