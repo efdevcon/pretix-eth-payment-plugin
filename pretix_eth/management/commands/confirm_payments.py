@@ -8,11 +8,12 @@ from django_scopes import scope
 
 from web3 import Web3
 from web3.providers.auto import load_provider_from_uri
+import web3.contract
 
 from pretix.base.models import OrderPayment
 from pretix.base.models.event import Event
 
-from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
+from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens, TOKEN_ABI
 
 logger = logging.getLogger(__name__)
 
@@ -73,17 +74,26 @@ class Command(BaseCommand):
 
                 expected_amount = info["amount"]
 
+                #
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
-                transaction_details = w3.eth.getTransaction(signed_message.transaction_hash)
+                # native asset
+                if token.IS_NATIVE_ASSET:
+                    transaction_details = w3.eth.getTransaction(signed_message.transaction_hash)
+                else:
+                    receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
+                    contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
+                    transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
+
                 payment_amount = transaction_details.value
-                correct_sender = getattr(transaction_details, 'from') == signed_message.sender_address
-                correct_recipient = transaction_details.to == signed_message.recipient_address
+                correct_sender = getattr(transaction_details, 'from').lower() == signed_message.sender_address.lower()
+                correct_recipient = transaction_details.to.lower() == signed_message.recipient_address.lower()
 
                 if not (correct_sender and correct_recipient):
                     logger.warning(
                         f"  * Transaction hash provided does not match correct sender and recipient"
                     )
+                    continue
 
                 if payment_amount > 0:
                     logger.info(f"Payments found for {full_id} at {signed_message.sender_address}:")

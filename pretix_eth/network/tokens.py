@@ -15,6 +15,7 @@ from pretix_eth.network.helpers import (
 
 
 TOKEN_ABI = [
+    # Functions
     {
         "constant": True,
         "inputs": [{"name": "_owner", "type": "address"}],
@@ -28,6 +29,32 @@ TOKEN_ABI = [
         "name": "transfer",
         "outputs": [{"name": "", "type": "bool"}],
         "type": "function"
+    },
+    # Event
+    {
+      "anonymous": False,
+      "inputs": [
+        {
+          "indexed": True,
+          "internalType": "address",
+          "name": "from",
+          "type": "address"
+        },
+        {
+          "indexed": True,
+          "internalType": "address",
+          "name": "to",
+          "type": "address"
+        },
+        {
+          "indexed": False,
+          "internalType": "uint256",
+          "name": "value",
+          "type": "uint256"
+        }
+      ],
+      "name": "Transfer",
+      "type": "event"
     }
 ]
 

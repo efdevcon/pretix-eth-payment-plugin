@@ -1,10 +1,7 @@
 from rest_framework.serializers import Serializer
 from rest_framework import fields
 
-from pretix.base.models import OrderPayment
-
 from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
-from pretix_eth.models import SignedMessage
 from pretix_eth.utils import get_message_to_sign
 
 
