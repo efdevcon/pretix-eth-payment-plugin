@@ -53,7 +53,7 @@ def get_rpc_url_for_network(payment_provider, network_id):
            payment_provider.settings.NETWORK_RPC_URL
        )
 
-       expected_network_rpc_url_key = f"{network_id.upper()}_RPC_URL"
+       expected_network_rpc_url_key = f"{network_id}_RPC_URL"
 
        if expected_network_rpc_url_key in rpc_urls:
            return rpc_urls[expected_network_rpc_url_key]
