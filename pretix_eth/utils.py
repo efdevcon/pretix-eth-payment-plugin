@@ -38,7 +38,7 @@ def get_message_to_sign(
             "Message": [
                 {"name": "sender_address", "type": "address"},
                 {"name": "receiver_address", "type": "address"},
-                {"name": "chain_id", "type": "uint8"},
+                {"name": "chain_id", "type": "uint256"},
                 {"name": "order_code", "type": "string"},
             ],
         },
