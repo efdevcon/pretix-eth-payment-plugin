@@ -27,6 +27,9 @@ class TransactionDetailsSerializer(Serializer):
 
         recipient_address = instance.payment_provider.get_receiving_address()
 
+        # don't let the user pay for multiple order payments wwithin one order
+        another_signature_submitted = any(order_payment.signed_messages.exists() for order_payment in instance.order.payments.all())
+
         return {
             "chain_id": token.CHAIN_ID,
             "network_identifier": token.NETWORK_IDENTIFIER,
@@ -40,6 +43,6 @@ class TransactionDetailsSerializer(Serializer):
                 chain_id=token.CHAIN_ID,
                 order_code=instance.order.code
             ),
-            "is_signature_submitted": instance.signed_messages.exists(),
+            "is_signature_submitted": another_signature_submitted,
             "has_other_unpaid_orders": None,
         }
