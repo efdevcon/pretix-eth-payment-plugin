@@ -295,26 +295,10 @@ class Ethereum(BasePaymentProvider):
     abort_pending_allowed = True
 
     def payment_refund_supported(self, payment: OrderPayment):
-        return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
+        return False
 
     def payment_partial_refund_supported(self, payment: OrderPayment):
         return self.payment_refund_supported(payment)
 
     def execute_refund(self, refund: OrderRefund):
-        if refund.payment is None:
-            raise Exception("Invariant: No payment associated with refund")
-
-        wallet_queryset = None  # todo WalletAddress.objects.filter(order_payment=refund.payment)
-
-        #todo fix
-        # if wallet_queryset.count() != 1:
-        #     raise Exception(
-        #         "Invariant: There is not assigned wallet address to this payment"
-        #     )
-        # refund.info_data = {
-        #     "currency_type": refund.payment.info_data["currency_type"],
-        #     "amount": refund.payment.info_data["amount"],
-        #     "wallet_address": wallet_queryset.first().hex_address,
-        # }
-
-        refund.save(update_fields=["info"])
+        raise Exception("Refunds are disabled for this payment provider for private key security reasons.")
