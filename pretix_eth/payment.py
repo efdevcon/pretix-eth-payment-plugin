@@ -281,6 +281,12 @@ class Ethereum(BasePaymentProvider):
         ctx["token_symbol"] = token.TOKEN_SYMBOL
         ctx["transaction_details_url"] = payment.pk
 
+        submitted_transation_hash = payment.signed_messages.last()
+        if submitted_transation_hash is not None:
+            submitted_transation_hash = submitted_transation_hash.transaction_hash
+
+        ctx["submitted_transation_hash"] = submitted_transation_hash
+
         return template.render(ctx.flatten())
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):

@@ -6,8 +6,16 @@
 {% if payment_is_valid %}
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
-  {% include "pretix_eth/web3modal.html" with payment=payment %}
 
+  {% if submitted_transation_hash %}
+<div>
+  <p>A payment for this order has already been submitted in transaction <strong>{{ submitted_transation_hash }}</strong>.</p>
+</div>
+  {% else %}
+  <div id="pretix-eth-payment-summary">Please pay {{amount_manual}} on {{network_name}} using the button below.</div>
+
+  {% include "pretix_eth/web3modal.html" with payment=payment %}
+  {% endif %}
   <p>
     {% blocktrans trimmed %}
     Once you send your payment, our system will automatically check for
