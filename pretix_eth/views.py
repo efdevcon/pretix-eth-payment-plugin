@@ -39,6 +39,7 @@ class PaymentTransactionDetailsView(GenericViewSet):
         except (KeyError, AttributeError):
             return HttpResponseBadRequest("Please supply sender_address GET.")
 
+        # todo other order_payments with a
         has_other_unpaid_orders = SignedMessage.objects.filter(
             sender_address=sender_address,
             order_payment__state__in=(

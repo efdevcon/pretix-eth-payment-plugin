@@ -3,6 +3,7 @@
 var selectedAccount = '';  // address of the currently connected account
 var signedByAccount = '';  // address of the account that has signed the message, to check on account chages
 var signature = false;  // true if user has sent a message
+var signatureRequested = false;
 var paymentDetails;
 var transactionHashSubmitted = false;
 
@@ -122,6 +123,12 @@ function showError(message = '', reset_state = true) {
     if (reset_state === true) {
         displayOnlyId("prepare");
     }
+    try {
+        document.getElementById("btn-connect").removeAttribute("disabled");
+    } catch (e) {
+        return false
+    }
+
     return false
 }
 
@@ -269,23 +276,30 @@ async function signMessage() {
             // skip the signature step if we have one already
             await submitTransaction();
         } else {
-            let message = JSON.stringify(paymentDetails['message']);
-            window.web3.currentProvider.sendAsync(
-                {
-                    method: "eth_signTypedData_v4",
-                    params: [selectedAccount, message],
-                    from: selectedAccount
-                },
-                async function (err, result) {
-                    if (err) {
-                        showError(err, true)
-                    } else {
-                        signature = result.result;
-                        signedByAccount = selectedAccount;
-                        await submitTransaction();
+            if (!signatureRequested) {
+                signatureRequested = true;
+                console.log("Requesting eth_signTypedData_v4:", selectedAccount, message);
+                let message = JSON.stringify(paymentDetails['message']);
+                window.web3.currentProvider.sendAsync(
+                    {
+                        method: "eth_signTypedData_v4",
+                        params: [selectedAccount, message],
+                        from: selectedAccount
+                    },
+                    async function (err, result) {
+                        if (err) {
+                            signatureRequested = false;
+                            showError(err, true)
+                        } else {
+                            signature = result.result;
+                            signedByAccount = selectedAccount;
+                            await submitTransaction();
+                        }
                     }
-                }
-            );
+                );
+            } else {
+                console.log("Requesting more than one message signature.");
+            }
         }
     }
     try {

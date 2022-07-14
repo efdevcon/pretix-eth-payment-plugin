@@ -60,7 +60,7 @@ class Command(BaseCommand):
 
                 info = order_payment.info_data
                 token: IToken = all_token_and_network_ids_to_tokens[info["currency_type"]]
-                expected_network_id = token.NETWORK_IDENTIFIER.upper()
+                expected_network_id = token.NETWORK_IDENTIFIER
                 expected_network_rpc_url_key = f"{expected_network_id}_RPC_URL"
 
                 if expected_network_rpc_url_key in rpc_urls:
