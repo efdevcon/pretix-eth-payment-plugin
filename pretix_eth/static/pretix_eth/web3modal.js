@@ -4,7 +4,8 @@ var selectedAccount = '';  // address of the currently connected account
 var signedByAccount = '';  // address of the account that has signed the message, to check on account chages
 var signature = false;  // true if user has sent a message
 var paymentDetails;
-// todo pay with DAI also!
+var transactionHashSubmitted = false;
+
 
 function getCookie(name) {
     // Add the = sign
@@ -29,6 +30,7 @@ function getCookie(name) {
     }
 }
 
+
 async function getPaymentTransactionData(){
     let walletAddress = await getAccount();
     const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
@@ -40,6 +42,7 @@ async function getPaymentTransactionData(){
     }
     return await response.json();
 }
+
 
 async function submitSignature(signature, transactionHash, selectedAccount) {
     async function _submitSignature(signature, transactionHash, selectedAccount) {
@@ -62,8 +65,7 @@ async function submitSignature(signature, transactionHash, selectedAccount) {
             }
         ).then((response) => {
                 if (response.ok) {
-                    document.getElementById("pretix-eth-transaction-hash").innerText = transactionHash;
-                    displayOnlyId("success");
+                    showSuccessMessage(transactionHash);
                 } else {
                     showError("There was an error processing your payment, please contact support. Your payment was sent in transaction " + transactionHash + ".", false)
                 }
@@ -76,6 +78,7 @@ async function submitSignature(signature, transactionHash, selectedAccount) {
         showError(error, true);
     }
 }
+
 
 function init() {
     document.querySelector("#prepare").style.display = "block";
@@ -94,16 +97,27 @@ function init() {
     });
 }
 
+
 function showError(message = '', reset_state = true) {
-    if (typeof message === "object") {
-        if (message.message !== undefined) {
-            message = message.message + " Please try again."
+    if (transactionHashSubmitted) {
+        // do not display errors or reset state after the transaction hash has been successfully submitted to the BE
+        message = "";
+        reset_state = false;
+    } else {
+        if (typeof message === "object") {
+            if (message.message !== undefined) {
+                message = message.message + ". Please try again."
+            } else if (message.error !== undefined && message.error.message !== undefined) {
+                message = message.error.message + ". Please try again.";
+            } else {
+                message = "";
+            }
+        }
+        if (message === "") {
+            message = "There was an error, please try again, or contact support if you have already confirmed a payment in your wallet provider."
         }
     }
 
-    if (message === "") {
-        message = "There was an error, please try again, or contact support if you have already confirmed a payment in your wallet provider."
-    }
     document.getElementById("message-error").innerHTML = message;
     if (reset_state === true) {
         displayOnlyId("prepare");
@@ -111,10 +125,10 @@ function showError(message = '', reset_state = true) {
     return false
 }
 
+
 function resetErrorMessage() {
     document.getElementById("message-error").innerHTML = '';
 }
-
 
 
 function displayOnlyId(divId) {
@@ -128,6 +142,15 @@ function displayOnlyId(divId) {
         }
     );
 }
+
+
+function showSuccessMessage(transactionHash) {
+    transactionHashSubmitted = true;
+    document.getElementById("pretix-eth-transaction-hash").innerText = transactionHash;
+    displayOnlyId();
+    document.getElementById("success").style.display = "block";
+}
+
 
 async function submitTransaction() {
     async function _submitTransaction() {
@@ -301,6 +324,7 @@ async function initWeb3() {
     return provider
 }
 
+
 /**
  * Connect wallet button pressed.
  */
@@ -321,15 +345,13 @@ window.addEventListener('load', async () => {
 });
 
 window.onerror = function (message, file, line, col, error) {
-    showError(error.message)
-    return false;
+    return showError(error.message)
 };
 
 window.addEventListener("error", function (e) {
-    showError(e.error.message)
-    return false;
+    return showError(e.error.message)
 })
 
 window.addEventListener('unhandledrejection', function (e) {
-    showError()
+    return showError()
 })
