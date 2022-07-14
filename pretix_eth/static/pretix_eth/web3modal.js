@@ -162,7 +162,7 @@ async function submitTransaction() {
         if (paymentDetails['erc20_contract_address'] !== null) {
             // erc20 transfer
             // TODO !!
-            const contract = new Contract(
+            const contract = new window.web3.eth.Contract(
                 paymentDetails['erc20_contract_address'],
                 ERC20.abi,  // todo
                 ethersProvider.getSigner()
@@ -272,7 +272,7 @@ async function signMessage() {
             let message = JSON.stringify(paymentDetails['message']);
             window.web3.currentProvider.sendAsync(
                 {
-                    method: "eth_signTypedData_v3",
+                    method: "eth_signTypedData_v4",
                     params: [selectedAccount, message],
                     from: selectedAccount
                 },
