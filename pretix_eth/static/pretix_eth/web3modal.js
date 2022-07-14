@@ -5,6 +5,7 @@ var signedByAccount = '';  // address of the account that has signed the message
 var signature = false;  // true if user has sent a message
 var signatureRequested = false;
 var paymentDetails;
+var transactionRequested = false;
 var transactionHashSubmitted = false;
 
 
@@ -32,9 +33,25 @@ function getCookie(name) {
 }
 
 
+function getTransactionDetailsURL() {
+    return document.getElementById("btn-connect").getAttribute("data-transaction-details-url");
+}
+
+
+async function getERC20ABI() {
+    let url = document.getElementById("btn-connect").getAttribute("data-erc20-abi-url");
+    let response = await fetch(url);
+    if (response.ok) {
+        return response.json()
+    } else {
+        showError("Failed to fetch ERC20 ABI.")
+    }
+}
+
+
 async function getPaymentTransactionData(){
     let walletAddress = await getAccount();
-    const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
+    const url = getTransactionDetailsURL();
     const response = await fetch(url + '?' + new URLSearchParams({
         sender_address: walletAddress
     }));
@@ -48,7 +65,7 @@ async function getPaymentTransactionData(){
 async function submitSignature(signature, transactionHash, selectedAccount) {
     async function _submitSignature(signature, transactionHash, selectedAccount) {
         let csrf_cookie = getCookie('pretix_csrftoken')
-        const url = document.getElementById("btn-connect").getAttribute("data-transaction-details-url")
+        const url = getTransactionDetailsURL();
         let searchParams = new URLSearchParams({
             signedMessage: signature,
             transactionHash: transactionHash,
@@ -105,6 +122,10 @@ function showError(message = '', reset_state = true) {
         message = "";
         reset_state = false;
     } else {
+        // reset
+        transactionRequested = false;
+        signatureRequested = false;
+
         if (typeof message === "object") {
             if (message.message !== undefined) {
                 message = message.message + ". Please try again."
@@ -161,25 +182,33 @@ function showSuccessMessage(transactionHash) {
 
 async function submitTransaction() {
     async function _submitTransaction() {
+        if (transactionRequested === true) {
+            return
+        }
+        transactionRequested = true
+
         displayOnlyId("send-transaction")
         var selectedAccount = await getAccount();
         let paymentDetails = await getPaymentTransactionData();
         var transactionHash;
         // make the payment
         if (paymentDetails['erc20_contract_address'] !== null) {
-            // erc20 transfer
-            // TODO !!
+            let erc20_abi = await getERC20ABI()
             const contract = new window.web3.eth.Contract(
+                erc20_abi,
                 paymentDetails['erc20_contract_address'],
-                ERC20.abi,  // todo
-                ethersProvider.getSigner()
             );
-            const tx = await contract.transfer(
-                to,
-                utils.parseUnits(amount, BigNumber.from(asset.decimals))
+
+            await contract.methods.transfer(
+                paymentDetails['recipient_address'],
+                paymentDetails['amount'],
+            ).send({from: selectedAccount}).on('transactionHash', function(transactionHash){
+                submitSignature(signature, transactionHash, selectedAccount);
+            }).on(
+                'error', showError
+            ).catch(
+                showError
             );
-            transactionHash = tx.hash;
-            submitSignature(signature, transactionHash, selectedAccount);
         } else { // crypto transfer
             await window.web3.eth.sendTransaction(
                 {
@@ -278,8 +307,8 @@ async function signMessage() {
         } else {
             if (!signatureRequested) {
                 signatureRequested = true;
-                console.log("Requesting eth_signTypedData_v4:", selectedAccount, message);
                 let message = JSON.stringify(paymentDetails['message']);
+                console.log("Requesting eth_signTypedData_v4:", selectedAccount, message);
                 window.web3.currentProvider.sendAsync(
                     {
                         method: "eth_signTypedData_v4",
@@ -315,8 +344,7 @@ async function initWeb3() {
     try {
         provider = await web3Modal.connect();
     } catch(e) {
-        console.log("Could not get a wallet connection", e);
-        return;
+        showError("Failed to connect to a wallet provider.");
     }
     window.web3 = new Web3(provider);
 
@@ -343,14 +371,11 @@ async function initWeb3() {
  * Connect wallet button pressed.
  */
 async function web3ModalOnConnect() {
-    document.getElementById("btn-connect").setAttribute("disabled", "disabled");
     try {
         await makePayment();
     } catch (error) {
         showError(error)
     }
-
-    document.getElementById("btn-connect").removeAttribute("disabled");
 }
 
 window.addEventListener('load', async () => {

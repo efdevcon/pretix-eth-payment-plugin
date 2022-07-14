@@ -10,12 +10,14 @@ from django.shortcuts import get_object_or_404
 from pretix.base.models import Order, OrderPayment
 
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 from rest_framework import permissions
 
 from pretix_eth import serializers
 from pretix_eth.models import SignedMessage
 from pretix_eth.utils import get_rpc_url_for_network
+from pretix_eth.network import tokens
 
 
 class PaymentTransactionDetailsView(GenericViewSet):
@@ -93,3 +95,8 @@ class PaymentTransactionDetailsView(GenericViewSet):
         )
         message_obj.save()
         return Response(status=201)
+
+
+class ERC20ABIView(APIView):
+    def get(self, request, organizer, event):
+        return Response(tokens.TOKEN_ABI)

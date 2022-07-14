@@ -34,7 +34,7 @@ class TransactionDetailsSerializer(Serializer):
             "chain_id": token.CHAIN_ID,
             "network_identifier": token.NETWORK_IDENTIFIER,
             "currency": token.TOKEN_SYMBOL,
-            "erc20_contract_address":  None,  # todo
+            "erc20_contract_address":  token.ADDRESS,
             "recipient_address": recipient_address,
             "amount": str(instance.info_data.get('amount')),
             "message": get_message_to_sign(
