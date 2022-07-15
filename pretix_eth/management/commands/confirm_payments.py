@@ -8,7 +8,6 @@ from django_scopes import scope
 
 from web3 import Web3
 from web3.providers.auto import load_provider_from_uri
-import web3.contract
 
 from pretix.base.models import OrderPayment
 from pretix.base.models.event import Event

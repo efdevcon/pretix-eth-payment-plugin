@@ -199,6 +199,11 @@ async function submitTransaction() {
                 paymentDetails['erc20_contract_address'],
             );
 
+            let balance = await contract.methods.balanceOf(selectedAccount).call();
+            if (BigInt(balance) < BigInt(paymentDetails['amount'])) {
+                showError("Not enough balance to pay using this wallet, please use another currency or payment method, or transfer funds to your wallet and try again.", true);
+            }
+
             await contract.methods.transfer(
                 paymentDetails['recipient_address'],
                 paymentDetails['amount'],
