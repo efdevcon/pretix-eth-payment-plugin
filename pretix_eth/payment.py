@@ -263,7 +263,6 @@ class Ethereum(BasePaymentProvider):
         if not payment_is_valid:
             return template.render(ctx)
 
-        # todo move to a util method?
         wallet_address = self.get_receiving_address()
         currency_type = payment.info_data["currency_type"]
         payment_amount = payment.info_data["amount"]

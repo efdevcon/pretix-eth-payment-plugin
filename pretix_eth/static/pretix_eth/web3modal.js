@@ -7,6 +7,7 @@ var signatureRequested = false;
 var paymentDetails;
 var transactionRequested = false;
 var transactionHashSubmitted = false;
+var lastOrderStatus = '';
 
 
 function getCookie(name) {
@@ -81,9 +82,11 @@ async function submitSignature(signature, transactionHash, selectedAccount) {
                 method: 'POST',
                 body: searchParams
             }
-        ).then((response) => {
+        ).then(
+            async (response) => {
                 if (response.ok) {
                     showSuccessMessage(transactionHash);
+                    await runPeriodicCheck();
                 } else {
                     showError("There was an error processing your payment, please contact support. Your payment was sent in transaction " + transactionHash + ".", false)
                 }
@@ -97,8 +100,30 @@ async function submitSignature(signature, transactionHash, selectedAccount) {
     }
 }
 
+async function periodicCheck() {
+    let url = document.getElementById("pretix-order-detail-url").getAttribute("data-order-detail-url");
+    let response = await fetch(url);
+    if (response.ok) {
+        let data = await response.json()
+        if (lastOrderStatus === '') {
+            lastOrderStatus = data.status;
+        } else if (lastOrderStatus !== data.status) {
+            // status has changed to PAID
+            if (data.status === 'p') {
+                location.reload();
+            }
+        }
+    }
+}
 
-function init() {
+async function runPeriodicCheck() {
+  while (true) {
+    await periodicCheck();
+    await new Promise(resolve => setTimeout(resolve, 5000));
+  }
+}
+
+async function init() {
     document.querySelector("#prepare").style.display = "block";
 
     const providerOptions = {
@@ -384,7 +409,7 @@ async function web3ModalOnConnect() {
 }
 
 window.addEventListener('load', async () => {
-    init();
+    await init();
     document.querySelector("#btn-connect").addEventListener("click", web3ModalOnConnect);
 });
 

@@ -6,6 +6,7 @@
 {% if payment_is_valid %}
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
+<a id="pretix-order-detail-url" data-order-detail-url="{% url 'api-v1:order-detail' organizer=payment.order.event.organizer.slug event=payment.order.event.slug code=payment.order.code %}"></a>
 
   {% if submitted_transation_hash %}
 <div>

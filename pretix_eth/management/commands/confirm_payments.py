@@ -8,6 +8,7 @@ from django_scopes import scope
 
 from web3 import Web3
 from web3.providers.auto import load_provider_from_uri
+from web3.exceptions import TransactionNotFound
 
 from pretix.base.models import OrderPayment
 from pretix.base.models.event import Event
@@ -37,6 +38,7 @@ class Command(BaseCommand):
         no_dry_run = options["no_dry_run"]
 
         with scope(organizer=None):
+            # todo change to events where pending payments are expected only?
             events = Event.objects.all()
 
         for event in events:
@@ -55,6 +57,8 @@ class Command(BaseCommand):
             )
 
         for order_payment in unconfirmed_order_payments:
+            # it is tempting to put .filter(invalid=False) here, but remember
+            # there is still a chance that low-gas txs are mined later on.
             for signed_message in order_payment.signed_messages.all():
                 rpc_urls = json.loads(
                     order_payment.payment_provider.settings.NETWORK_RPC_URL
@@ -76,15 +80,30 @@ class Command(BaseCommand):
 
                 expected_amount = info["amount"]
 
-                #
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
                 # native asset
                 if token.IS_NATIVE_ASSET:
-                    transaction_details = w3.eth.getTransaction(signed_message.transaction_hash)
+                    try:
+                        transaction_details = w3.eth.getTransaction(signed_message.transaction_hash)
+                    except TransactionNotFound:
+                        if signed_message.age > 30*60:
+                            signed_message.invalidate()
+                        continue
+
                     block_number = transaction_details.blockNumber
                 else:
-                    receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
+                    try:
+                        receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
+                    except TransactionNotFound:
+                        if signed_message.age > 30*60:
+                            signed_message.invalidate()
+                        continue
+
+                    if receipt.status == 0:
+                        signed_message.invalidate()
+                        continue
+
                     block_number = receipt.blockNumber
                     contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
                     transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args

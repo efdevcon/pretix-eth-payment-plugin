@@ -43,6 +43,7 @@ class PaymentTransactionDetailsView(GenericViewSet):
 
         # todo other order_payments with a
         has_other_unpaid_orders = SignedMessage.objects.filter(
+            invalid=False,
             sender_address=sender_address,
             order_payment__state__in=(
                 OrderPayment.PAYMENT_STATE_CREATED,
