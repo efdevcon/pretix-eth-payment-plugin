@@ -328,7 +328,6 @@ async function makePayment() {
 /* */
 async function signMessage() {
     async function _signMessage() {
-        displayOnlyId("sign-a-message");
         let selectedAccount = await getAccount();
         let paymentDetails = await getPaymentTransactionData();
         // sign the message
@@ -337,6 +336,7 @@ async function signMessage() {
             await submitTransaction();
         } else {
             if (!signatureRequested) {
+                displayOnlyId("sign-a-message");
                 signatureRequested = true;
                 let message = JSON.stringify(paymentDetails['message']);
                 console.log("Requesting eth_signTypedData_v4:", selectedAccount, message);
