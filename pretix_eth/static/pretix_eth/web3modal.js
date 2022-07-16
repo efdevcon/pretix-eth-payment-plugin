@@ -227,6 +227,7 @@ async function submitTransaction() {
             let balance = await contract.methods.balanceOf(selectedAccount).call();
             if (BigInt(balance) < BigInt(paymentDetails['amount'])) {
                 showError("Not enough balance to pay using this wallet, please use another currency or payment method, or transfer funds to your wallet and try again.", true);
+                return
             }
 
             await contract.methods.transfer(
@@ -380,17 +381,17 @@ async function initWeb3() {
 
     // Subscribe to accounts change
     provider.on("accountsChanged", (accounts) => {
-        makePayment();
+        location.reload();
     });
 
     // Subscribe to chainId change
     provider.on("chainChanged", (chainId) => {
-        makePayment();
+        location.reload();
     });
 
     // Subscribe to networkId change
     provider.on("networkChanged", (networkId) => {
-        makePayment();
+        location.reload();
     });
 
     return provider
