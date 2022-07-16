@@ -212,7 +212,6 @@ async function submitTransaction() {
         }
         transactionRequested = true
 
-        displayOnlyId("send-transaction")
         var selectedAccount = await getAccount();
         let paymentDetails = await getPaymentTransactionData();
         var transactionHash;
@@ -230,6 +229,7 @@ async function submitTransaction() {
                 return
             }
 
+            displayOnlyId("send-transaction");
             await contract.methods.transfer(
                 paymentDetails['recipient_address'],
                 paymentDetails['amount'],
@@ -241,6 +241,7 @@ async function submitTransaction() {
                 showError
             );
         } else { // crypto transfer
+            displayOnlyId("send-transaction");
             await window.web3.eth.sendTransaction(
                 {
                     from: selectedAccount,
