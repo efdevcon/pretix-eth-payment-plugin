@@ -1,6 +1,7 @@
 from rest_framework.serializers import Serializer
 from rest_framework import fields
 
+from pretix_eth.models import SignedMessage
 from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
 from pretix_eth.utils import get_message_to_sign
 
@@ -24,15 +25,12 @@ class TransactionDetailsSerializer(Serializer):
 
         recipient_address = instance.payment_provider.get_receiving_address()
 
-        # don't let the user pay for multiple order payments wwithin one order
-        another_signature_submitted = any(
-            (
-                order_payment.signed_messages.exists()
-                and not order_payment.signed_messages.invalid
-            )
-            for order_payment in instance.order.payments.all()
-        )
+        another_signature_submitted = SignedMessage.objects.filter(
+            order_payment__order=instance.order,
+            invalid=False
+        ).exists()
 
+        # don't let the user pay for multiple order payments wwithin one order
         return {
             "chain_id": token.CHAIN_ID,
             "network_identifier": token.NETWORK_IDENTIFIER,

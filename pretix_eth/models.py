@@ -31,3 +31,13 @@ class SignedMessage(models.Model):
     @property
     def age(self):
         return timezone.now().timestamp() - self.created_at.timestamp()
+
+    @property
+    def another_signature_submitted(self):
+        if self.order_payment is None:
+            return False
+
+        return self.objects.filter(
+            order_payment__order=self.order_payment.order,
+            invalid=False
+        ).exists()
