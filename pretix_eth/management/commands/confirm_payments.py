@@ -83,35 +83,27 @@ class Command(BaseCommand):
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
                 # native asset
-                if token.IS_NATIVE_ASSET:
-                    try:
-                        transaction_details = w3.eth.getTransaction(signed_message.transaction_hash)
-                    except TransactionNotFound:
-                        if signed_message.age > 30*60:
-                            signed_message.invalidate()
-                        continue
 
-                    block_number = transaction_details.blockNumber
-                else:
-                    try:
-                        receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
-                    except TransactionNotFound:
-                        if signed_message.age > 30*60:
-                            signed_message.invalidate()
-                        continue
-
-                    if receipt.status == 0:
+                try:
+                    receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
+                except TransactionNotFound:
+                    if signed_message.age > 30*60:
                         signed_message.invalidate()
-                        continue
+                    continue
 
-                    block_number = receipt.blockNumber
-                    contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
-                    transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
+                if receipt.status == 0:
+                    signed_message.invalidate()
+                    continue
 
-                if block_number + SAFETY_BLOCK_COUNT > w3.eth.get_block_number():
+                block_number = receipt.blockNumber
+
+                if block_number is None or block_number + SAFETY_BLOCK_COUNT > w3.eth.get_block_number():
                     logger.warning(f"  * Transfer found in a block that is too young, waiting until at least {SAFETY_BLOCK_COUNT} more blocks are confirmed.")
                     continue
 
+                if token.IS_NATIVE_ASSET:
+                    contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
+                    transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
                 payment_amount = transaction_details.value
                 correct_sender = getattr(transaction_details, 'from').lower() == signed_message.sender_address.lower()
                 correct_recipient = transaction_details.to.lower() == signed_message.recipient_address.lower()
