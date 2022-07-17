@@ -82,8 +82,6 @@ class Command(BaseCommand):
 
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
-                # native asset
-
                 try:
                     receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
                 except TransactionNotFound:
