@@ -37,7 +37,7 @@ class SignedMessage(models.Model):
         if self.order_payment is None:
             return False
 
-        return self.objects.filter(
+        return SignedMessage.objects.filter(
             order_payment__order=self.order_payment.order,
             invalid=False
         ).exists()
