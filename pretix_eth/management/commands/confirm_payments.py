@@ -100,11 +100,16 @@ class Command(BaseCommand):
                     continue
 
                 if token.IS_NATIVE_ASSET:
+                    # ETH
+                    payment_amount = w3.eth.getTransaction(signed_message.transaction_hash).value
+                else:
+                    # DAI
                     contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
                     transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
-                payment_amount = transaction_details.value
-                correct_sender = getattr(transaction_details, 'from').lower() == signed_message.sender_address.lower()
-                correct_recipient = transaction_details.to.lower() == signed_message.recipient_address.lower()
+                    payment_amount = transaction_details.value
+
+                correct_sender = getattr(receipt, 'from').lower() == signed_message.sender_address.lower()
+                correct_recipient = receipt.to.lower() == signed_message.recipient_address.lower()
 
                 if not (correct_sender and correct_recipient):
                     logger.warning(
