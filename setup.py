@@ -27,7 +27,7 @@ extras_require = {
     ],
     'lint': [
         'flake8>=3.7,<5',
-        'mypy==0.931',
+        'mypy==0.971',
     ],
     'dev': [
         'tox>=3.14.5,<4',
