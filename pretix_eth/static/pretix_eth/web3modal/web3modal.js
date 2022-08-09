@@ -19,6 +19,10 @@ async function init() {
         cacheProvider: false,
         providerOptions
     });
+    GlobalPretixEthState.elements.buttonConnect.addEventListener(
+        "click",
+        web3ModalOnConnect
+    );
 }
 
 /**
@@ -34,7 +38,6 @@ async function web3ModalOnConnect() {
 
 window.addEventListener('load', async () => {
     await init();
-    GlobalPretixEthState.elements.buttonConnect.addEventListener("click", web3ModalOnConnect);
 });
 
 window.onerror = function (message, file, line, col, error) {

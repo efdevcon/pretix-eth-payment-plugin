@@ -75,31 +75,6 @@ async function getPaymentTransactionData(refresh = false){
     return await response.json();
 }
 
-
-async function periodicCheck() {
-    let url = GlobalPretixEthState.elements.aOrderDetailURL.getAttribute("data-order-detail-url");
-    let response = await fetch(url);
-    if (response.ok) {
-        let data = await response.json()
-        if (GlobalPretixEthState.lastOrderStatus === '') {
-            GlobalPretixEthState.lastOrderStatus = data.status;
-        } else if (GlobalPretixEthState.lastOrderStatus !== data.status) {
-            // status has changed to PAID
-            if (data.status === 'p') {
-                location.reload();
-            }
-        }
-    }
-}
-
-async function runPeriodicCheck() {
-  while (true) {
-    await periodicCheck();
-    await new Promise(resolve => setTimeout(resolve, 5000));
-  }
-}
-
-
 /*
 * Success and error handdling
 */

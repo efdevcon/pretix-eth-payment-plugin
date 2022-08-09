@@ -64,12 +64,16 @@ async function disconnect() {
 
 window.addEventListener('load', async () => {
   init();
-  const addressButtons = document.querySelectorAll('.btn-connect');
-  for (let i of addressButtons) {
-    i.addEventListener('click', e => onConnect(e));
+  try {
+    const addressButtons = document.querySelectorAll('.btn-connect');
+    for (let i of addressButtons) {
+      i.addEventListener('click', e => onConnect(e));
+    }
+    const submitButton = document.querySelector('.btn-primary');
+    submitButton.addEventListener('click', checkValidity);
+  } catch (e) {
+    console.log(e);
   }
-  const submitButton = document.querySelector('.btn-primary');
-  submitButton.addEventListener('click', checkValidity);
 });
 
 // from our marked fields obtain all ids of desired questions

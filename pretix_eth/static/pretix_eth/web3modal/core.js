@@ -1,12 +1,12 @@
 "use strict";
 
 import {getTransactionDetailsURL, getERC20ABI,
-    getPaymentTransactionData, runPeriodicCheck,
+    getPaymentTransactionData,
     showError, resetErrorMessage, displayOnlyId,
     showSuccessMessage, getAccount, initWeb3
 } from './interface.js';
-
 import {getCookie, GlobalPretixEthState} from './utils.js';
+import {runPeriodicCheck} from './periodic_check';
 
 // Payment process functions
 

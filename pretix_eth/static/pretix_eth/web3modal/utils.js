@@ -16,7 +16,8 @@ const GlobalPretixEthState = {
         divSuccess: document.getElementById("success"),
         divTransactionHash: document.getElementById("pretix-eth-transaction-hash"),
         aOrderDetailURL: document.getElementById("pretix-order-detail-url"),
-        buttonConnect: document.getElementById("btn-connect")
+        buttonConnect: document.getElementById("btn-connect"),
+        submittedTransactionHash: document.getElementById("pretix-eth-submitted-transaction-hash")
     },
     selectors: {
         paymentSteps: document.querySelectorAll(".pretix-eth-payment-steps")
