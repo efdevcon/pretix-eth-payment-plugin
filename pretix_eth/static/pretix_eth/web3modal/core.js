@@ -10,14 +10,180 @@ import {getCookie, GlobalPretixEthState} from './utils.js';
 
 // Payment process functions
 
-async function submitSignature(signature, transactionHash, selectedAccount) {
-    async function _submitSignature(signature, transactionHash, selectedAccount) {
-        let csrf_cookie = getCookie('pretix_csrftoken')
+/*
+* Called on "Connect wallet and pay" button click and every chain/account change
+*
+* Step 1
+*/
+async function makePayment() {
+    async function _checkChainAndProceed() {
+        // refresh paymentDetails in case account has changed
+        GlobalPretixEthState.paymentDetails = await getPaymentTransactionData(true);
+        if (GlobalPretixEthState.paymentDetails['is_signature_submitted'] === true) {
+            showError("It seems that you have paid for this order already.")
+            return
+        }
+        if (GlobalPretixEthState.paymentDetails['has_other_unpaid_orders'] === true) {
+            showError("Please wait for other payments from your wallet to be confirmed before submitting another transaction.")
+            return
+        }
+
+        // Make sure we're connected to the right chain
+        const currentChainId = await window.web3.eth.getChainId()
+        if (GlobalPretixEthState.paymentDetails['chain_id'] !== currentChainId) {
+            // Subscribe to chainId change
+            let provider = await initWeb3();
+            provider.on("chainChanged", (chainId) => {
+                signMessage();
+            });
+
+            // Subscribe to networkId change
+            provider.on("networkChanged", (networkId) => {
+                signMessage();
+            });
+
+            let desiredChainId = '0x'+GlobalPretixEthState.paymentDetails['chain_id'].toString(16);
+            window.ethereum.request(
+                {
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: desiredChainId}]
+                }
+            )
+        } else {
+            await signMessage();
+        }
+    }
+    resetErrorMessage();
+    try {
+        await _checkChainAndProceed();
+    } catch (error) {
+        showError(error, true);
+    }
+}
+
+/* Step 2 */
+async function signMessage() {
+    async function _signMessage() {
+        GlobalPretixEthState.selectedAccount = await getAccount();
+        GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
+        // sign the message
+        if (
+            GlobalPretixEthState.messageSignature !== null
+            && GlobalPretixEthState.selectedAccount === GlobalPretixEthState.signedByAccount
+        ) {
+            // skip the signature step if we have one already
+            await submitTransaction();
+        } else {
+            if (!GlobalPretixEthState.signatureRequested) {
+                displayOnlyId("sign-a-message");
+                GlobalPretixEthState.signatureRequested = true;
+                let message = JSON.stringify(GlobalPretixEthState.paymentDetails['message']);
+                console.log("Requesting eth_signTypedData_v4:", selectedAccount, message);
+                window.web3.currentProvider.sendAsync(
+                    {
+                        method: "eth_signTypedData_v4",
+                        params: [GlobalPretixEthState.selectedAccount, message],
+                        from: GlobalPretixEthState.selectedAccount
+                    },
+                    async function (err, result) {
+                        if (err) {
+                            GlobalPretixEthState.signatureRequested = false;
+                            showError(err, true)
+                        } else {
+                            GlobalPretixEthState.messageSignature = result.result;
+                            GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
+                            await submitTransaction();
+                        }
+                    }
+                );
+            } else {
+                console.log("Requesting more than one message signature.");
+            }
+        }
+    }
+    try {
+        await _signMessage();
+    } catch (error) {
+        showError(error);
+        GlobalPretixEthState.signatureRequested = false;
+    }
+}
+
+/* Step 3 */
+async function submitTransaction() {
+    async function _submitTransaction() {
+        if (GlobalPretixEthState.transactionRequested === true) {
+            return
+        }
+        GlobalPretixEthState.transactionRequested = true
+        GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
+        // make the payment
+        if (GlobalPretixEthState.paymentDetails['erc20_contract_address'] !== null) {
+            let erc20_abi = await getERC20ABI()
+            const contract = new window.web3.eth.Contract(
+                erc20_abi,
+                GlobalPretixEthState.paymentDetails['erc20_contract_address'],
+            );
+
+            let balance = await contract.methods.balanceOf(GlobalPretixEthState.signedByAccount).call();
+            if (BigInt(balance) < BigInt(GlobalPretixEthState.paymentDetails['amount'])) {
+                showError("Not enough balance to pay using this wallet, please use another currency or payment method, or transfer funds to your wallet and try again.", true);
+                return
+            }
+
+            displayOnlyId("send-transaction");
+            await contract.methods.transfer(
+                GlobalPretixEthState.paymentDetails['recipient_address'],
+                GlobalPretixEthState.paymentDetails['amount'],
+            ).send(
+                {from: GlobalPretixEthState.signedByAccount}
+            ).on('transactionHash', function(transactionHash){
+                submitSignature(
+                    transactionHash
+                );
+            }).on(
+                'error', showError
+            ).catch(
+                showError
+            );
+        } else { // crypto transfer
+            displayOnlyId("send-transaction");
+            await window.web3.eth.sendTransaction(
+                {
+                    from: GlobalPretixEthState.signedByAccount,
+                    to: GlobalPretixEthState.paymentDetails['recipient_address'],
+                    value: GlobalPretixEthState.paymentDetails['amount'],
+                }
+            ).on(
+                'transactionHash',
+                function (transactionHash) {
+                    submitSignature(
+                        transactionHash,
+                    );
+                }
+            ).on(
+                'error', showError
+            ).catch(
+                showError
+            );
+        }
+    }
+    try {
+        await _submitTransaction(GlobalPretixEthState.signature);
+    } catch (error) {
+        showError(error, true);
+    }
+}
+
+/* Step 4 */
+async function submitSignature(transactionHash) {
+    async function _submitSignature(transactionHash) {
+        const csrf_cookie = getCookie('pretix_csrftoken')
         const url = getTransactionDetailsURL();
         let searchParams = new URLSearchParams({
-            signedMessage: signature,
+            signedMessage: GlobalPretixEthState.messageSignature,
             transactionHash: transactionHash,
-            selectedAccount: selectedAccount,
+            selectedAccount: GlobalPretixEthState.signedByAccount,
             csrfmiddlewaretoken: csrf_cookie
         })
         fetch(url, {
@@ -41,173 +207,10 @@ async function submitSignature(signature, transactionHash, selectedAccount) {
         )
     }
     try {
-        await _submitSignature(signature, transactionHash, selectedAccount);
+        await _submitSignature(transactionHash);
     } catch (error) {
         showError(error, true);
     }
 }
-
-
-async function submitTransaction() {
-    async function _submitTransaction() {
-        if (GlobalPretixEthState.transactionRequested === true) {
-            return
-        }
-        GlobalPretixEthState.transactionRequested = true
-
-        const selectedAccount = await getAccount();
-        let paymentDetails = await getPaymentTransactionData();
-        // make the payment
-        if (paymentDetails['erc20_contract_address'] !== null) {
-            let erc20_abi = await getERC20ABI()
-            const contract = new window.web3.eth.Contract(
-                erc20_abi,
-                paymentDetails['erc20_contract_address'],
-            );
-
-            let balance = await contract.methods.balanceOf(selectedAccount).call();
-            if (BigInt(balance) < BigInt(paymentDetails['amount'])) {
-                showError("Not enough balance to pay using this wallet, please use another currency or payment method, or transfer funds to your wallet and try again.", true);
-                return
-            }
-
-            displayOnlyId("send-transaction");
-            await contract.methods.transfer(
-                paymentDetails['recipient_address'],
-                paymentDetails['amount'],
-            ).send({from: selectedAccount}).on('transactionHash', function(transactionHash){
-                submitSignature(
-                    GlobalPretixEthState.signature,
-                    GlobalPretixEthState.transactionHash,
-                    GlobalPretixEthState.selectedAccount);
-            }).on(
-                'error', showError
-            ).catch(
-                showError
-            );
-        } else { // crypto transfer
-            displayOnlyId("send-transaction");
-            await window.web3.eth.sendTransaction(
-                {
-                    from: selectedAccount,
-                    to: paymentDetails['recipient_address'],
-                    value: paymentDetails['amount'],
-                }
-            ).on(
-                'transactionHash',
-                function (transactionHash) {
-                    submitSignature(
-                        GlobalPretixEthState.signature,
-                        transactionHash,
-                        GlobalPretixEthState.selectedAccount
-                    );
-                }
-            ).on(
-                'error', showError
-            ).catch(
-                showError
-            );
-        }
-    }
-    try {
-        await _submitTransaction(GlobalPretixEthState.signature);
-    } catch (error) {
-        showError(error, true);
-    }
-}
-
-/*
-* Called on "Connect wallet and pay" button click and every chain/account change
-*/
-async function makePayment() {
-    async function _checkChainAndProceed() {
-        // refresh paymentDetails in case account has changed
-        let paymentDetails = await getPaymentTransactionData();
-        if (paymentDetails['is_signature_submitted'] === true) {
-            showError("It seems that you have paid for this order already.")
-            return
-        }
-        if (paymentDetails['has_other_unpaid_orders'] === true) {
-            showError("Please wait for other payments from your wallet to be confirmed before submitting another transaction.")
-            return
-        }
-
-        // Make sure we're connected to the right chain
-        const currentChainId = await window.web3.eth.getChainId()
-        if (paymentDetails['chain_id'] !== currentChainId) {
-            // Subscribe to chainId change
-            let provider = await initWeb3();
-            provider.on("chainChanged", (chainId) => {
-                signMessage();
-            });
-
-            // Subscribe to networkId change
-            provider.on("networkChanged", (networkId) => {
-                signMessage();
-            });
-
-            let desiredChainId = '0x'+paymentDetails['chain_id'].toString(16);
-            window.ethereum.request(
-                {
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: desiredChainId}]
-                }
-            )
-        } else {
-            await signMessage();
-        }
-    }
-    resetErrorMessage();
-    try {
-        await _checkChainAndProceed();
-    } catch (error) {
-        showError(error, true);
-    }
-}
-
-/* */
-async function signMessage() {
-    async function _signMessage() {
-        let selectedAccount = await getAccount();
-        let paymentDetails = await getPaymentTransactionData();
-        // sign the message
-        if (GlobalPretixEthState.signature && selectedAccount === GlobalPretixEthState.signedByAccount) {
-            // skip the signature step if we have one already
-            await submitTransaction();
-        } else {
-            if (!GlobalPretixEthState.signatureRequested) {
-                displayOnlyId("sign-a-message");
-                GlobalPretixEthState.signatureRequested = true;
-                let message = JSON.stringify(paymentDetails['message']);
-                console.log("Requesting eth_signTypedData_v4:", selectedAccount, message);
-                window.web3.currentProvider.sendAsync(
-                    {
-                        method: "eth_signTypedData_v4",
-                        params: [selectedAccount, message],
-                        from: selectedAccount
-                    },
-                    async function (err, result) {
-                        if (err) {
-                            GlobalPretixEthState.signatureRequested = false;
-                            showError(err, true)
-                        } else {
-                            GlobalPretixEthState.signature = result.result;
-                            GlobalPretixEthState.signedByAccount = selectedAccount;
-                            await submitTransaction();
-                        }
-                    }
-                );
-            } else {
-                console.log("Requesting more than one message signature.");
-            }
-        }
-    }
-    try {
-        await _signMessage();
-    } catch (error) {
-        showError(error);
-    }
-}
-
 
 export {makePayment}

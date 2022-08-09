@@ -60,7 +60,10 @@ async function getERC20ABI() {
 }
 
 
-async function getPaymentTransactionData(){
+async function getPaymentTransactionData(refresh = false){
+    if (!refresh && GlobalPretixEthState.paymentDetails !== null) {
+        return GlobalPretixEthState.paymentDetails
+    }
     let walletAddress = await getAccount();
     const url = getTransactionDetailsURL();
     const response = await fetch(url + '?' + new URLSearchParams({

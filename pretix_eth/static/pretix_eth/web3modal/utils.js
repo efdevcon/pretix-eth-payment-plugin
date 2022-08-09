@@ -1,13 +1,12 @@
 "use strict";
 
-import {showError} from "./interface.js";
-
 const GlobalPretixEthState = {
-    selectedAccount: '',  // address of the currently connected account
-    signedByAccount: '',  // address of the account that has signed the message, to check on account chages
-    signature: false,  // true if user has sent a message
-    signatureRequested: false,
+    selectedAccount: null,  // address of the currently connected account
+    signedByAccount: null,  // address of the account that has signed the message, to check on account chages
+    messageSignature: null,
     paymentDetails: null,
+    // payment flow flags
+    signatureRequested: false,  // true if js has
     transactionRequested: false,
     transactionHashSubmitted: false,
     lastOrderStatus: '',

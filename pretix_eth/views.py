@@ -75,10 +75,8 @@ class PaymentTransactionDetailsView(GenericViewSet):
             )
         )
 
-        recovered_address = w3.eth.account.recover_message(
-            encode_structured_data(text=json.dumps(typed_data)),
-            signature=signed_message
-        )
+        encoded_data = encode_structured_data(text=json.dumps(typed_data))
+        recovered_address = w3.eth.account.recover_message(encoded_data, signature=signed_message)
 
         if recovered_address.lower() != sender_address.lower():
             raise
