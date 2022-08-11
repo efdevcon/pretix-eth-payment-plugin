@@ -6,7 +6,7 @@ import {getTransactionDetailsURL, getERC20ABI,
     showSuccessMessage, getAccount, initWeb3
 } from './interface.js';
 import {getCookie, GlobalPretixEthState} from './utils.js';
-import {runPeriodicCheck} from './periodic_check';
+import {runPeriodicCheck} from './periodic_check.js';
 
 // Payment process functions
 

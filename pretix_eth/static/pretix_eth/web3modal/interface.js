@@ -144,7 +144,7 @@ function showSuccessMessage(transactionHash) {
 
 export {
     getTransactionDetailsURL, getERC20ABI,
-    getPaymentTransactionData, runPeriodicCheck,
+    getPaymentTransactionData,
     showError, resetErrorMessage, displayOnlyId,
     showSuccessMessage, getAccount, initWeb3
 };
