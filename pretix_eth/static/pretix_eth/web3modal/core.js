@@ -113,6 +113,7 @@ async function signMessage() {
 async function submitTransaction() {
     async function _submitTransaction() {
         if (GlobalPretixEthState.transactionRequested === true) {
+            console.log("Transaction was already submitted.");
             return
         }
         GlobalPretixEthState.transactionRequested = true
@@ -169,7 +170,7 @@ async function submitTransaction() {
         }
     }
     try {
-        await _submitTransaction(GlobalPretixEthState.signature);
+        await _submitTransaction();
     } catch (error) {
         showError(error, true);
     }

@@ -1,9 +1,12 @@
-from rest_framework.serializers import Serializer
+from rest_framework.serializers import Serializer, ModelSerializer
 from rest_framework import fields
+
+from pretix.base.models import Order
 
 from pretix_eth.models import SignedMessage
 from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
 from pretix_eth.utils import get_message_to_sign
+
 
 
 class TransactionDetailsSerializer(Serializer):
@@ -47,3 +50,10 @@ class TransactionDetailsSerializer(Serializer):
             "is_signature_submitted": another_signature_submitted,
             "has_other_unpaid_orders": None,
         }
+
+
+class PaymentStatusSerializer(ModelSerializer):
+
+    class Meta:
+        model = Order
+        fields = ('status',)

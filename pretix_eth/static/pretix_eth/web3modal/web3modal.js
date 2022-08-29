@@ -39,15 +39,3 @@ async function web3ModalOnConnect() {
 window.addEventListener('load', async () => {
     await init();
 });
-
-window.onerror = function (message, file, line, col, error) {
-    return showError(error.message)
-};
-
-window.addEventListener("error", function (e) {
-    return showError(e.error.message)
-})
-
-window.addEventListener('unhandledrejection', function (e) {
-    return showError()
-})

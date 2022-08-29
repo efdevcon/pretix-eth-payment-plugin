@@ -6,7 +6,7 @@
 {% if payment_is_valid %}
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
-<a id="pretix-order-detail-url" data-order-detail-url="{% url 'api-v1:order-detail' organizer=payment.order.event.organizer.slug event=payment.order.event.slug code=payment.order.code %}"></a>
+<a id="pretix-order-detail-url" data-order-detail-url="{% url 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"></a>
 
   {% if submitted_transation_hash %}
 <script type="module" src="/static/pretix_eth/web3modal/run_periodic_check.js"></script>

@@ -12,7 +12,7 @@ from pretix.base.models import Order, OrderPayment
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
-from rest_framework import permissions
+from rest_framework import permissions, mixins
 
 from pretix_eth import serializers
 from pretix_eth.models import SignedMessage
@@ -93,6 +93,19 @@ class PaymentTransactionDetailsView(GenericViewSet):
         )
         message_obj.save()
         return Response(status=201)
+
+
+class OrderStatusView(mixins.RetrieveModelMixin, GenericViewSet):
+
+    queryset = Order.objects.none()
+    serializer_class = serializers.PaymentStatusSerializer
+    permission_classes = [permissions.AllowAny]
+    permission = 'can_view_orders'
+    write_permission = 'can_view_orders'
+    lookup_field = 'secret'
+
+    def get_object(self):
+        return get_object_or_404(Order, code=self.kwargs['order'], event=self.request.event)
 
 
 class ERC20ABIView(APIView):
