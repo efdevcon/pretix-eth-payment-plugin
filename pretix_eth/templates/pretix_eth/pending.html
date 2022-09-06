@@ -2,6 +2,7 @@
 {% load static %}
 
 <br/><br/>
+<script src="{% static '3rd_party/web3.min-1.7.5.js' %}"></script>
 
 {% if payment_is_valid %}
   <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
