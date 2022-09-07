@@ -37,11 +37,6 @@ async function makePayment() {
                 signMessage();
             });
 
-            // Subscribe to networkId change
-            provider.on("networkChanged", (networkId) => {
-                signMessage();
-            });
-
             let desiredChainId = '0x'+GlobalPretixEthState.paymentDetails['chain_id'].toString(16);
             window.ethereum.request(
                 {
