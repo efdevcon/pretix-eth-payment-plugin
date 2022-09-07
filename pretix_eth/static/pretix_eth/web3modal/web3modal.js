@@ -11,7 +11,7 @@ async function init() {
         walletconnect: {
             package: WalletConnectProvider,
             options: {
-                infuraId: "INFURA_ID" // todo required, make it an endpoint
+                infuraId: "a89d9c9e36b44b19be2a812587205eee" // todo required, make it an endpoint
             }
         }
     };

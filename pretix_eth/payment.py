@@ -27,6 +27,8 @@ from .network.tokens import (
     token_verbose_name_to_token_network_id,
 )
 
+from pretix_eth.models import SignedMessage
+
 logger = logging.getLogger(__name__)
 
 RESERVED_ORDER_DIGITS = 5
@@ -298,7 +300,14 @@ class Ethereum(BasePaymentProvider):
 
         hex_wallet_address = self.get_receiving_address()
 
-        ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address}
+        # display all submitted transaction hashes along with their respective sendr and recipient addresses
+        signed_messages = list(payment.signed_messages.all().values(
+            'sender_address',
+            'recipient_address',
+            'transaction_hash'
+        ))
+
+        ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address, "signed_messages": signed_messages}
 
         return template.render(ctx)
 

@@ -6,10 +6,10 @@
         <dd>{{ payment_info.amount }}</dd>
         <dt>{% trans "Currency type" %}</dt>
         <dd>{{ payment_info.currency_type }}</dd>
-        <dt>{% trans "Wallet Address" %}</dt>
+        <dt>{% trans "Receiving Wallet Address" %}</dt>
         <dd>{{ wallet_address }}</dd>
-        <dt>{% trans "Transaction hash" %}</dt>
-        <dd>{{ payment_info.txn_hash }}</dd>
+        <dt>{% trans "Signed Messages" %}</dt>
+        <dd>{{ signed_messages }}</dd>
     </dl>
     {% if "message" in payment_info %}
         <dl class="dl-horizontal">

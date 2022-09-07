@@ -39,9 +39,11 @@ def signal_process_response(sender, request, response, **kwargs):
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
-            "wss://bridge.walletconnect.org/",
-            "wss://*.infura.io/",
+            "https://registry.walletconnect.com/",
+            "https://*.bridge.walletconnect.org/",
+            "wss://*.bridge.walletconnect.org/",
             "https://*.infura.io/",
+            "wss://*.infura.io/",
         ],
         'manifest-src': ["'self'"],
     })
