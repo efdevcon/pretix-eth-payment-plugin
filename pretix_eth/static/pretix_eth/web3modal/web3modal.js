@@ -8,12 +8,12 @@ async function init() {
     GlobalPretixEthState.elements.divPrepare.style.display = "block";
 
     const providerOptions = {
-        walletconnect: {
+        /* walletconnect: {
             package: WalletConnectProvider,
             options: {
                 infuraId: "a89d9c9e36b44b19be2a812587205eee" // todo required, make it an endpoint
             }
-        }
+        }*/
     };
     web3Modal = new Web3Modal({
         cacheProvider: false,

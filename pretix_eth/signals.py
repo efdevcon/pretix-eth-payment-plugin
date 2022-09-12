@@ -36,6 +36,12 @@ def signal_process_response(sender, request, response, **kwargs):
         'style-src': [
             "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
             "'sha256-O+AX3tWIOimhuzg+lrMfltcdtWo7Mp2Y9qJUkE6ysWE='",
+            "'sha256-loEB2lJVNc8mwYhvyJtb9aHD7kvSHU2kaRWkXHRpApY='",  # walletconnect-web3-provider-1.8.0.js
+        ],
+        'script-src': [
+            "'sha256-G0alWBi3d/qUeACYUzGOmJ34+fZaiiZaP2XpCEg7UFA='",  # web3modal-HOTFIX.js
+            "'sha256-loEB2lJVNc8mwYhvyJtb9aHD7kvSHU2kaRWkXHRpApY='",  # walletconnect-web3-provider-1.8.0.js
+            "'sha256-sqlmDxtDyZOFztnt94HoSfNbtRvmgNuCqYTRVVH6X3k='",  # web3.min-1.7.5.js
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [

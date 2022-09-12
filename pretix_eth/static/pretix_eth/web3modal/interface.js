@@ -12,20 +12,10 @@ async function initWeb3() {
     } catch(e) {
         showError("Failed to connect to a wallet provider.");
     }
-    window.web3 = new Web3(provider);
+    window.web3_provider = new Web3(provider);
 
     // Subscribe to accounts change
     provider.on("accountsChanged", (accounts) => {
-        location.reload();
-    });
-
-    // Subscribe to chainId change
-    provider.on("chainChanged", (chainId) => {
-        location.reload();
-    });
-
-    // Subscribe to networkId change
-    provider.on("networkChanged", (networkId) => {
         location.reload();
     });
 
@@ -34,11 +24,11 @@ async function initWeb3() {
 
 
 async function getAccount() {
-    if (window.web3 === undefined || window.web3.eth === undefined) {
+    if (window.web3_provider === undefined || window.web3_provider.eth === undefined) {
         await initWeb3();
     }
     // Get a Web3 instance for the wallet
-    const accounts = await window.web3.eth.getAccounts();
+    const accounts = await window.web3_provider.eth.getAccounts();
     // MetaMask does not give you all accounts, only the selected account
     return accounts[0];
 }
