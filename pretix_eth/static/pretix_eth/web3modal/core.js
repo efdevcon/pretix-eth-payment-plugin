@@ -3,7 +3,7 @@
 import {getTransactionDetailsURL, getERC20ABI,
     getPaymentTransactionData,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount, initWeb3
+    showSuccessMessage, getAccount, getProvider
 } from './interface.js';
 import {getCookie, GlobalPretixEthState} from './utils.js';
 import {runPeriodicCheck} from './periodic_check.js';
@@ -28,11 +28,12 @@ async function makePayment() {
             return
         }
 
+        let provider = await getProvider();
+
         // Make sure we're connected to the right chain
-        const currentChainId = await window.web3_provider.eth.getChainId()
+        const currentChainId = await provider.eth.getChainId()
         if (GlobalPretixEthState.paymentDetails['chain_id'] !== currentChainId) {
             // Subscribe to chainId change
-            let provider = await initWeb3();
 
             provider.on("chainChanged", signMessage);
 
@@ -72,9 +73,8 @@ async function signMessage() {
                 displayOnlyId("sign-a-message");
                 GlobalPretixEthState.signatureRequested = true;
                 let message = JSON.stringify(GlobalPretixEthState.paymentDetails['message']);
-                // console.log("Requesting eth_signTypedData_v4:", selectedAccount, message);
-                debugger;
-                window.web3_provider.currentProvider.sendAsync(
+                let provider = await getProvider();
+                provider.currentProvider.sendAsync(
                     {
                         method: "eth_signTypedData_v4",
                         params: [GlobalPretixEthState.selectedAccount, message],
@@ -82,11 +82,9 @@ async function signMessage() {
                     },
                     async function (err, result) {
                         if (err) {
-                            debugger;
                             GlobalPretixEthState.signatureRequested = false;
                             showError(err, true)
                         } else {
-                            debugger;
                             GlobalPretixEthState.messageSignature = result.result;
                             GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
                             await submitTransaction();
@@ -98,7 +96,6 @@ async function signMessage() {
             }
         }
     }
-    debugger;
     try {
         await _signMessage();
     } catch (error) {
@@ -110,17 +107,17 @@ async function signMessage() {
 /* Step 3 */
 async function submitTransaction() {
     async function _submitTransaction() {
-        debugger;
         if (GlobalPretixEthState.transactionRequested === true) {
             console.log("Transaction was already submitted.");
             return
         }
         GlobalPretixEthState.transactionRequested = true
         GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
+        let provider = getProvider()
         // make the payment
         if (GlobalPretixEthState.paymentDetails['erc20_contract_address'] !== null) {
             let erc20_abi = await getERC20ABI()
-            const contract = new window.web3_provider.eth.Contract(
+            const contract = new provider.eth.Contract(
                 erc20_abi,
                 GlobalPretixEthState.paymentDetails['erc20_contract_address'],
             );
@@ -148,7 +145,7 @@ async function submitTransaction() {
             );
         } else { // crypto transfer
             displayOnlyId("send-transaction");
-            await window.web3_provider.eth.sendTransaction(
+            await provider.eth.sendTransaction(
                 {
                     from: GlobalPretixEthState.signedByAccount,
                     to: GlobalPretixEthState.paymentDetails['recipient_address'],

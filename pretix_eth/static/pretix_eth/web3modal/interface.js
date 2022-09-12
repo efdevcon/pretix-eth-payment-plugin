@@ -5,12 +5,19 @@
 import {GlobalPretixEthState} from './utils.js';
 
 
-async function initWeb3() {
+async function getProvider() {
+    if (window.web3_provider) {
+        return window.web3_provider
+    }
     let provider;
     try {
-        provider = await web3Modal.connect();
+        provider = await window.Web3Modal.default.connect();
     } catch(e) {
-        showError("Failed to connect to a wallet provider.");
+        provider = window.ethereum
+    }
+    if (!provider) {
+        // no provider found
+        throw "Failed to connect to a wallet provider. Please make sure you have Metamask or another injected provider set up in this browser.";
     }
     window.web3_provider = new Web3(provider);
 
@@ -24,11 +31,9 @@ async function initWeb3() {
 
 
 async function getAccount() {
-    if (window.web3_provider === undefined || window.web3_provider.eth === undefined) {
-        await initWeb3();
-    }
+    let provider = await getProvider();
     // Get a Web3 instance for the wallet
-    const accounts = await window.web3_provider.eth.getAccounts();
+    const accounts = await provider.eth.getAccounts();
     // MetaMask does not give you all accounts, only the selected account
     return accounts[0];
 }
@@ -66,7 +71,7 @@ async function getPaymentTransactionData(refresh = false){
 }
 
 /*
-* Success and error handdling
+* Success and error handling
 */
 
 function showError(message = '', reset_state = true) {
@@ -136,5 +141,5 @@ export {
     getTransactionDetailsURL, getERC20ABI,
     getPaymentTransactionData,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount, initWeb3
+    showSuccessMessage, getAccount, getProvider
 };
