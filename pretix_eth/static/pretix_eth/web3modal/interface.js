@@ -27,7 +27,7 @@ async function getProvider() {
         location.reload();
     });
 
-    return provider
+    return window.web3_provider
 }
 
 
