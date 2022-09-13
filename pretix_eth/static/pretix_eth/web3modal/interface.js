@@ -11,8 +11,9 @@ async function getProvider() {
     }
     let provider;
     try {
-        provider = await window.Web3Modal.default.connect();
+        provider = await web3Modal.connect();
     } catch(e) {
+        console.log("Web3Modal exception:", e)
         provider = window.ethereum
     }
     if (!provider) {
