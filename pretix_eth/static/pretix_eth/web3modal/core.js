@@ -113,7 +113,7 @@ async function submitTransaction() {
         }
         GlobalPretixEthState.transactionRequested = true
         GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
-        let provider = getProvider()
+        let provider = await getProvider()
         // make the payment
         if (GlobalPretixEthState.paymentDetails['erc20_contract_address'] !== null) {
             let erc20_abi = await getERC20ABI()
