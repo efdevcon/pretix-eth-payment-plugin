@@ -55,8 +55,10 @@ class Command(BaseCommand):
                     OrderPayment.PAYMENT_STATE_PENDING
                 )
             )
+            logger.debug(f" * Found {unconfirmed_order_payments.count()} unconfirmed order payments")
 
         for order_payment in unconfirmed_order_payments:
+            logger.debug(f" * trying to confirm payment: {order_payment} (has {order_payment.signed_messages.all().count()} signed messages)")
             # it is tempting to put .filter(invalid=False) here, but remember
             # there is still a chance that low-gas txs are mined later on.
             for signed_message in order_payment.signed_messages.all():
@@ -82,14 +84,17 @@ class Command(BaseCommand):
 
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
+                logger.debug(f"   * Looking for a receip for a transaction with hash={signed_message.transaction_hash}")
                 try:
                     receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
                 except TransactionNotFound:
+                    logger.debug(f"   * Transaction hash={signed_message.transaction_hash} not found, skipping.")
                     if signed_message.age > 30*60:
                         signed_message.invalidate()
                     continue
 
                 if receipt.status == 0:
+                    logger.debug(f"   * Transaction hash={signed_message.transaction_hash} was has status=0, invalidating.")
                     signed_message.invalidate()
                     continue
 
@@ -108,13 +113,17 @@ class Command(BaseCommand):
                     transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
                     payment_amount = transaction_details.value
 
-                correct_sender = getattr(receipt, 'from').lower() == signed_message.sender_address.lower()
-                correct_recipient = receipt.to.lower() == signed_message.recipient_address.lower()
+                receipt_sender = getattr(receipt, 'from').lower()
+                receipt_reciever = receipt.to.lower()
+                correct_sender = receipt_sender == signed_message.sender_address.lower()
+                correct_recipient = receipt_reciever == signed_message.recipient_address.lower()
 
                 if not (correct_sender and correct_recipient):
                     logger.warning(
                         f"  * Transaction hash provided does not match correct sender and recipient"
                     )
+                    logger.debug(f"receipt sender={receipt_sender}, expected sender={signed_message.sender_address.lower()}")
+                    logger.debug(f"receipt recipient={receipt_reciever}, expected recipient={signed_message.recipient_address.lower()}")
                     continue
 
                 if payment_amount > 0:
