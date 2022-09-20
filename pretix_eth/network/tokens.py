@@ -258,7 +258,7 @@ class DaiGoerliL1(GoerliL1):
 
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
-    ADDRESS = "0x73967c6a0904aa032c103b4104747e88c566b1a2"
+    ADDRESS = "0x73967c6a0904aA032C103b4104747E88c566B1A2"
 
 
 class EthL1(L1):
@@ -276,7 +276,7 @@ class DaiL1(L1):
 
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
-    ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
+    ADDRESS = "0x6B175474E89094C44Da98b954EedeAC495271d0F"
 
 
 """ Optimism Networks """
@@ -317,7 +317,7 @@ class DaiKovanOptimism(KovanOptimism):
 
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
-    ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+    ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
 
 
 class EthOptimism(Optimism):
@@ -335,7 +335,7 @@ class DaiOptimism(Optimism):
 
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
-    ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+    ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
 
 
 """ Arbitrum Networks """
