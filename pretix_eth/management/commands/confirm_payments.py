@@ -114,14 +114,16 @@ class Command(BaseCommand):
                 if token.IS_NATIVE_ASSET:
                     # ETH
                     payment_amount = w3.eth.getTransaction(signed_message.transaction_hash).value
+                    receipt_reciever = receipt.to.lower()
                 else:
                     # DAI
                     contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
                     transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
                     payment_amount = transaction_details.value
+                    # take recipient address from the topics, not from the "from" field, as that's the contract address
+                    receipt_reciever = receipt.logs[0].topics[2][12:].hex().lower()
 
                 receipt_sender = getattr(receipt, 'from').lower()
-                receipt_reciever = receipt.to.lower()
                 correct_sender = receipt_sender == signed_message.sender_address.lower()
                 correct_recipient = receipt_reciever == signed_message.recipient_address.lower()
 
