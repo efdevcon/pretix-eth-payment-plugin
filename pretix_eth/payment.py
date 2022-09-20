@@ -260,6 +260,7 @@ class Ethereum(BasePaymentProvider):
             "payment_is_valid": payment_is_valid,
             "order": payment.order,
             "payment": payment,
+            'event': self.event,
         })
 
         if not payment_is_valid:

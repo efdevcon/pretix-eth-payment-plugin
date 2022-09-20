@@ -10,26 +10,31 @@
 
 <a id="pretix-order-detail-url" data-order-detail-url="{% eventurl event 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"></a>
 
-  {% if submitted_transation_hash %}
-<script type="module" src="/static/pretix_eth/web3modal/run_periodic_check.js"></script>
+{% if submitted_transation_hash %}
+<script type="module"
+        src="/static/pretix_eth/web3modal/run_periodic_check.js"></script>
 <div>
-  <p>A payment for this order has already been submitted in transaction <strong><span id="pretix-eth-submitted-transaction-hash">{{ submitted_transation_hash }}</span></strong>.</p>
-</div>
-  {% endif %}
-
-  {% if order_accepting_payments %}
-  <div id="pretix-eth-payment-summary">Please pay {{amount_manual}} on {{network_name}} using the button below.</div>
-  {% include "pretix_eth/web3modal.html" with payment=payment %}
-  {% endif %}
-  <p>
-    {% blocktrans trimmed %}
-    Once you send your payment, our system will automatically check for
-    confirmation. Please allow up to several hours. Once confirmed, you will
-    get an email notification.
-    {% endblocktrans %}
+  <p>A payment for this order has already been submitted in transaction <strong><span
+          id="pretix-eth-submitted-transaction-hash">{{ submitted_transation_hash }}</span></strong>.
   </p>
+</div>
+{% endif %}
 
-  <p>
+{% if order_accepting_payments %}
+<div id="pretix-eth-payment-summary">Please pay {{amount_manual}} on
+  {{network_name}} using the button below.
+</div>
+{% include "pretix_eth/web3modal.html" with payment=payment event=event %}
+{% endif %}
+<p>
+  {% blocktrans trimmed %}
+  Once you send your payment, our system will automatically check for
+  confirmation. Please allow up to several hours. Once confirmed, you will
+  get an email notification.
+  {% endblocktrans %}
+</p>
+
+<p>
     {% blocktrans trimmed %}
     If you want to improve this process, submit a PR to this github repository:
     {% endblocktrans %}
