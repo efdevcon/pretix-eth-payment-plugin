@@ -53,7 +53,8 @@ class Command(BaseCommand):
                 order__event=event,
                 state__in=(
                     OrderPayment.PAYMENT_STATE_CREATED,
-                    OrderPayment.PAYMENT_STATE_PENDING
+                    OrderPayment.PAYMENT_STATE_PENDING,
+                    OrderPayment.PAYMENT_STATE_CANCELED,
                 )
             )
             if log_verbosity > 0:
