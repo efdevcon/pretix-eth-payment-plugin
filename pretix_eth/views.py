@@ -109,5 +109,8 @@ class OrderStatusView(mixins.RetrieveModelMixin, GenericViewSet):
 
 
 class ERC20ABIView(APIView):
+
+    permission_classes = [permissions.AllowAny]
+
     def get(self, request, organizer, event):
         return Response(tokens.TOKEN_ABI)
