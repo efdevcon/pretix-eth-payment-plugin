@@ -416,7 +416,7 @@ class DaiArbitrum(Arbitrum):
 
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
-    ADDRESS = "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1"
+    ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
 
 
 registry = [
