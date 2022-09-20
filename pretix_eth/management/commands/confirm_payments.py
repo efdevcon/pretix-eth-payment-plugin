@@ -36,15 +36,16 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         no_dry_run = options["no_dry_run"]
+        log_verbosity = int(options.get('verbosity', 0))
 
         with scope(organizer=None):
             # todo change to events where pending payments are expected only?
             events = Event.objects.all()
 
         for event in events:
-            self.confirm_payments_for_event(event, no_dry_run)
+            self.confirm_payments_for_event(event, no_dry_run, log_verbosity)
 
-    def confirm_payments_for_event(self, event: Event, no_dry_run):
+    def confirm_payments_for_event(self, event: Event, no_dry_run, log_verbosity=0):
         logger.info(f"Event name - {event.name}")
 
         with scope(organizer=event.organizer):
@@ -55,10 +56,12 @@ class Command(BaseCommand):
                     OrderPayment.PAYMENT_STATE_PENDING
                 )
             )
-            logger.debug(f" * Found {unconfirmed_order_payments.count()} unconfirmed order payments")
+            if log_verbosity > 0:
+                logger.info(f" * Found {unconfirmed_order_payments.count()} unconfirmed order payments")
 
         for order_payment in unconfirmed_order_payments:
-            logger.debug(f" * trying to confirm payment: {order_payment} (has {order_payment.signed_messages.all().count()} signed messages)")
+            if log_verbosity > 0:
+                logger.info(f" * trying to confirm payment: {order_payment} (has {order_payment.signed_messages.all().count()} signed messages)")
             # it is tempting to put .filter(invalid=False) here, but remember
             # there is still a chance that low-gas txs are mined later on.
             for signed_message in order_payment.signed_messages.all():
@@ -84,17 +87,20 @@ class Command(BaseCommand):
 
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
-                logger.debug(f"   * Looking for a receip for a transaction with hash={signed_message.transaction_hash}")
+                if log_verbosity > 0:
+                    logger.info(f"   * Looking for a receip for a transaction with hash={signed_message.transaction_hash}")
                 try:
                     receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
                 except TransactionNotFound:
-                    logger.debug(f"   * Transaction hash={signed_message.transaction_hash} not found, skipping.")
+                    if log_verbosity > 0:
+                        logger.info(f"   * Transaction hash={signed_message.transaction_hash} not found, skipping.")
                     if signed_message.age > 30*60:
                         signed_message.invalidate()
                     continue
 
                 if receipt.status == 0:
-                    logger.debug(f"   * Transaction hash={signed_message.transaction_hash} was has status=0, invalidating.")
+                    if log_verbosity > 0:
+                        logger.info(f"   * Transaction hash={signed_message.transaction_hash} was has status=0, invalidating.")
                     signed_message.invalidate()
                     continue
 
@@ -122,8 +128,9 @@ class Command(BaseCommand):
                     logger.warning(
                         f"  * Transaction hash provided does not match correct sender and recipient"
                     )
-                    logger.debug(f"receipt sender={receipt_sender}, expected sender={signed_message.sender_address.lower()}")
-                    logger.debug(f"receipt recipient={receipt_reciever}, expected recipient={signed_message.recipient_address.lower()}")
+                    if log_verbosity > 0:
+                        logger.info(f"receipt sender={receipt_sender}, expected sender={signed_message.sender_address.lower()}")
+                        logger.info(f"receipt recipient={receipt_reciever}, expected recipient={signed_message.recipient_address.lower()}")
                     continue
 
                 if payment_amount > 0:
