@@ -34,8 +34,8 @@ async function makePayment() {
         const currentChainId = await provider.eth.getChainId()
         if (GlobalPretixEthState.paymentDetails['chain_id'] !== currentChainId) {
             // Subscribe to chainId change
-
-            provider.on("chainChanged", signMessage);
+            
+            provider._provider.on("chainChanged", signMessage);
 
             let desiredChainId = '0x'+GlobalPretixEthState.paymentDetails['chain_id'].toString(16);
             window.ethereum.request(
