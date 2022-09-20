@@ -55,7 +55,7 @@ class PaymentTransactionDetailsView(GenericViewSet):
 
         return Response(response_data)
 
-    def submit_signed_transaction(self, request, organizer, event, order, secret, pk):
+    def submit_signed_transaction(self, request, *args, **kwargs):
         order_payment: OrderPayment = self.get_object()
         serializer = self.get_serializer(order_payment)
 
@@ -112,5 +112,5 @@ class ERC20ABIView(APIView):
 
     permission_classes = [permissions.AllowAny]
 
-    def get(self, request, organizer, event):
+    def get(self, request, *args, **kwargs):
         return Response(tokens.TOKEN_ABI)
