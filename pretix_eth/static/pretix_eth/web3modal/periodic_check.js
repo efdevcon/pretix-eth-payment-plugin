@@ -1,4 +1,4 @@
-import {getCookie, GlobalPretixEthState} from "./utils.js";
+import {getCookie, GlobalPretixEthState} from "./interface.js";
 
 async function periodicCheck() {
     let url = GlobalPretixEthState.elements.aOrderDetailURL.getAttribute("data-order-detail-url");

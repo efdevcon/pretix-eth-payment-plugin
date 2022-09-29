@@ -57,11 +57,12 @@ def signal_process_response(sender, request, response, **kwargs):
     return response
 
 
-@receiver(html_head, dispatch_uid="payment_eth_add_question_type_javascript")
-def add_question_type_javascript(sender, request, **kwargs):
+@receiver(html_head,
+          dispatch_uid="payment_eth_add_web3modal_css_and_javascript")
+def add_web3modal_css_and_javascript(sender, request, **kwargs):
     # TODO: enable js only when question is asked
     # url = resolve(request.path_info)
-    template = get_template('pretix_eth/question_type_javascript.html')
+    template = get_template('pretix_eth/web3modal_css_and_javascript.html')
     context = {
         'event': sender,
     }

@@ -6,10 +6,19 @@
         <dd>{{ payment_info.amount }}</dd>
         <dt>{% trans "Currency type" %}</dt>
         <dd>{{ payment_info.currency_type }}</dd>
-        <dt>{% trans "Receiving Wallet Address" %}</dt>
+        <dt>{% trans "Expected Receiving Wallet Address" %}</dt>
         <dd>{{ wallet_address }}</dd>
-        <dt>{% trans "Signed Messages" %}</dt>
-        <dd>{{ signed_messages }}</dd>
+        <dt>{% trans "Transaction Sender Address" %}</dt>
+        <dd>{{ transaction_sender_address }}</dd>
+        <dt>{% trans "Transaction Recipient Address" %}</dt>
+        <dd>{{ transaction_recipient_address }}</dd>
+        <dt>{% trans "Transaction Hash" %}</dt>
+        {% if block_explorer_link %}
+        <dd><a href="{{ block_explorer_link }}" target="_blank">{{
+            transaction_hash }}</a></dd>
+        {% else %}
+        <dd>{{ transaction_hash }}</dd>
+        {% endif %}
     </dl>
     {% if "message" in payment_info %}
         <dl class="dl-horizontal">

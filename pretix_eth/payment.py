@@ -302,13 +302,27 @@ class Ethereum(BasePaymentProvider):
         hex_wallet_address = self.get_receiving_address()
 
         # display all submitted transaction hashes along with their respective sendr and recipient addresses
-        signed_messages = list(payment.signed_messages.all().values(
-            'sender_address',
-            'recipient_address',
-            'transaction_hash'
-        ))
+        last_signed_message: SignedMessage = payment.signed_messages.last()
 
-        ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address, "signed_messages": signed_messages}
+        if last_signed_message is not None:
+            transaction_sender_address = last_signed_message.sender_address
+            transaction_recipient_address = last_signed_message.recipient_address
+            block_explorer_link = None
+            transaction_hash = last_signed_message.transaction_hash
+        else:
+            transaction_sender_address = None
+            transaction_recipient_address = None
+            block_explorer_link = None
+            transaction_hash = None
+
+        ctx = {
+            "payment_info": payment.info_data,
+            "wallet_address": hex_wallet_address,
+            "transaction_sender_address": transaction_sender_address,
+            "transaction_recipient_address": transaction_recipient_address,
+            "block_explorer_link": block_explorer_link,
+            "transaction_hash": transaction_hash
+        }
 
         return template.render(ctx)
 

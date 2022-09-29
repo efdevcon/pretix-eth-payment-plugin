@@ -3,20 +3,30 @@
 {% load eventurl %}
 
 <br/><br/>
+<link rel="stylesheet" type="text/css" href="{% static "
+      pretix_eth/eth_plugin.css" %}" />
+
 <script src="{% static '3rd_party/web3.min-1.7.5.js' %}"></script>
+<script type="text/javascript"
+        src="{% static '3rd_party/web3modal-HOTFIX.js' %}"></script>
 
 {% if payment_is_valid %}
-  <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
+<a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
-<a id="pretix-order-detail-url" data-order-detail-url="{% eventurl event 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"></a>
+<a id="pretix-order-detail-url"
+   data-order-detail-url="{% eventurl event 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"
+   data-chains-json-url="{% static '3rd_party/chains-2022-09-27.json' %}"></a>
+<a id="pretix-data-chain-info" data-chain-id="{{ chain_id }}"
+   data-network-name="{{ network_name }}"></a>
 
 {% if submitted_transation_hash %}
 <script type="module"
         src="/static/pretix_eth/web3modal/run_periodic_check.js"></script>
 <div>
-  <p>A payment for this order has already been submitted in transaction <strong><span
-          id="pretix-eth-submitted-transaction-hash">{{ submitted_transation_hash }}</span></strong>.
-  </p>
+    <p>A payment for this order has already been submitted in transaction
+        <strong><span
+                id="pretix-eth-submitted-transaction-hash">{{ submitted_transation_hash }}</span></strong>.
+    </p>
 </div>
 {% endif %}
 

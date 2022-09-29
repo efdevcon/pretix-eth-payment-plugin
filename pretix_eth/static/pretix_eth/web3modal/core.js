@@ -1,11 +1,11 @@
 "use strict";
 
-import {getTransactionDetailsURL, getERC20ABI,
-    getPaymentTransactionData,
+import {
+    getTransactionDetailsURL, getERC20ABI,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount, getProvider
+    showSuccessMessage, getAccount, getProvider,
+    getCookie, GlobalPretixEthState, getPaymentTransactionData
 } from './interface.js';
-import {getCookie, GlobalPretixEthState} from './utils.js';
 import {runPeriodicCheck} from './periodic_check.js';
 
 // Payment process functions
@@ -34,14 +34,16 @@ async function makePayment() {
         const currentChainId = await provider.eth.getChainId()
         if (GlobalPretixEthState.paymentDetails['chain_id'] !== currentChainId) {
             // Subscribe to chainId change
-            
             provider._provider.on("chainChanged", signMessage);
-
-            let desiredChainId = '0x'+GlobalPretixEthState.paymentDetails['chain_id'].toString(16);
+            // display request to changee network
+            GlobalPretixEthState.elements.paymentNetworkName.innerText = GlobalPretixEthState.elements.aNetworkData.getAttribute("data-network-name");
+            displayOnlyId("set-correct-network");
+            // trigger network change in provider
+            let desiredChainId = '0x' + GlobalPretixEthState.paymentDetails['chain_id'].toString(16);
             window.ethereum.request(
                 {
                     method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: desiredChainId}]
+                    params: [{chainId: desiredChainId}]
                 }
             )
         } else {
