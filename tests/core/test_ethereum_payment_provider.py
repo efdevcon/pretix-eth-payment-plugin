@@ -2,8 +2,6 @@ from django.test import RequestFactory
 from django.contrib.sessions.backends.db import SessionStore
 import pytest
 
-from pretix_eth.models import WalletAddress
-
 TEST_ETH_RATE = "4000.0"
 TEST_DAI_RATE = "1.0"
 FORM_FIELDS_SETTINGS = ("TOKEN_RATES", "_NETWORKS", "NETWORK_RPC_URL")
@@ -37,15 +35,12 @@ def test_provider_is_allowed(event, provider):
     request.event = event
     request.session = session
 
-    WalletAddress.objects.create(
-        event=event,
-        hex_address="0x0000000000000000000000000000000000000000",
-    )
-
     # test that incorrect settings lead to provider being disallowed.
     provider.settings.set("TOKEN_RATES", dict())
     provider.settings.set("_NETWORKS", [])
     provider.settings.set("NETWORK_RPC_URL", dict())
+    provider.settings.set("SINGLE_RECEIVER_ADDRESS",
+                          "0x0000000000000000000000000000000000000000")
     assert not provider.is_allowed(request)
 
     # now test with right values:

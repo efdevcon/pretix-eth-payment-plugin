@@ -6,8 +6,6 @@ import time
 
 from django.test import RequestFactory
 
-from pretix_eth.models import WalletAddress
-
 
 WEB3_PROVIDER_URI = os.environ.get("WEB3_PROVIDER_URI")
 
@@ -86,14 +84,13 @@ def test_confirm_payment_enough(
     provider, event, get_request_order_payment, pytestconfig
 ):
     check_web3_provider(pytestconfig)
-    provider.settings.set("NETWORK_RPC_URL", {"Rinkeby_RPC_URL": WEB3_PROVIDER_URI})
-
+    provider.settings.set("NETWORK_RPC_URL",
+                          {"Rinkeby_RPC_URL": WEB3_PROVIDER_URI})
+    provider.settings.set("SINGLE_RECEIVER_ADDRESS",
+                          "0x0000000000000000000000000000000000000000")
     payments = []
     orders = []
     for payment_info in TEST_ENOUGH_AMOUNT:
-        WalletAddress.objects.create(
-            hex_address=payment_info["hex_address"], event=event
-        )
         order, payment = make_order_payment(
             payment_info, provider, get_request_order_payment
         )
@@ -124,9 +121,6 @@ def test_confirm_payment_dry_run(
     payments = []
     orders = []
     for payment_info in TEST_ENOUGH_AMOUNT:
-        WalletAddress.objects.create(
-            hex_address=payment_info["hex_address"], event=event
-        )
         order, payment = make_order_payment(
             payment_info, provider, get_request_order_payment
         )
@@ -173,9 +167,6 @@ def test_confirm_payment_lower_amount(
     payments = []
     orders = []
     for payment_info in TEST_LOWER_AMOUNT:
-        WalletAddress.objects.create(
-            hex_address=payment_info["hex_address"], event=event
-        )
         order, payment = make_order_payment(
             payment_info, provider, get_request_order_payment
         )
@@ -220,9 +211,6 @@ def test_confirm_payment_wrong_currency(
     payments = []
     orders = []
     for payment_info in TEST_WRONG_CURRENCY:
-        WalletAddress.objects.create(
-            hex_address=payment_info["hex_address"], event=event
-        )
         order, payment = make_order_payment(
             payment_info, provider, get_request_order_payment
         )

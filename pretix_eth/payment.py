@@ -130,7 +130,8 @@ class Ethereum(BasePaymentProvider):
             logger.error("No networks configured")
 
         receiving_address = self.get_receiving_address()
-        single_receiver_mode_configured = len(receiving_address) > 0
+        single_receiver_mode_configured = receiving_address is not None and len(
+            receiving_address) > 0
 
         if not single_receiver_mode_configured:
             logger.error("Single receiver addresses not configured properly")
