@@ -307,21 +307,28 @@ class Ethereum(BasePaymentProvider):
         if last_signed_message is not None:
             transaction_sender_address = last_signed_message.sender_address
             transaction_recipient_address = last_signed_message.recipient_address
-            block_explorer_link = None
             transaction_hash = last_signed_message.transaction_hash
         else:
             transaction_sender_address = None
             transaction_recipient_address = None
-            block_explorer_link = None
             transaction_hash = None
+
+        token: IToken = all_token_and_network_ids_to_tokens[
+            payment.info_data["currency_type"]]
 
         ctx = {
             "payment_info": payment.info_data,
+            "token": token,
             "wallet_address": hex_wallet_address,
             "transaction_sender_address": transaction_sender_address,
+            "transaction_sender_address_link": token.get_address_link(
+                transaction_sender_address),
             "transaction_recipient_address": transaction_recipient_address,
-            "block_explorer_link": block_explorer_link,
-            "transaction_hash": transaction_hash
+            "transaction_recipient_address_link": token.get_address_link(
+                transaction_recipient_address),
+            "transaction_hash": transaction_hash,
+            "transaction_hash_link": token.get_transaction_link(
+                transaction_hash),
         }
 
         return template.render(ctx)

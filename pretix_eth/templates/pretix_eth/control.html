@@ -9,12 +9,22 @@
         <dt>{% trans "Expected Receiving Wallet Address" %}</dt>
         <dd>{{ wallet_address }}</dd>
         <dt>{% trans "Transaction Sender Address" %}</dt>
+        {% if transaction_sender_address_link %}
+        <dd><a href="{{ transaction_sender_address_link }}" target="_blank">{{
+            transaction_sender_address }}</a></dd>
+        {% else %}
         <dd>{{ transaction_sender_address }}</dd>
+        {% endif %}
         <dt>{% trans "Transaction Recipient Address" %}</dt>
+        {% if transaction_recipient_address_link %}
+        <dd><a href="{{ transaction_recipient_address_link }}" target="_blank">{{
+            transaction_recipient_address }}</a></dd>
+        {% else %}
         <dd>{{ transaction_recipient_address }}</dd>
+        {% endif %}
         <dt>{% trans "Transaction Hash" %}</dt>
-        {% if block_explorer_link %}
-        <dd><a href="{{ block_explorer_link }}" target="_blank">{{
+        {% if transaction_hash_link %}
+        <dd><a href="{{ transaction_hash_link }}" target="_blank">{{
             transaction_hash }}</a></dd>
         {% else %}
         <dd>{{ transaction_hash }}</dd>

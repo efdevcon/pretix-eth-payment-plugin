@@ -1,3 +1,4 @@
+from typing import Optional
 import decimal
 
 from django.core.exceptions import ImproperlyConfigured
@@ -69,6 +70,7 @@ class IToken(object):
     TOKEN_AND_NETWORK_ID_COMBINED = None  # {TOKEN_SYMBOL}-{NETWORK_IDENTIFIER}
     IS_NATIVE_ASSET = True  # Not a token - e.g. ETH in L1.
     ADDRESS = None  # If a token, then the smart contract address.
+    EIP3091_EXPLORER_URL = None  # if set, allows links to transactions to be generated
 
     def __init__(self):
         self._validate_class_variables()
@@ -158,6 +160,19 @@ class IToken(object):
             )
             return token_contract.functions.balanceOf(checksum_address).call()
 
+    def get_transaction_link(self, transaction_hash: Optional[str]) -> Optional[
+        str]:
+        return '{base}/tx/{hash}'.format(
+            base=self.EIP3091_EXPLORER_URL,
+            hash=transaction_hash,
+        )
+
+    def get_address_link(self, address: Optional[str]) -> Optional[str]:
+        return '{base}/address/{address}'.format(
+            base=self.EIP3091_EXPLORER_URL,
+            address=address,
+        )
+
 
 """ L1 Networks """
 
@@ -166,6 +181,7 @@ class L1(IToken):
     NETWORK_IDENTIFIER = "L1"
     NETWORK_VERBOSE_NAME = "Ethereum Mainnet"
     CHAIN_ID = 1
+    EIP3091_EXPLORER_URL = "https://etherscan.io"
 
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_token_base_unit
@@ -213,6 +229,7 @@ class RinkebyL1(L1):
     NETWORK_IDENTIFIER = "Rinkeby"
     NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
     CHAIN_ID = 4
+    EIP3091_EXPLORER_URL = "https://rinkeby.etherscan.io"
 
 
 class GoerliL1(L1):
@@ -223,6 +240,7 @@ class GoerliL1(L1):
     NETWORK_IDENTIFIER = "Goerli"
     NETWORK_VERBOSE_NAME = "Goerli Ethereum Testnet"
     CHAIN_ID = 5
+    EIP3091_EXPLORER_URL = "https://goerli.etherscan.io"
 
 
 class EthRinkebyL1(RinkebyL1):
@@ -290,6 +308,7 @@ class Optimism(L1):
     NETWORK_IDENTIFIER = "Optimism"
     NETWORK_VERBOSE_NAME = "Optimism Mainnet"
     CHAIN_ID = 10
+    EIP3091_EXPLORER_URL = "https://optimistic.etherscan.io"
 
 
 class KovanOptimism(Optimism):
@@ -300,6 +319,7 @@ class KovanOptimism(Optimism):
     NETWORK_IDENTIFIER = "KovanOptimism"
     NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
     CHAIN_ID = 69
+    EIP3091_EXPLORER_URL = "https://kovan-optimistic.etherscan.io"
 
 
 class EthKovanOptimism(KovanOptimism):
@@ -349,6 +369,7 @@ class Arbitrum(L1):
     NETWORK_IDENTIFIER = "Arbitrum"
     NETWORK_VERBOSE_NAME = "Arbitrum Mainnet"
     CHAIN_ID = 42161
+    EIP3091_EXPLORER_URL = "https://explorer.arbitrum.io"
 
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_token_base_unit
@@ -391,6 +412,7 @@ class RinkebyArbitrum(Arbitrum):
     NETWORK_IDENTIFIER = "RinkebyArbitrum"
     NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
     CHAIN_ID = 421611
+    EIP3091_EXPLORER_URL = "https://rinkeby-explorer.arbitrum.io"
 
 
 class ETHRinkebyArbitrum(RinkebyArbitrum):
