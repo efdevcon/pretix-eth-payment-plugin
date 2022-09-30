@@ -71,6 +71,7 @@ class IToken(object):
     IS_NATIVE_ASSET = True  # Not a token - e.g. ETH in L1.
     ADDRESS = None  # If a token, then the smart contract address.
     EIP3091_EXPLORER_URL = None  # if set, allows links to transactions to be generated
+    CHAIN_ID = None
 
     def __init__(self):
         self._validate_class_variables()

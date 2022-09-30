@@ -156,6 +156,8 @@ class Command(BaseCommand):
                         logger.info(f"  * Confirming order payment {full_id}")
                         with scope(organizer=None):
                             order_payment.confirm()
+                        signed_message.is_confirmed = True
+                        signed_message.save()
                     else:
                         logger.info(f"  * DRY RUN: Would confirm order payment {full_id}")
                 else:

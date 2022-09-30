@@ -8,6 +8,10 @@ from pretix.base.models import (
     OrderRefund,
 )
 
+from pretix_eth.models import SignedMessage
+from pretix_eth.network.tokens import IToken, \
+    all_token_and_network_ids_to_tokens
+
 import pytz
 
 
@@ -22,12 +26,25 @@ def payment_to_row(payment):
     else:
         completion_date = ''
 
-    token = payment.info_data.get("currency_type", "")
+    currency_type = payment.info_data.get("currency_type", "")
+    token: IToken = all_token_and_network_ids_to_tokens[currency_type]
+
     fiat_amount = payment.amount
     token_amount = payment.info_data.get("amount", "")
 
-    wallet_address = None # todo WalletAddress.objects.filter(order_payment=payment).first()
-    hex_wallet_address = wallet_address.hex_address if wallet_address else ""
+    confirmed_transaction: SignedMessage = payment.signed_messages.filter(
+        is_confirmed=True).first()
+    if confirmed_transaction is None:
+        confirmed_transaction: SignedMessage = payment.signed_messages.last()
+
+    if confirmed_transaction is not None:
+        sender_address = confirmed_transaction.sender_address
+        recipient_address = confirmed_transaction.recipient_address
+        transaction_hash = confirmed_transaction.transaction_hash
+    else:
+        sender_address = None
+        recipient_address = None
+        transaction_hash = None
 
     row = [
         "Payment",
@@ -39,8 +56,12 @@ def payment_to_row(payment):
         payment.state,
         fiat_amount,
         token_amount,
-        token,
-        hex_wallet_address,
+        currency_type,
+        sender_address,
+        recipient_address,
+        transaction_hash,
+        token.CHAIN_ID,
+        token.ADDRESS,
     ]
     return row
 
@@ -81,7 +102,9 @@ class EthereumOrdersExporter(ListExporter):
 
     headers = (
         'Type', 'Event slug', 'Order', 'Payment ID', 'Creation date',
-        'Completion date', 'Status', 'Amount', 'Token', 'Wallet address'
+        'Completion date', 'Status', 'Fiat Amount', 'Token Amount', 'Token',
+        'ETH or DAI sender address', 'ETH or DAI receiver address',
+        'Transaction Hash', 'Chain ID', 'DAI contract address'
     )
 
     @property

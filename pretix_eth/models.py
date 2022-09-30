@@ -17,6 +17,8 @@ class SignedMessage(models.Model):
     transaction_hash = models.CharField(max_length=66, null=True)
     invalid = models.BooleanField(default=False)
     created_at = models.DateTimeField(editable=False, null=True)
+    is_confirmed = models.BooleanField(
+        default=False)  # true for the payment that arrived
 
     def save(self, *args, **kwargs):
         if self.pk is None or self.created_at is None:
