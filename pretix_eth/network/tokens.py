@@ -164,8 +164,7 @@ class IToken(object):
             )
             return token_contract.functions.balanceOf(checksum_address).call()
 
-    def get_transaction_link(self, transaction_hash: Optional[str]) -> Optional[
-        str]:
+    def get_transaction_link(self, transaction_hash: Optional[str]) -> Optional[str]:
         return "{base}/tx/{hash}".format(
             base=self.EIP3091_EXPLORER_URL,
             hash=transaction_hash,

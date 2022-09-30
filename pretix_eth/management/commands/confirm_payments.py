@@ -148,7 +148,7 @@ class Command(BaseCommand):
                     ).value
                     receipt_reciever = receipt.to.lower()
                     correct_recipient = (
-                            receipt_reciever == signed_message.recipient_address.lower()
+                        receipt_reciever == signed_message.recipient_address.lower()
                     )
 
                 else:
@@ -156,18 +156,16 @@ class Command(BaseCommand):
                     contract = w3.eth.contract(address=token.ADDRESS,
                                                abi=TOKEN_ABI)
                     transaction_details = (
-                        contract.events.Transfer().processReceipt(receipt)[
-                            0].args
+                        contract.events.Transfer().processReceipt(receipt)[0].args
                     )
                     payment_amount = transaction_details.value
                     # check that the payment happened on the right contract address
                     correct_contract = token.ADDRESS.lower() == receipt.to.lower()
                     # take recipient address from the topics,
                     # not from the "from" field, as that's the contract address
-                    receipt_reciever = receipt.logs[0].topics[2][
-                                       12:].hex().lower()
+                    receipt_reciever = receipt.logs[0].topics[2][12:].hex().lower()
                     correct_recipient = correct_contract and (
-                            receipt_reciever == signed_message.recipient_address.lower()
+                        receipt_reciever == signed_message.recipient_address.lower()
                     )
 
                 receipt_sender = getattr(receipt, "from").lower()
@@ -175,8 +173,8 @@ class Command(BaseCommand):
 
                 if not (correct_sender and correct_recipient):
                     logger.warning(
-                        f"  * Transaction hash provided does not match "
-                        f"correct sender and recipient"
+                        "  * Transaction hash provided does not match "
+                        "correct sender and recipient"
                     )
                     if log_verbosity > 0:
                         logger.info(
