@@ -26,37 +26,40 @@ TOKEN_ABI = [
     },
     {
         "constant": False,
-        "inputs": [{"name": "_to", "type": "address"}, {"name": "_value", "type": "uint256"}],
+        "inputs": [
+            {"name": "_to", "type": "address"},
+            {"name": "_value", "type": "uint256"},
+        ],
         "name": "transfer",
         "outputs": [{"name": "", "type": "bool"}],
-        "type": "function"
+        "type": "function",
     },
     # Event
     {
-      "anonymous": False,
-      "inputs": [
-        {
-          "indexed": True,
-          "internalType": "address",
-          "name": "from",
-          "type": "address"
-        },
-        {
-          "indexed": True,
-          "internalType": "address",
-          "name": "to",
-          "type": "address"
-        },
-        {
-          "indexed": False,
-          "internalType": "uint256",
-          "name": "value",
-          "type": "uint256"
-        }
-      ],
-      "name": "Transfer",
-      "type": "event"
-    }
+        "anonymous": False,
+        "inputs": [
+            {
+                "indexed": True,
+                "internalType": "address",
+                "name": "from",
+                "type": "address",
+            },
+            {
+                "indexed": True,
+                "internalType": "address",
+                "name": "to",
+                "type": "address",
+            },
+            {
+                "indexed": False,
+                "internalType": "uint256",
+                "name": "value",
+                "type": "uint256",
+            },
+        ],
+        "name": "Transfer",
+        "type": "event",
+    },
 ]
 
 
@@ -163,13 +166,13 @@ class IToken(object):
 
     def get_transaction_link(self, transaction_hash: Optional[str]) -> Optional[
         str]:
-        return '{base}/tx/{hash}'.format(
+        return "{base}/tx/{hash}".format(
             base=self.EIP3091_EXPLORER_URL,
             hash=transaction_hash,
         )
 
     def get_address_link(self, address: Optional[str]) -> Optional[str]:
-        return '{base}/address/{address}'.format(
+        return "{base}/address/{address}".format(
             base=self.EIP3091_EXPLORER_URL,
             address=address,
         )

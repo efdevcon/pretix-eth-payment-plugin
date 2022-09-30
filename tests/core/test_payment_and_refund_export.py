@@ -1,10 +1,7 @@
 import pytest
 from django.urls import reverse
 
-from pretix.base.models import (
-    OrderPayment,
-    OrderRefund,
-)
+from pretix.base.models import OrderPayment
 
 
 @pytest.mark.django_db

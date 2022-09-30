@@ -8,12 +8,9 @@ logger = logging.getLogger(__name__)
 
 
 def get_message_to_sign(
-        sender_address: str,
-        receiver_address: str,
-        chain_id: int,
+        sender_address: str, receiver_address: str, chain_id: int,
         order_code: str
-    ):
-
+):
     message_structured = {
         "domain": {
             "chainId": chain_id,
@@ -49,17 +46,12 @@ def get_message_to_sign(
 
 
 def get_rpc_url_for_network(payment_provider, network_id):
-       rpc_urls = json.loads(
-           payment_provider.settings.NETWORK_RPC_URL
-       )
+    rpc_urls = json.loads(payment_provider.settings.NETWORK_RPC_URL)
 
-       expected_network_rpc_url_key = f"{network_id}_RPC_URL"
+    expected_network_rpc_url_key = f"{network_id}_RPC_URL"
 
-       if expected_network_rpc_url_key in rpc_urls:
-           return rpc_urls[expected_network_rpc_url_key]
-       else:
-           logger.warning(
-               f"No RPC URL configured for {network_id}. Skipping..."
-           )
-           return None
-
+    if expected_network_rpc_url_key in rpc_urls:
+        return rpc_urls[expected_network_rpc_url_key]
+    else:
+        logger.warning(f"No RPC URL configured for {network_id}. Skipping...")
+        return None

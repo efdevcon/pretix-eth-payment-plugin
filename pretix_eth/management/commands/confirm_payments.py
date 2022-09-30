@@ -13,7 +13,11 @@ from web3.exceptions import TransactionNotFound
 from pretix.base.models import OrderPayment
 from pretix.base.models.event import Event
 
-from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens, TOKEN_ABI
+from pretix_eth.network.tokens import (
+    IToken,
+    all_token_and_network_ids_to_tokens,
+    TOKEN_ABI,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +40,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         no_dry_run = options["no_dry_run"]
-        log_verbosity = int(options.get('verbosity', 0))
+        log_verbosity = int(options.get("verbosity", 0))
 
         with scope(organizer=None):
             # todo change to events where pending payments are expected only?
@@ -55,14 +59,20 @@ class Command(BaseCommand):
                     OrderPayment.PAYMENT_STATE_CREATED,
                     OrderPayment.PAYMENT_STATE_PENDING,
                     OrderPayment.PAYMENT_STATE_CANCELED,
-                )
+                ),
             )
             if log_verbosity > 0:
-                logger.info(f" * Found {unconfirmed_order_payments.count()} unconfirmed order payments")
+                logger.info(
+                    f" * Found {unconfirmed_order_payments.count()} "
+                    f"unconfirmed order payments"
+                )
 
         for order_payment in unconfirmed_order_payments:
             if log_verbosity > 0:
-                logger.info(f" * trying to confirm payment: {order_payment} (has {order_payment.signed_messages.all().count()} signed messages)")
+                logger.info(
+                    f" * trying to confirm payment: {order_payment} "
+                    f"(has {order_payment.signed_messages.all().count()} signed messages)"
+                )
             # it is tempting to put .filter(invalid=False) here, but remember
             # there is still a chance that low-gas txs are mined later on.
             for signed_message in order_payment.signed_messages.all():
@@ -72,7 +82,9 @@ class Command(BaseCommand):
                 full_id = order_payment.full_id
 
                 info = order_payment.info_data
-                token: IToken = all_token_and_network_ids_to_tokens[info["currency_type"]]
+                token: IToken = all_token_and_network_ids_to_tokens[
+                    info["currency_type"]
+                ]
                 expected_network_id = token.NETWORK_IDENTIFIER
                 expected_network_rpc_url_key = f"{expected_network_id}_RPC_URL"
 
@@ -89,66 +101,106 @@ class Command(BaseCommand):
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
                 if log_verbosity > 0:
-                    logger.info(f"   * Looking for a receip for a transaction with hash={signed_message.transaction_hash}")
+                    logger.info(
+                        f"   * Looking for a receip for a transaction with "
+                        f"hash={signed_message.transaction_hash}"
+                    )
                 try:
-                    receipt = w3.eth.getTransactionReceipt(signed_message.transaction_hash)
+                    receipt = w3.eth.getTransactionReceipt(
+                        signed_message.transaction_hash
+                    )
                 except TransactionNotFound:
                     if log_verbosity > 0:
-                        logger.info(f"   * Transaction hash={signed_message.transaction_hash} not found, skipping.")
-                    if signed_message.age > 30*60:
+                        logger.info(
+                            f"   * Transaction"
+                            f" hash={signed_message.transaction_hash} not found,"
+                            f" skipping."
+                        )
+                    if signed_message.age > 30 * 60:
                         signed_message.invalidate()
                     continue
 
                 if receipt.status == 0:
                     if log_verbosity > 0:
-                        logger.info(f"   * Transaction hash={signed_message.transaction_hash} was has status=0, invalidating.")
+                        logger.info(
+                            f"   * Transaction hash={signed_message.transaction_hash}"
+                            f" was has status=0, invalidating."
+                        )
                     signed_message.invalidate()
                     continue
 
                 block_number = receipt.blockNumber
 
-                if block_number is None or block_number + SAFETY_BLOCK_COUNT > w3.eth.get_block_number():
-                    logger.warning(f"  * Transfer found in a block that is too young, waiting until at least {SAFETY_BLOCK_COUNT} more blocks are confirmed.")
+                if (
+                        block_number is None
+                        or block_number + SAFETY_BLOCK_COUNT > w3.eth.get_block_number()
+                ):
+                    logger.warning(
+                        f"  * Transfer found in a block that is too young, "
+                        f"waiting until at least {SAFETY_BLOCK_COUNT} more blocks are confirmed."
+                    )
                     continue
 
                 if token.IS_NATIVE_ASSET:
                     # ETH
-                    payment_amount = w3.eth.getTransaction(signed_message.transaction_hash).value
+                    payment_amount = w3.eth.getTransaction(
+                        signed_message.transaction_hash
+                    ).value
                     receipt_reciever = receipt.to.lower()
-                    correct_recipient = receipt_reciever == signed_message.recipient_address.lower()
+                    correct_recipient = (
+                            receipt_reciever == signed_message.recipient_address.lower()
+                    )
 
                 else:
                     # DAI
-                    contract = w3.eth.contract(address=token.ADDRESS, abi=TOKEN_ABI)
-                    transaction_details = contract.events.Transfer().processReceipt(receipt)[0].args
+                    contract = w3.eth.contract(address=token.ADDRESS,
+                                               abi=TOKEN_ABI)
+                    transaction_details = (
+                        contract.events.Transfer().processReceipt(receipt)[
+                            0].args
+                    )
                     payment_amount = transaction_details.value
                     # check that the payment happened on the right contract address
                     correct_contract = token.ADDRESS.lower() == receipt.to.lower()
-                    # take recipient address from the topics, not from the "from" field, as that's the contract address
-                    receipt_reciever = receipt.logs[0].topics[2][12:].hex().lower()
-                    correct_recipient = correct_contract and (receipt_reciever == signed_message.recipient_address.lower())
+                    # take recipient address from the topics,
+                    # not from the "from" field, as that's the contract address
+                    receipt_reciever = receipt.logs[0].topics[2][
+                                       12:].hex().lower()
+                    correct_recipient = correct_contract and (
+                            receipt_reciever == signed_message.recipient_address.lower()
+                    )
 
-
-                receipt_sender = getattr(receipt, 'from').lower()
+                receipt_sender = getattr(receipt, "from").lower()
                 correct_sender = receipt_sender == signed_message.sender_address.lower()
 
                 if not (correct_sender and correct_recipient):
                     logger.warning(
-                        f"  * Transaction hash provided does not match correct sender and recipient"
+                        f"  * Transaction hash provided does not match "
+                        f"correct sender and recipient"
                     )
                     if log_verbosity > 0:
-                        logger.info(f"receipt sender={receipt_sender}, expected sender={signed_message.sender_address.lower()}")
-                        logger.info(f"receipt recipient={receipt_reciever}, expected recipient={signed_message.recipient_address.lower()}")
+                        logger.info(
+                            f"receipt sender={receipt_sender}, "
+                            f"expected sender={signed_message.sender_address.lower()}"
+                        )
+                        logger.info(
+                            f"receipt recipient={receipt_reciever}, "
+                            f"expected recipient={signed_message.recipient_address.lower()}"
+                        )
                     continue
 
                 if payment_amount > 0:
-                    logger.info(f"Payments found for {full_id} at {signed_message.sender_address}:")
+                    logger.info(
+                        f"Payments found for {full_id} at {signed_message.sender_address}:"
+                    )
                     if payment_amount < expected_amount:
                         logger.warning(
-                            f"  * Expected payment of at least {expected_amount} {token.TOKEN_SYMBOL}"
+                            f"  * Expected payment of at least"
+                            f" {expected_amount} {token.TOKEN_SYMBOL}"
                         )
                         logger.warning(
-                            f"  * Given payment was {payment_amount} {token.TOKEN_SYMBOL}"
+                            f"  * Given payment was"
+                            f" {payment_amount} {token.TOKEN_SYMBOL}"
                         )
                         logger.warning(f"  * Skipping")  # noqa: F541
                         continue
@@ -159,6 +211,8 @@ class Command(BaseCommand):
                         signed_message.is_confirmed = True
                         signed_message.save()
                     else:
-                        logger.info(f"  * DRY RUN: Would confirm order payment {full_id}")
+                        logger.info(
+                            f"  * DRY RUN: Would confirm order payment {full_id}"
+                        )
                 else:
                     logger.info(f"No payments found for {full_id}")

@@ -8,11 +8,11 @@ from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_token
 from pretix_eth.utils import get_message_to_sign
 
 
-
 class TransactionDetailsSerializer(Serializer):
     chain_id = fields.IntegerField()
     currency = fields.CharField()
-    erc20_contract_address = fields.CharField(allow_null=True)  # contract address for non-native currencies like DAI
+    # contract address for non-native ERC20 currencies like DAI
+    erc20_contract_address = fields.CharField(allow_null=True)
     recipient_address = fields.CharField()
     amount = fields.CharField()
     message = fields.CharField()
@@ -38,11 +38,12 @@ class TransactionDetailsSerializer(Serializer):
             "chain_id": token.CHAIN_ID,
             "network_identifier": token.NETWORK_IDENTIFIER,
             "currency": token.TOKEN_SYMBOL,
-            "erc20_contract_address":  token.ADDRESS,
+            "erc20_contract_address": token.ADDRESS,
             "recipient_address": recipient_address,
             "amount": str(instance.info_data.get('amount')),
             "message": get_message_to_sign(
-                sender_address=self.context.get('request').query_params.get('sender_address'),
+                sender_address=self.context.get('request').query_params.get(
+                    'sender_address'),
                 receiver_address=recipient_address,
                 chain_id=token.CHAIN_ID,
                 order_code=instance.order.code

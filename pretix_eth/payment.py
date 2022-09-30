@@ -18,7 +18,6 @@ from pretix.base.payment import BasePaymentProvider
 
 from eth_utils import from_wei
 
-#from .models import WalletAddress
 from .network.tokens import (
     IToken,
     registry,
@@ -215,7 +214,8 @@ class Ethereum(BasePaymentProvider):
         return False
 
     def payment_is_valid_session(self, request):
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
+        # Note: payment_currency_type check already done
+        # in token_verbose_name_to_token_network_id()
         return all(
             (
                 "payment_currency_type" in request.session,
@@ -225,7 +225,8 @@ class Ethereum(BasePaymentProvider):
         )
 
     def _payment_is_valid_info(self, payment: OrderPayment) -> bool:
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
+        # Note: payment_currency_type check already done
+        # in token_verbose_name_to_token_network_id()
         return all(
             (
                 "currency_type" in payment.info_data,
@@ -302,7 +303,8 @@ class Ethereum(BasePaymentProvider):
 
         hex_wallet_address = self.get_receiving_address()
 
-        # display all submitted transaction hashes along with their respective sendr and recipient addresses
+        # display all submitted transaction hashes along with
+        # their respective sendr and recipient addresses
         last_signed_message: SignedMessage = payment.signed_messages.last()
 
         if last_signed_message is not None:
@@ -343,4 +345,4 @@ class Ethereum(BasePaymentProvider):
         return self.payment_refund_supported(payment)
 
     def execute_refund(self, refund: OrderRefund):
-        raise Exception("Refunds are disabled for this payment provider for private key security reasons.")
+        raise Exception("Refunds are disabled for this payment provider.")

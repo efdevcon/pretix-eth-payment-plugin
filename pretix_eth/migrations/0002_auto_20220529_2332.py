@@ -7,24 +7,36 @@ import django.db.models.deletion
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('pretixbase', '0208_auto_20220214_1632'),
-        ('pretix_eth', '0001_initial'),
+        ("pretixbase", "0208_auto_20220214_1632"),
+        ("pretix_eth", "0001_initial"),
     ]
 
     operations = [
         migrations.CreateModel(
-            name='SignedMessage',
+            name="SignedMessage",
             fields=[
-                ('id', models.AutoField(auto_created=True, primary_key=True, serialize=False)),
-                ('signature', models.CharField(max_length=132)),
-                ('raw_message', models.CharField(max_length=256)),
-                ('sender_address', models.CharField(max_length=42)),
-                ('recipient_address', models.CharField(max_length=42)),
-                ('chain_id', models.SmallIntegerField()),
-                ('order_payment', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='signed_messages', to='pretixbase.orderpayment')),
+                (
+                    "id",
+                    models.AutoField(
+                        auto_created=True, primary_key=True, serialize=False
+                    ),
+                ),
+                ("signature", models.CharField(max_length=132)),
+                ("raw_message", models.CharField(max_length=256)),
+                ("sender_address", models.CharField(max_length=42)),
+                ("recipient_address", models.CharField(max_length=42)),
+                ("chain_id", models.SmallIntegerField()),
+                (
+                    "order_payment",
+                    models.ForeignKey(
+                        on_delete=django.db.models.deletion.CASCADE,
+                        related_name="signed_messages",
+                        to="pretixbase.orderpayment",
+                    ),
+                ),
             ],
         ),
         migrations.DeleteModel(
-            name='WalletAddress',
+            name="WalletAddress",
         ),
     ]

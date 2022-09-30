@@ -1,6 +1,4 @@
 from django.dispatch import receiver
-from django.urls import resolve, reverse
-from django.utils.translation import gettext_lazy as _
 from django.template.loader import get_template
 
 from pretix.base.middleware import _parse_csp, _merge_csp, _render_csp
@@ -9,17 +7,11 @@ from pretix.presale.signals import (
     process_response,
 )
 from pretix.base.signals import (
-    logentry_display,
     register_payment_providers,
     register_data_exporters,
 )
 
-from pretix.control.signals import (
-    event_dashboard_widgets,
-    nav_event_settings,
-)
 from .exporter import EthereumOrdersExporter
-from . import models
 
 
 NUM_WIDGET = '<div class="numwidget"><span class="num">{num}</span><span class="text">{text}</span></div>'  # noqa: E501
@@ -36,12 +28,12 @@ def signal_process_response(sender, request, response, **kwargs):
         'style-src': [
             "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
             "'sha256-O+AX3tWIOimhuzg+lrMfltcdtWo7Mp2Y9qJUkE6ysWE='",
-            "'sha256-loEB2lJVNc8mwYhvyJtb9aHD7kvSHU2kaRWkXHRpApY='",  # walletconnect-web3-provider-1.8.0.js
         ],
         'script-src': [
-            "'sha256-G0alWBi3d/qUeACYUzGOmJ34+fZaiiZaP2XpCEg7UFA='",  # web3modal-HOTFIX.js
-            "'sha256-loEB2lJVNc8mwYhvyJtb9aHD7kvSHU2kaRWkXHRpApY='",  # walletconnect-web3-provider-1.8.0.js
-            "'sha256-sqlmDxtDyZOFztnt94HoSfNbtRvmgNuCqYTRVVH6X3k='",  # web3.min-1.7.5.js
+            # web3modal-HOTFIX.js
+            "'sha256-G0alWBi3d/qUeACYUzGOmJ34+fZaiiZaP2XpCEg7UFA='",
+            # web3.min-1.7.5.js
+            "'sha256-sqlmDxtDyZOFztnt94HoSfNbtRvmgNuCqYTRVVH6X3k='",
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
