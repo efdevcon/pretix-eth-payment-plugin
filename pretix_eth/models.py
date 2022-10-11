@@ -6,8 +6,6 @@ from pretix.base.models import OrderPayment
 
 class SignedMessage(models.Model):
 
-    MAX_AGE_UNCONFIRMED = 30 * 60  # allow retry payment after 30mins
-
     signature = models.CharField(max_length=132)
     raw_message = models.TextField()
     sender_address = models.CharField(max_length=42)
