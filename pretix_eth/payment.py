@@ -2,6 +2,8 @@ import logging
 import time
 from collections import OrderedDict
 
+from json import JSONDecoder, loads, JSONDecodeError
+
 from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
@@ -38,6 +40,19 @@ def truncate_wei_value(value: int, digits: int) -> int:
     return int(round(value / multiplier) * multiplier)
 
 
+class TokenRatesJSONDecoder(JSONDecoder):
+    ALLOWED_KEYS = ('ETH_RATE', 'DAI_RATE',)
+
+    def decode(self, s: str):
+        decoded = super().decode(s)
+        for key, value in loads(decoded).items():
+            if key not in self.ALLOWED_KEYS:
+                raise JSONDecodeError(f"{key} is not an allowed key for this field.", "aaa", 0)
+            if not isinstance(value, (int, float)):
+                raise JSONDecodeError("Please supply integers or floats as values.", "aaabbb", 0)
+        return decoded
+
+
 class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
     verbose_name = _("ETH or DAI")
@@ -56,6 +71,7 @@ class Ethereum(BasePaymentProvider):
                         help_text=_(
                             "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in the fiat currency you have chosen. E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."  # noqa: E501
                         ),
+                        decoder=TokenRatesJSONDecoder,
                     ),
                 ),
                 # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works... # noqa: E501
