@@ -22,9 +22,6 @@ from pretix_eth.network.tokens import (
 logger = logging.getLogger(__name__)
 
 
-SAFETY_BLOCK_COUNT = 5
-
-
 class Command(BaseCommand):
     help = (
         "Verify pending orders from on-chain payments. Performs a dry run by default."
@@ -116,7 +113,7 @@ class Command(BaseCommand):
                             f" hash={signed_message.transaction_hash} not found,"
                             f" skipping."
                         )
-                    if signed_message.age > 30 * 60:
+                    if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:
                         signed_message.invalidate()
                     continue
 
@@ -133,11 +130,11 @@ class Command(BaseCommand):
 
                 if (
                         block_number is None
-                        or block_number + SAFETY_BLOCK_COUNT > w3.eth.get_block_number()
+                        or block_number + order_payment.payment_provider.settings.SAFETY_BLOCK_COUNT > w3.eth.get_block_number()
                 ):
                     logger.warning(
                         f"  * Transfer found in a block that is too young, "
-                        f"waiting until at least {SAFETY_BLOCK_COUNT} more blocks are confirmed."
+                        f"waiting until at least {order_payment.payment_provider.settings.SAFETY_BLOCK_COUNT} more blocks are confirmed."
                     )
                     continue
 
