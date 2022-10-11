@@ -66,36 +66,6 @@ def payment_to_row(payment):
     return row
 
 
-def refund_to_row(refund):
-    time_zone = pytz.timezone(refund.order.event.settings.timezone)
-    if refund.execution_date:
-        completion_date = date_to_string(time_zone, refund.execution_date)
-    else:
-        completion_date = ''
-
-    token = refund.info_data.get("currency_type", "")
-    fiat_amount = refund.amount
-    token_amount = refund.info_data.get("amount", "")
-
-    wallet_address = None  # todo WalletAddress.objects.filter(order_payment=refund.payment).first()
-    hex_wallet_address = wallet_address.hex_address if wallet_address else ""
-
-    row = [
-        "Refund",
-        refund.order.event.slug,
-        refund.order.code,
-        refund.full_id,
-        date_to_string(time_zone, refund.created),
-        completion_date,
-        refund.state,
-        fiat_amount,
-        token_amount,
-        token,
-        hex_wallet_address,
-    ]
-    return row
-
-
 class EthereumOrdersExporter(ListExporter):
     identifier = 'ethorders'
     verbose_name = 'Ethereum orders and refunds'
@@ -139,25 +109,15 @@ class EthereumOrdersExporter(ListExporter):
             provider='ethereum'
         ).order_by('created')
 
-        refunds = OrderRefund.objects.filter(
-            order__event__in=self.events,
-            state__in=form_data.get('refund_states', []),
-            provider='ethereum'
-        ).order_by('created')
-
-        objs = sorted(list(payments) + list(refunds), key=lambda obj: obj.created)
-
         yield self.headers
 
-        yield self.ProgressSetTotal(total=len(objs))
-        for obj in objs:
+        yield self.ProgressSetTotal(total=payments.count())
+        for obj in payments:
             if isinstance(obj, OrderPayment):
                 row = payment_to_row(obj)
-            elif isinstance(obj, OrderRefund):
-                row = refund_to_row(obj)
             else:
                 raise Exception(
-                    'Invariant:Expected OrderPayment or OrderRefund, found {0}'.format((obj))
+                    'Invariant:Expected OrderPayment, found {0}'.format((obj))
                 )
             yield row
 
