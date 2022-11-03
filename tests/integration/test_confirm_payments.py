@@ -64,12 +64,12 @@ def make_order_payment(payment_info, provider, get_request_order_payment):
 
 TEST_ENOUGH_AMOUNT = [
     {
-        "currency": "ETH - Rinkeby",
+        "currency": "ETH - Goerli",
         "amount": int("1000", base=10),
         "hex_address": "0xb84AC43014d60AE5dCe5d36975eE461f31e953d3",
     },  # Has about 0.5 ETH
     {
-        "currency": "DAI - Rinkeby",
+        "currency": "DAI - Goerli",
         "amount": int("1000", base=10),
         "hex_address": "0x18FF3A11FAF05F83198A8724006975ce414872Bc",
     },  # Has about 48 DAI
@@ -85,7 +85,7 @@ def test_confirm_payment_enough(
 ):
     check_web3_provider(pytestconfig)
     provider.settings.set("NETWORK_RPC_URL",
-                          {"Rinkeby_RPC_URL": WEB3_PROVIDER_URI})
+                          {"Goerli_RPC_URL": WEB3_PROVIDER_URI})
     provider.settings.set("SINGLE_RECEIVER_ADDRESS",
                           "0x0000000000000000000000000000000000000000")
     payments = []
@@ -116,7 +116,7 @@ def test_confirm_payment_dry_run(
     provider, event, get_request_order_payment, pytestconfig
 ):
     check_web3_provider(pytestconfig)
-    provider.settings.set("NETWORK_RPC_URL", {"Rinkeby_RPC_URL": WEB3_PROVIDER_URI})
+    provider.settings.set("NETWORK_RPC_URL", {"Goerli_RPC_URL": WEB3_PROVIDER_URI})
 
     payments = []
     orders = []
@@ -142,12 +142,12 @@ def test_confirm_payment_dry_run(
 
 TEST_LOWER_AMOUNT = [
     {
-        "currency": "ETH - Rinkeby",
+        "currency": "ETH - Goerli",
         "amount": int("99000000", base=10),
         "hex_address": "0xDb9574bf428A612fe13BEFFeB7F4bD8C73BF2D88",
     },  # Has about 10'000'000 wei
     {
-        "currency": "DAI - Rinkeby",
+        "currency": "DAI - Goerli",
         "amount": int("99000000", base=10),
         "hex_address": "0x3d5091A1652e215c71C755BCfA97A08AFC9d6CB0",
     },  # Has about 32'035 wei
@@ -162,7 +162,7 @@ def test_confirm_payment_lower_amount(
     provider, event, get_request_order_payment, pytestconfig
 ):
     check_web3_provider(pytestconfig)
-    provider.settings.set("NETWORK_RPC_URL", {"Rinkeby_RPC_URL": WEB3_PROVIDER_URI})
+    provider.settings.set("NETWORK_RPC_URL", {"Goerli_RPC_URL": WEB3_PROVIDER_URI})
 
     payments = []
     orders = []
@@ -186,12 +186,12 @@ def test_confirm_payment_lower_amount(
 
 TEST_WRONG_CURRENCY = [
     {
-        "currency": "DAI - Rinkeby",
+        "currency": "DAI - Goerli",
         "amount": int("1000", base=10),
         "hex_address": "0xb84AC43014d60AE5dCe5d36975eE461f31e953d3",
     },  # Has enough amount, but in ETH
     {
-        "currency": "ETH - Rinkeby",
+        "currency": "ETH - Goerli",
         "amount": int("1000", base=10),
         "hex_address": "0x18FF3A11FAF05F83198A8724006975ce414872Bc",
     },  # Has enough amount, but in DAI
@@ -206,7 +206,7 @@ def test_confirm_payment_wrong_currency(
     provider, event, get_request_order_payment, pytestconfig
 ):
     check_web3_provider(pytestconfig)
-    provider.settings.set("NETWORK_RPC_URL", {"Rinkeby_RPC_URL": WEB3_PROVIDER_URI})
+    provider.settings.set("NETWORK_RPC_URL", {"Goerli_RPC_URL": WEB3_PROVIDER_URI})
 
     payments = []
     orders = []

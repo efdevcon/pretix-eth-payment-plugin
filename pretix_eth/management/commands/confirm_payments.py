@@ -79,9 +79,16 @@ class Command(BaseCommand):
                 full_id = order_payment.full_id
 
                 info = order_payment.info_data
-                token: IToken = all_token_and_network_ids_to_tokens[
-                    info["currency_type"]
-                ]
+                try:
+                    token: IToken = all_token_and_network_ids_to_tokens[
+                        info["currency_type"]
+                    ]
+                except KeyError:
+                    logger.info(f"info['currency_type'] = {info['currency_type']}")
+                    logger.warning("Invalid network, invalidating signed message and skipping.")
+                    signed_message.invalidate()
+                    continue
+
                 expected_network_id = token.NETWORK_IDENTIFIER
                 expected_network_rpc_url_key = f"{expected_network_id}_RPC_URL"
 

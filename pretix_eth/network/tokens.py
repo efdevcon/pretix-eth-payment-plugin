@@ -190,7 +190,7 @@ class L1(IToken):
         self, wallet_address, payment_amount, amount_in_token_base_unit
     ):
         """
-        Generic instructions for paying on all L1 networks (eg Rinkeby and Mainnet),
+        Generic instructions for paying on all L1 networks (eg Goerli and Mainnet),
         both for native tokens and custom tokens.
 
         Pay via a web3 modal, ERC 681 (QR Code), uniswap url or manually.
@@ -223,18 +223,6 @@ class L1(IToken):
             "wallet_address": wallet_address,
         }
 
-
-class RinkebyL1(L1):
-    """
-    Constants for Rinkeby Ethereum Testnet
-    """
-
-    NETWORK_IDENTIFIER = "Rinkeby"
-    NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
-    CHAIN_ID = 4
-    EIP3091_EXPLORER_URL = "https://rinkeby.etherscan.io"
-
-
 class GoerliL1(L1):
     """
     Constants for Goerli Ethereum Testnet
@@ -244,24 +232,6 @@ class GoerliL1(L1):
     NETWORK_VERBOSE_NAME = "Goerli Ethereum Testnet"
     CHAIN_ID = 5
     EIP3091_EXPLORER_URL = "https://goerli.etherscan.io"
-
-
-class EthRinkebyL1(RinkebyL1):
-    """
-    Ethereum on Rinkeby L1 Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
-
-
-class DaiRinkebyL1(RinkebyL1):
-    """
-    DAI on Rinkeby L1 Network
-    """
-
-    TOKEN_SYMBOL = "DAI"
-    IS_NATIVE_ASSET = False
-    ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
 
 
 class EthGoerliL1(GoerliL1):
@@ -378,7 +348,7 @@ class Arbitrum(L1):
         self, wallet_address, payment_amount, amount_in_token_base_unit
     ):
         """
-        Generic instructions for paying on all Arbitrum networks (eg Rinkeby and Mainnet),
+        Generic instructions for paying on all Arbitrum networks (eg Goerli and Mainnet),
         both for native tokens and custom tokens.
 
         Pay via a web3 modal, ERC 681 (QR Code) or manually.
@@ -407,24 +377,6 @@ class Arbitrum(L1):
         }
 
 
-class RinkebyArbitrum(Arbitrum):
-    """
-    Constants for the Optimism Mainnet
-    """
-
-    NETWORK_IDENTIFIER = "RinkebyArbitrum"
-    NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
-    CHAIN_ID = 421611
-    EIP3091_EXPLORER_URL = "https://rinkeby-explorer.arbitrum.io"
-
-
-class ETHRinkebyArbitrum(RinkebyArbitrum):
-    """
-    Ethereum on Arbitrum Rinkeby Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
-
 
 class ETHArbitrum(Arbitrum):
     """
@@ -447,8 +399,6 @@ class DaiArbitrum(Arbitrum):
 registry = [
     EthL1(),
     DaiL1(),
-    EthRinkebyL1(),
-    DaiRinkebyL1(),
     EthGoerliL1(),
     DaiGoerliL1(),
     EthOptimism(),
@@ -456,7 +406,6 @@ registry = [
     EthKovanOptimism(),
     DaiKovanOptimism(),
     ETHArbitrum(),
-    ETHRinkebyArbitrum(),
     DaiArbitrum(),
 ]
 all_network_verbose_names_to_ids = {}
