@@ -135,13 +135,17 @@ class Command(BaseCommand):
 
                 block_number = receipt.blockNumber
 
+                safety_block_count = order_payment.payment_provider.settings.SAFETY_BLOCK_COUNT
+                if safety_block_count is None:
+                    safety_block_count = 10
+
                 if (
                         block_number is None
-                        or block_number + order_payment.payment_provider.settings.SAFETY_BLOCK_COUNT > w3.eth.get_block_number()
+                        or block_number + safety_block_count > w3.eth.get_block_number()
                 ):
                     logger.warning(
                         f"  * Transfer found in a block that is too young, "
-                        f"waiting until at least {order_payment.payment_provider.settings.SAFETY_BLOCK_COUNT} more blocks are confirmed."
+                        f"waiting until at least {safety_block_count} more blocks are confirmed."
                     )
                     continue
 
