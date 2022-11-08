@@ -249,7 +249,7 @@ class DaiGoerliL1(GoerliL1):
 
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
-    ADDRESS = "0x73967c6a0904aA032C103b4104747E88c566B1A2"
+    ADDRESS = "0x11fe4b6ae13d2a6055c8d9cf65c55bac32b5d844"
 
 
 class EthL1(L1):
