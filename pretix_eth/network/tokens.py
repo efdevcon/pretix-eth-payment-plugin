@@ -223,6 +223,7 @@ class L1(IToken):
             "wallet_address": wallet_address,
         }
 
+
 class GoerliL1(L1):
     """
     Constants for Goerli Ethereum Testnet
@@ -249,7 +250,26 @@ class DaiGoerliL1(GoerliL1):
 
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
-    ADDRESS = "0x11fe4b6ae13d2a6055c8d9cf65c55bac32b5d844"
+    ADDRESS = "0x11fE4B6AE13d2a6055C8D9cF65c55bac32B5d844"
+
+
+class SepoliaL1(L1):
+    """
+    Constants for Goerli Ethereum Testnet
+    """
+
+    NETWORK_IDENTIFIER = "Sepolia"
+    NETWORK_VERBOSE_NAME = "Sepolia Ethereum Testnet"
+    CHAIN_ID = 11155111
+    EIP3091_EXPLORER_URL = "https://sepolia.etherscan.io"
+
+
+class EthSepoliaL1(SepoliaL1):
+    """
+    Ethereum on Sepolia L1 Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
 
 
 class EthL1(L1):
