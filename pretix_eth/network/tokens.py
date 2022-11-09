@@ -75,6 +75,7 @@ class IToken(object):
     ADDRESS = None  # If a token, then the smart contract address.
     EIP3091_EXPLORER_URL = None  # if set, allows links to transactions to be generated
     CHAIN_ID = None
+    DISABLED = False
 
     def __init__(self):
         self._validate_class_variables()
@@ -112,7 +113,7 @@ class IToken(object):
         2. Check that the network is selected."""
         return (self.TOKEN_SYMBOL + "_RATE" in rates) and (
             self.NETWORK_IDENTIFIER in network_ids
-        )
+        ) and not self.DISABLED
 
     def get_ticket_price_in_token(self, total, rates):
         if not (self.TOKEN_SYMBOL + "_RATE" in rates):
@@ -222,6 +223,36 @@ class L1(IToken):
             "amount_manual": amount_manual,
             "wallet_address": wallet_address,
         }
+
+
+class RinkebyL1(L1):
+    """
+    Constants for Rinkeby Ethereum Testnet
+    """
+
+    NETWORK_IDENTIFIER = "Rinkeby"
+    NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
+    CHAIN_ID = 4
+    EIP3091_EXPLORER_URL = "https://rinkeby.etherscan.io"
+    DISABLED = True
+
+
+class EthRinkebyL1(RinkebyL1):
+    """
+    Ethereum on Rinkeby L1 Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
+
+
+class DaiRinkebyL1(RinkebyL1):
+    """
+    DAI on Rinkeby L1 Network
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
 
 
 class GoerliL1(L1):
@@ -416,17 +447,41 @@ class DaiArbitrum(Arbitrum):
     ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
 
 
+class RinkebyArbitrum(Arbitrum):
+    """
+    Constants for the Optimism Mainnet
+    """
+
+    NETWORK_IDENTIFIER = "RinkebyArbitrum"
+    NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
+    CHAIN_ID = 421611
+    EIP3091_EXPLORER_URL = "https://rinkeby-explorer.arbitrum.io"
+    DISABLED = True
+
+
+class ETHRinkebyArbitrum(RinkebyArbitrum):
+    """
+    Ethereum on Arbitrum Rinkeby Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
+
+
 registry = [
     EthL1(),
     DaiL1(),
+    EthRinkebyL1(),
+    DaiRinkebyL1(),
     EthGoerliL1(),
     DaiGoerliL1(),
+    EthSepoliaL1(),
     EthOptimism(),
     DaiOptimism(),
     EthKovanOptimism(),
     DaiKovanOptimism(),
     ETHArbitrum(),
     DaiArbitrum(),
+    ETHRinkebyArbitrum(),
 ]
 all_network_verbose_names_to_ids = {}
 for token in registry:
