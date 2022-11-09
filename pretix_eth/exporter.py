@@ -38,6 +38,7 @@ def payment_to_row(payment):
 
     fiat_amount = payment.amount
     token_amount = payment.info_data.get("amount", "")
+    token_rate = payment.info_data.get("token_rate", "")
 
     confirmed_transaction: SignedMessage = payment.signed_messages.filter(
         is_confirmed=True).first()
@@ -69,6 +70,7 @@ def payment_to_row(payment):
         transaction_hash,
         chain_id,
         token_address,
+        token_rate,
     ]
     return row
 
@@ -81,7 +83,8 @@ class EthereumOrdersExporter(ListExporter):
         'Type', 'Event slug', 'Order', 'Payment ID', 'Creation date',
         'Completion date', 'Status', 'Fiat Amount', 'Token Amount', 'Token',
         'ETH or DAI sender address', 'ETH or DAI receiver address',
-        'Transaction Hash', 'Chain ID', 'DAI contract address'
+        'Transaction Hash', 'Chain ID', 'DAI contract address',
+        'Token Rate at time of order',
     )
 
     @property

@@ -135,9 +135,11 @@ class Command(BaseCommand):
 
                 block_number = receipt.blockNumber
 
-                safety_block_count = order_payment.payment_provider.settings.SAFETY_BLOCK_COUNT
-                if safety_block_count is None:
-                    safety_block_count = 10
+                safety_block_count = order_payment.payment_provider.settings.get(
+                    'SAFETY_BLOCK_COUNT',
+                    as_type=int,
+                    default=10,
+                )
 
                 if (
                         block_number is None

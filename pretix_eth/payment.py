@@ -274,10 +274,16 @@ class Ethereum(BasePaymentProvider):
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
+        rates = payment.payment_provider.settings.get("TOKEN_RATES", as_type=dict, default={})
+        token: IToken = all_token_and_network_ids_to_tokens[
+            request.session["payment_currency_type"]
+        ]
+
         payment.info_data = {
             "currency_type": request.session["payment_currency_type"],
             "time": request.session["payment_time"],
             "amount": request.session["payment_amount"],
+            "token_rate": rates[f"{token.TOKEN_SYMBOL}_RATE"],
         }
         payment.save(update_fields=["info"])
 
