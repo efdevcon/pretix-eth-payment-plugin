@@ -8,6 +8,8 @@ from pretix.base.models import (
     OrderRefund,
 )
 
+from web3 import Web3
+
 from pretix_eth.models import SignedMessage
 from pretix_eth.network.tokens import IToken, \
     all_token_and_network_ids_to_tokens
@@ -63,7 +65,7 @@ def payment_to_row(payment):
         completion_date,
         payment.state,
         fiat_amount,
-        token_amount,
+        Web3.fromWei(int(token_amount), 'ether'),
         currency_type,
         sender_address,
         recipient_address,
