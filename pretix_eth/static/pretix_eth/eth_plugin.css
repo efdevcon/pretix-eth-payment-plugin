@@ -53,3 +53,39 @@ button#uniswap_btn {
 button#uniswap_btn:hover {
   box-shadow: none;
 }
+
+#pretix-eth-payment-summary {
+  margin-bottom: 2em;
+}
+
+#web3modal {
+  margin-bottom: 2em;
+}
+
+#web3modal #prepare {
+  display: block;
+}
+
+#web3modal #connected {
+  display: none;
+}
+
+#web3modal #sign-a-message {
+  display: none;
+}
+
+#web3modal #send-transaction {
+  display: none;
+}
+
+#web3modal #set-correct-network {
+  display: none;
+}
+
+#web3modal #success {
+  display: none;
+}
+
+#web3modal #message-error {
+  display: block;
+}
