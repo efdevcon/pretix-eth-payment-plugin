@@ -61,6 +61,8 @@ setup(
         # Requests requires urllib3 <1.26.0.  Can delete this later after
         # requests gets its act together.
         "urllib3<1.27.0",
+        # django-bootstrap3 22.2 under py3.8, added for pip legacy resolver to avoid conflicts
+        'importlib-metadata<3; python_version < "3.8"',
     ],
     python_requires='>=3.7, <4',
     extras_require=extras_require,
