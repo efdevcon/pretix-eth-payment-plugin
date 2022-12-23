@@ -15,14 +15,22 @@ jobs:
           - python-version: 3.8
             toxenv: py38-core
           - python-version: 3.8
+            toxenv: lint
+          - python-version: 3.8
             toxenv: py38-integration
           - python-version: 3.9
             toxenv: py39-core
           - python-version: 3.9
             toxenv: py39-integration
-          - python-version: 3.8
-            toxenv: lint
-          
+          - python-version: "3.10"
+            toxenv: py310-core
+          - python-version: "3.10"
+            toxenv: py310-integration
+          - python-version: "3.11"
+            toxenv: py311-core
+          - python-version: "3.11"
+            toxenv: py311-integration
+
     steps:
     - uses: actions/checkout@v2
     - uses: actions/setup-python@v2
@@ -40,7 +48,7 @@ jobs:
       if: steps.cache.outputs.cache-hit != 'true'
       run: |
         python -m pip install --upgrade pip wheel setuptools
-        pip install -e .[dev]
+        pip install -e .[dev] --use-deprecated=legacy-resolver
 
     - name: Pip Check
       run: pip check
