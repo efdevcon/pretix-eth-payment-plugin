@@ -53,7 +53,7 @@ setup(
     license='Apache Software License',
     install_requires=[
         "pretix>=3.8.0",
-        "web3>=5.7.0",
+        "web3==6.0.0-beta.8",
         "eth-abi>=2.1.1,<3",
         "eth-typing>=2.2.1,<3",
         "eth-utils>=1.8.4,<2",
@@ -62,7 +62,7 @@ setup(
         # requests gets its act together.
         "urllib3<1.27.0",
         # django-bootstrap3 22.2 under py3.8, added for pip legacy resolver to avoid conflicts
-        'importlib-metadata<3; python_version < "3.8"',
+        'importlib-metadata<3; python_version<"3.8"',
     ],
     python_requires='>=3.7, <4',
     extras_require=extras_require,

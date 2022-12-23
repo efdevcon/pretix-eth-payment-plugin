@@ -48,10 +48,10 @@ def create_payment_with_address(get_order_and_payment, event, provider):
     def _create_payment_with_address(
         payment_kwargs={
             "state": OrderPayment.PAYMENT_STATE_CONFIRMED,
-            "amount": "100.0",
+            "amount": "100",
             "provider": "ethereum",
         },
-        info_data={"currency_type": "ETH - L1", "amount": "100.0"},
+        info_data={"currency_type": "ETH - L1", "amount": "100"},
     ):
 
         _, payment = get_order_and_payment(
@@ -92,6 +92,7 @@ def test_payment_data_present(
 
     assert response.status_code == 200
 
+    assert response.streaming is True
     file_content = "".join(str(row) for row in response.streaming_content)
 
     assert "ETH - L1" in file_content

@@ -96,17 +96,16 @@ def test_provider_payment_form_fields_multiple_networks_multiple_currencies(prov
     provider.settings.set(
         "TOKEN_RATES", {"ETH_RATE": TEST_ETH_RATE, "DAI_RATE": TEST_DAI_RATE}
     )
-    provider.settings.set("_NETWORKS", ["L1", "Goerli", "GoerliArbitrum"])
+    provider.settings.set("_NETWORKS", ["L1", "Goerli"])
 
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 5
+    assert len(currency_type_field.choices) == 4
     assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
     assert currency_type_field.choices[1][0] == "DAI - Ethereum Mainnet"
     assert currency_type_field.choices[2][0] == "ETH - Goerli Ethereum Testnet"
     assert currency_type_field.choices[3][0] == "DAI - Goerli Ethereum Testnet"
-    assert currency_type_field.choices[4][0] == "ETH - Goerli Arbitrum Testnet"
 
 
 @pytest.mark.django_db
