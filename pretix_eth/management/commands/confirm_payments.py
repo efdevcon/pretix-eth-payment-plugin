@@ -110,7 +110,7 @@ class Command(BaseCommand):
                         f"hash={signed_message.transaction_hash}"
                     )
                 try:
-                    receipt = w3.eth.getTransactionReceipt(
+                    receipt = w3.eth.get_transaction_receipt(
                         signed_message.transaction_hash
                     )
                 except TransactionNotFound:
