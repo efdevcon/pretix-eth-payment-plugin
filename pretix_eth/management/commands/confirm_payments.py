@@ -153,7 +153,7 @@ class Command(BaseCommand):
 
                 if token.IS_NATIVE_ASSET:
                     # ETH
-                    payment_amount = w3.eth.getTransaction(
+                    payment_amount = w3.eth.get_transaction(
                         signed_message.transaction_hash
                     ).value
                     receipt_reciever = receipt.to.lower()
