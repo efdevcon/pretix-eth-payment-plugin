@@ -1,68 +1,49 @@
 {% load i18n %}
 {% load static %}
+{% load eventurl %}
 
 <br/><br/>
+<link rel="stylesheet" type="text/css" href="{% static 'pretix_eth/eth_plugin.css' %}" />
+
+<script src="{% static '3rd_party/web3.min-1.7.5.js' %}"></script>
+<script type="text/javascript"
+        src="{% static '3rd_party/web3modal-HOTFIX.js' %}"></script>
 
 {% if payment_is_valid %}
+<a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
-  <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
+<a id="pretix-order-detail-url"
+   data-order-detail-url="{% eventurl event 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"
+   data-chains-json-url="{% static '3rd_party/chains-2022-09-27.json' %}"></a>
+<a id="pretix-data-chain-info" data-chain-id="{{ chain_id }}"
+   data-network-name="{{ network_name }}"></a>
 
-  <p>{% trans "Choose one of the following payment options:" %}</p>
-  <ol>
-    <li class="payment-options">
-      <img src="{% static "icons/web3modal-logo.png" %}" width=32 height=32 alt="web3modal icon"/>
-      <a target="blank" rel="noreferrer noopener" href="{{ web3modal_url }}">
-        <button class="btn btn-primary" id="web3modal_btn">{% trans "Web3Modal" %}</button>
-      </a>
-      <ul class="payment-info">
-        <li>{% trans "Allows you to pay with WalletConnect or MetaMask." %}</li>
-      </ul>
-    </li>
-    
-    <li class="payment-options">
-      <img src={% static "icons/qr_code.png" %} id="qr_icon" alt="QR Code Icon"/>
-      <button class="btn btn-primary" id="btn-qr">{% trans "Toggle QR Code" %}</button>
-      <ul class="payment-info">
-        <li>{% blocktrans trimmed %}Via <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a> QR-Code{% endblocktrans %}</li>
-      </ul>
-      <div id="pretix-eth-qr-div"></div>
-      <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
-    </li>
+{% if submitted_transation_hash %}
+<script type="module"
+        src="/static/pretix_eth/web3modal/run_periodic_check.js"></script>
+<div>
+    <p>A payment for this order has already been submitted in transaction
+        <strong><span
+                id="pretix-eth-submitted-transaction-hash">{{ submitted_transation_hash }}</span></strong>.
+    </p>
+</div>
+{% endif %}
 
-    {% if uniswap_url %}
-      <li class="payment-options">
-        <img src="{% static "icons/uniswap-logo-32.svg" %}" alt="Uniswap logo" />
-        <a target="blank" rel="noreferrer noopener" href="{{ uniswap_url }}">
-          <button class="btn btn-primary" id="uniswap_btn">{% trans "Uniswap" %}</button>
-        </a>
-        <ul class="payment-info">
-          <li>{% trans "Allows you to pay with any uniswap supported token." %}
-            <strong>{% trans "Please do not change the output amount or output currency!" %}</strong>
-          </li>
-        </ul>
-      </li>  
-    {% endif %}
+{% if order_accepting_payments %}
+<div id="pretix-eth-payment-summary">Please pay {{amount_manual}} on
+  {{network_name}} using the button below.
+</div>
+{% include "pretix_eth/web3modal.html" with payment=payment event=event %}
+{% endif %}
+<p>
+  {% blocktrans trimmed %}
+  Once you send your payment, our system will automatically check for
+  confirmation. Please allow up to several hours. Once confirmed, you will
+  get an email notification.
+  {% endblocktrans %}
+</p>
 
-    <li class="payment-options">
-      <p>{% blocktrans trimmed %}Manually pay {{ amount_manual }} on {{ network_name }} to 
-        <span id="address">{{ wallet_address }}</span>{% endblocktrans %}
-        <img tabindex="0" src="{% static "icons/clipboard-icon.jpg" %}" id="clipboard" alt="copy to clipboard" data-toggle="tooltip" data-placement="right" data-trigger="click" title="Copied to clipboard"/></p>
-
-      <ul class="payment-info">
-          <li><em>{% trans "Note: Each payment address is unique to each order. Only send your payment to the address specified above." %}</em></li>
-      </ul>
-    </li>
-  </ol>
-  <script type="text/javascript" src="{% static "pretix_eth/pending.js" %}"></script>
-  <p>
-    {% blocktrans trimmed %}
-    Once you send your payment, our system will automatically check for
-    confirmation. Please allow up to several hours. Once confirmed, you will
-    get an email notification.
-    {% endblocktrans %}
-  </p>
-
-  <p>
+<p>
     {% blocktrans trimmed %}
     If you want to improve this process, submit a PR to this github repository:
     {% endblocktrans %}

@@ -2,11 +2,15 @@ import logging
 import time
 from collections import OrderedDict
 
+from json import JSONDecoder, loads, JSONDecodeError
+
 from django import forms
 from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
+from django.template import RequestContext
 from django.template.loader import get_template
 from django.utils.translation import ugettext_lazy as _
+
 
 from pretix.base.models import (
     OrderPayment,
@@ -16,7 +20,6 @@ from pretix.base.payment import BasePaymentProvider
 
 from eth_utils import from_wei
 
-from .models import WalletAddress
 from .network.tokens import (
     IToken,
     registry,
@@ -24,6 +27,8 @@ from .network.tokens import (
     all_token_and_network_ids_to_tokens,
     token_verbose_name_to_token_network_id,
 )
+
+from pretix_eth.models import SignedMessage
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,19 @@ RESERVED_ORDER_DIGITS = 5
 def truncate_wei_value(value: int, digits: int) -> int:
     multiplier = 10 ** digits
     return int(round(value / multiplier) * multiplier)
+
+
+class TokenRatesJSONDecoder(JSONDecoder):
+    ALLOWED_KEYS = ('ETH_RATE', 'DAI_RATE',)
+
+    def decode(self, s: str):
+        decoded = super().decode(s)
+        for key, value in loads(decoded).items():
+            if key not in self.ALLOWED_KEYS:
+                raise JSONDecodeError(f"{key} is not an allowed key for this field.", "aaa", 0)
+            if not isinstance(value, (int, float)):
+                raise JSONDecodeError("Please supply integers or floats as values.", "aaabbb", 0)
+        return decoded
 
 
 class Ethereum(BasePaymentProvider):
@@ -53,6 +71,7 @@ class Ethereum(BasePaymentProvider):
                         help_text=_(
                             "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in the fiat currency you have chosen. E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."  # noqa: E501
                         ),
+                        decoder=TokenRatesJSONDecoder,
                     ),
                 ),
                 # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works... # noqa: E501
@@ -76,6 +95,13 @@ class Ethereum(BasePaymentProvider):
                     ),
                 ),
                 (
+                    "SINGLE_RECEIVER_ADDRESS",
+                    forms.CharField(
+                        label=_("Payment receiver address."),
+                        help_text=_("Caution: Must work on all networks configured.")
+                    )
+                ),
+                (
                     "NETWORK_RPC_URL",
                     forms.JSONField(
                         label=_("RPC URLs for networks"),
@@ -84,6 +110,28 @@ class Ethereum(BasePaymentProvider):
                         ),
                     ),
                 ),
+                (
+                    "PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT",
+                    forms.IntegerField(
+                        label=_("Payment retry timeout in seconds"),
+                        help_text=_(
+                            "Customers will be allowed to pay again after their previous payment "
+                            "hasn't arrived for a given time. 1800s (30min) is a reasonable starting value"
+                        ),
+                        initial=30*60,
+                    )
+                ),
+                (
+                    "SAFETY_BLOCK_COUNT",
+                    forms.IntegerField(
+                        label=_("Number of blocks to be mined after a transaction for it to be considered accepted by the chain."),
+                        help_text=_(
+                            "Higher value means better protection from (hypothetical) double spending attacks, "
+                            "at the cost of payment confirmation latency."
+                        ),
+                        initial=5,
+                    )
+                )
             ]
         )
 
@@ -96,6 +144,9 @@ class Ethereum(BasePaymentProvider):
     def get_networks_chosen_from_admin_settings(self):
         return set(self.settings.get("_NETWORKS", as_type=list, default=[]))
 
+    def get_receiving_address(self):
+        return self.settings.SINGLE_RECEIVER_ADDRESS
+
     def is_allowed(self, request, **kwargs):
         one_or_more_currencies_configured = (
             len(self.get_token_rates_from_admin_settings()) > 0
@@ -103,12 +154,6 @@ class Ethereum(BasePaymentProvider):
         # TODO: Check that TOKEN_RATES conforms to a schema.
         if not one_or_more_currencies_configured:
             logger.error("No currencies configured")
-
-        at_least_one_unused_address = (
-            WalletAddress.objects.all().unused().for_event(request.event).exists()
-        )
-        if not at_least_one_unused_address:
-            logger.error("No unused wallet addresses left")
 
         at_least_one_network_configured = all(
             (
@@ -121,11 +166,18 @@ class Ethereum(BasePaymentProvider):
         if not at_least_one_network_configured:
             logger.error("No networks configured")
 
+        receiving_address = self.get_receiving_address()
+        single_receiver_mode_configured = receiving_address is not None and len(
+            receiving_address) > 0
+
+        if not single_receiver_mode_configured:
+            logger.error("Single receiver addresses not configured properly")
+
         return all(
             (
                 one_or_more_currencies_configured,
-                at_least_one_unused_address,
                 at_least_one_network_configured,
+                single_receiver_mode_configured,
                 super().is_allowed(request),
             )
         )
@@ -200,7 +252,8 @@ class Ethereum(BasePaymentProvider):
         return False
 
     def payment_is_valid_session(self, request):
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
+        # Note: payment_currency_type check already done
+        # in token_verbose_name_to_token_network_id()
         return all(
             (
                 "payment_currency_type" in request.session,
@@ -210,7 +263,8 @@ class Ethereum(BasePaymentProvider):
         )
 
     def _payment_is_valid_info(self, payment: OrderPayment) -> bool:
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
+        # Note: payment_currency_type check already done
+        # in token_verbose_name_to_token_network_id()
         return all(
             (
                 "currency_type" in payment.info_data,
@@ -220,10 +274,16 @@ class Ethereum(BasePaymentProvider):
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
+        rates = payment.payment_provider.settings.get("TOKEN_RATES", as_type=dict, default={})
+        token: IToken = all_token_and_network_ids_to_tokens[
+            request.session["payment_currency_type"]
+        ]
+
         payment.info_data = {
             "currency_type": request.session["payment_currency_type"],
             "time": request.session["payment_time"],
             "amount": request.session["payment_amount"],
+            "token_rate": rates[f"{token.TOKEN_SYMBOL}_RATE"],
         }
         payment.save(update_fields=["info"])
 
@@ -242,17 +302,17 @@ class Ethereum(BasePaymentProvider):
         template = get_template("pretix_eth/pending.html")
 
         payment_is_valid = self._payment_is_valid_info(payment)
-        ctx = {
+        ctx = RequestContext(request, {
             "payment_is_valid": payment_is_valid,
             "order": payment.order,
-        }
+            "payment": payment,
+            'event': self.event,
+        })
 
         if not payment_is_valid:
             return template.render(ctx)
 
-        wallet_address = WalletAddress.objects.get_for_order_payment(
-            payment
-        ).hex_address
+        wallet_address = self.get_receiving_address()
         currency_type = payment.info_data["currency_type"]
         payment_amount = payment.info_data["amount"]
         amount_in_ether_or_token = from_wei(payment_amount, "ether")
@@ -265,42 +325,68 @@ class Ethereum(BasePaymentProvider):
 
         ctx.update(instructions)
         ctx["network_name"] = token.NETWORK_VERBOSE_NAME
+        ctx["chain_id"] = token.CHAIN_ID
+        ctx["token_symbol"] = token.TOKEN_SYMBOL
+        ctx["transaction_details_url"] = payment.pk
 
-        return template.render(ctx)
+        latest_signed_message = payment.signed_messages.last()
+
+        submitted_transaction_hash = None
+        order_accepting_payments = True
+        if latest_signed_message is not None:
+            submitted_transaction_hash = latest_signed_message.transaction_hash
+            order_accepting_payments = not latest_signed_message.another_signature_submitted
+
+        ctx["submitted_transation_hash"] = submitted_transaction_hash
+        ctx["order_accepting_payments"] = order_accepting_payments
+
+        return template.render(ctx.flatten())
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")
 
-        wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
-        hex_wallet_address = wallet_address.hex_address if wallet_address else ""
+        hex_wallet_address = self.get_receiving_address()
 
-        ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address}
+        # display all submitted transaction hashes along with
+        # their respective sendr and recipient addresses
+        last_signed_message: SignedMessage = payment.signed_messages.last()
+
+        if last_signed_message is not None:
+            transaction_sender_address = last_signed_message.sender_address
+            transaction_recipient_address = last_signed_message.recipient_address
+            transaction_hash = last_signed_message.transaction_hash
+        else:
+            transaction_sender_address = None
+            transaction_recipient_address = None
+            transaction_hash = None
+
+        token: IToken = all_token_and_network_ids_to_tokens[
+            payment.info_data["currency_type"]]
+
+        ctx = {
+            "payment_info": payment.info_data,
+            "token": token,
+            "wallet_address": hex_wallet_address,
+            "transaction_sender_address": transaction_sender_address,
+            "transaction_sender_address_link": token.get_address_link(
+                transaction_sender_address),
+            "transaction_recipient_address": transaction_recipient_address,
+            "transaction_recipient_address_link": token.get_address_link(
+                transaction_recipient_address),
+            "transaction_hash": transaction_hash,
+            "transaction_hash_link": token.get_transaction_link(
+                transaction_hash),
+        }
 
         return template.render(ctx)
 
     abort_pending_allowed = True
 
     def payment_refund_supported(self, payment: OrderPayment):
-        return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
+        return False
 
     def payment_partial_refund_supported(self, payment: OrderPayment):
         return self.payment_refund_supported(payment)
 
     def execute_refund(self, refund: OrderRefund):
-        if refund.payment is None:
-            raise Exception("Invariant: No payment associated with refund")
-
-        wallet_queryset = WalletAddress.objects.filter(order_payment=refund.payment)
-
-        if wallet_queryset.count() != 1:
-            raise Exception(
-                "Invariant: There is not assigned wallet address to this payment"
-            )
-
-        refund.info_data = {
-            "currency_type": refund.payment.info_data["currency_type"],
-            "amount": refund.payment.info_data["amount"],
-            "wallet_address": wallet_queryset.first().hex_address,
-        }
-
-        refund.save(update_fields=["info"])
+        raise Exception("Refunds are disabled for this payment provider.")
