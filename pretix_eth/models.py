@@ -24,6 +24,7 @@ class WalletAddressQuerySet(models.QuerySet):
         return self.filter(order_payment__state__in=(
             OrderPayment.PAYMENT_STATE_CREATED,
             OrderPayment.PAYMENT_STATE_PENDING,
+            OrderPayment.PAYMENT_STATE_CANCELED,
         ))
 
     def unconfirmed_refunds(self) -> models.QuerySet:
