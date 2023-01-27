@@ -74,6 +74,7 @@ def payment_to_row(payment):
         token_address,
         token_rate,
     ]
+
     return row
 
 
