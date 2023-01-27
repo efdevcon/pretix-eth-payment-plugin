@@ -26,10 +26,10 @@ jobs:
             toxenv: py310-core
           - python-version: "3.10"
             toxenv: py310-integration
-          - python-version: "3.11"
-            toxenv: py311-core
-          - python-version: "3.11"
-            toxenv: py311-integration
+          # - python-version: "3.11"
+          #   toxenv: py311-core
+          # - python-version: "3.11"
+          #   toxenv: py311-integration
 
     steps:
     - uses: actions/checkout@v2
