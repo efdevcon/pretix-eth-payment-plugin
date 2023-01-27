@@ -428,7 +428,6 @@ class Arbitrum(L1):
         }
 
 
-
 class ETHArbitrum(Arbitrum):
     """
     Ethereum on Arbitrum mainnet Network
