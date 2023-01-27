@@ -120,7 +120,7 @@ class Command(BaseCommand):
                             f" hash={signed_message.transaction_hash} not found,"
                             f" skipping."
                         )
-                    if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:
+                    if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
                         signed_message.invalidate()
                     continue
 

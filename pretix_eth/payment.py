@@ -118,13 +118,14 @@ class Ethereum(BasePaymentProvider):
                             "Customers will be allowed to pay again after their previous payment "
                             "hasn't arrived for a given time. 1800s (30min) is a reasonable starting value"
                         ),
-                        initial=30*60,
+                        initial=30 * 60,
                     )
                 ),
                 (
                     "SAFETY_BLOCK_COUNT",
                     forms.IntegerField(
-                        label=_("Number of blocks to be mined after a transaction for it to be considered accepted by the chain."),
+                        label=_(
+                            "Number of blocks to be mined after a transaction for it to be considered accepted by the chain."),
                         help_text=_(
                             "Higher value means better protection from (hypothetical) double spending attacks, "
                             "at the cost of payment confirmation latency."
