@@ -65,7 +65,7 @@ def payment_to_row(payment):
         completion_date,
         payment.state,
         fiat_amount,
-        Web3.fromWei(int(token_amount), 'ether'),
+        Web3.from_wei(int(token_amount), 'ether'),
         currency_type,
         sender_address,
         recipient_address,
