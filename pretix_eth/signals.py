@@ -26,22 +26,44 @@ def signal_process_response(sender, request, response, **kwargs):
         h = _parse_csp(response['Content-Security-Policy'])
     _merge_csp(h, {
         'style-src': [
-            "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
-            "'sha256-O+AX3tWIOimhuzg+lrMfltcdtWo7Mp2Y9qJUkE6ysWE='",
+            "'sha256-9h9aPS509wv9tZVxhu0nafBWlh+iaLnprlcvGgGBrdc='",
+            "'sha256-DcyKFer0/PNr8zSoqGvI+uLTvhcd7+ZrM8+TmG2QAvM='",
+            "'sha256-tExE+c+cPIPjfUjwNtUK/J5aPbrI03LPmDpjHbcju/I='",
+            "'sha256-PuESmRo5xLKq9p5zvWn/yHwOcA+VaQ0L6ObRcRKsl3g='",
+            "'sha256-/Y8sOmVZLE8kYkmzpX15FodnMH6ygvqAz1FyNpY8qoo='",
+            "'sha256-VMErMRuzD9JGQOwDtb0NWk6Ei1jibuo0S7h0b3Zt5Nw='",
+            "'sha256-thB/1uQ6hZv+vTQDSxOw21131dHhE475xakO9wp4pxo='",
+            "'sha256-4CSX0cSvsqdXksjA6mWUlZWOxhEmilc7TqCXOuzQjd8='",
+            "'sha256-QIjW/+aUzfg58HcITJNHkkCTGmLovNUIQbL+Zq2TsIE='",
+            "https://*.bridge.walletconnect.org/",
+        ],
+        'img-src': [
+            'https://registry.walletconnect.com',
+            "https://explorer-api.walletconnect.com/",
+            "https://*.bridge.walletconnect.org/",
         ],
         'script-src': [
             # web3modal-HOTFIX.js
             "'sha256-G0alWBi3d/qUeACYUzGOmJ34+fZaiiZaP2XpCEg7UFA='",
             # web3.min-1.7.5.js
             "'sha256-sqlmDxtDyZOFztnt94HoSfNbtRvmgNuCqYTRVVH6X3k='",
+            "https://unpkg.com/",
+            "https://cdn.jsdelivr.net"
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
+            "https://rpc.ankr.com/eth_goerli",
             "https://registry.walletconnect.com/",
             "https://*.bridge.walletconnect.org/",
             "wss://*.bridge.walletconnect.org/",
+            "https://explorer-api.walletconnect.com/",
             "https://*.infura.io/",
             "wss://*.infura.io/",
+            "https://rpc.walletconnect.com/",
+            "https://cloudflare-eth.com/",
+            "wss://www.walletlink.org/",
+            "https://www.sepoliarpc.space/",
+            "https://rpc.sepolia.org/"
         ],
         'manifest-src': ["'self'"],
     })

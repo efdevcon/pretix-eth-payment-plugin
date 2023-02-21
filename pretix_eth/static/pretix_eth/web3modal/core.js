@@ -1,14 +1,12 @@
 "use strict";
 
 import {
-    getTransactionDetailsURL, getERC20ABI,
+    getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount, getProvider,
-    getCookie, GlobalPretixEthState, getPaymentTransactionData
+    showSuccessMessage, getAccount,
+    getCookie, GlobalPretixEthState, getPaymentTransactionData, getERC20ABI
 } from './interface.js';
-import {runPeriodicCheck} from './periodic_check.js';
-
-// Payment process functions
+import { runPeriodicCheck } from './periodic_check.js';
 
 /*
 * Called on "Connect wallet and pay" button click and every chain/account change
@@ -19,38 +17,50 @@ async function makePayment() {
     async function _checkChainAndProceed() {
         // refresh paymentDetails in case account has changed
         GlobalPretixEthState.paymentDetails = await getPaymentTransactionData(true);
+
         if (GlobalPretixEthState.paymentDetails['is_signature_submitted'] === true) {
             showError("It seems that you have paid for this order already.")
             return
         }
+
         if (GlobalPretixEthState.paymentDetails['has_other_unpaid_orders'] === true) {
             showError("Please wait for other payments from your wallet to be confirmed before submitting another transaction.")
             return
         }
 
-        let provider = await getProvider();
+        const {
+            wagmi: {
+                core: {
+                    switchNetwork,
+                    getNetwork
+                },
+            },
+        } = window.__web3modal
 
-        // Make sure we're connected to the right chain
-        const currentChainId = await provider.eth.getChainId()
-        if (GlobalPretixEthState.paymentDetails['chain_id'] !== currentChainId) {
-            // Subscribe to chainId change
-            provider._provider.on("chainChanged", signMessage);
-            // display request to changee network
-            GlobalPretixEthState.elements.paymentNetworkName.innerText = GlobalPretixEthState.elements.aNetworkData.getAttribute("data-network-name");
-            displayOnlyId("set-correct-network");
-            // trigger network change in provider
-            let desiredChainId = '0x' + GlobalPretixEthState.paymentDetails['chain_id'].toString(16);
-            window.ethereum.request(
-                {
-                    method: 'wallet_switchEthereumChain',
-                    params: [{chainId: desiredChainId}]
-                }
-            )
+
+        const network = await getNetwork();
+        const networkIsWrong = network.chain.id !== GlobalPretixEthState.paymentDetails.chain_id
+
+        if (networkIsWrong) {
+            // Switch network is non-blocking so we can't just await it - we'll be signing on the wrong chain then
+            // Instead we switch network and wait for the user to accept, and whenever the network changes we call makePayment again (happens outside this function)
+            try {
+                const eh = await switchNetwork({
+                    chainId: GlobalPretixEthState.paymentDetails.chain_id,
+                })
+
+                console.log(eh, 'eh')
+            } catch (e) {
+                showError(e)
+            }
         } else {
             await signMessage();
         }
+
     }
+
     resetErrorMessage();
+
     try {
         await _checkChainAndProceed();
     } catch (error) {
@@ -63,6 +73,7 @@ async function signMessage() {
     async function _signMessage() {
         GlobalPretixEthState.selectedAccount = await getAccount();
         GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
+
         // sign the message
         if (
             GlobalPretixEthState.messageSignature !== null
@@ -74,31 +85,26 @@ async function signMessage() {
             if (!GlobalPretixEthState.signatureRequested) {
                 displayOnlyId("sign-a-message");
                 GlobalPretixEthState.signatureRequested = true;
-                let message = JSON.stringify(GlobalPretixEthState.paymentDetails['message']);
-                let provider = await getProvider();
-                provider.currentProvider.sendAsync(
-                    {
-                        method: "eth_signTypedData_v4",
-                        params: [GlobalPretixEthState.selectedAccount, message],
-                        from: GlobalPretixEthState.selectedAccount
-                    },
-                    async function (err, result) {
-                        if (err) {
-                            GlobalPretixEthState.signatureRequested = false;
-                            showError(err, true)
-                        } else {
-                            GlobalPretixEthState.messageSignature = result.result;
-                            GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
-                            await submitTransaction();
-                        }
-                    }
-                );
+
+                const message = GlobalPretixEthState.paymentDetails['message'];
+
+                const signature = await window.__web3modal.wagmi.core.signTypedData({
+                    domain: message.domain,
+                    types: message.types,
+                    value: message.message
+                })
+
+                GlobalPretixEthState.messageSignature = signature;
+                GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
+
+                await submitTransaction();
             } else {
                 console.log("Requesting more than one message signature.");
             }
         }
     }
     try {
+        console.log('signing message')
         await _signMessage();
     } catch (error) {
         showError(error);
@@ -113,58 +119,59 @@ async function submitTransaction() {
             console.log("Transaction was already submitted.");
             return
         }
+
         GlobalPretixEthState.transactionRequested = true
         GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
-        let provider = await getProvider()
+
         // make the payment
         if (GlobalPretixEthState.paymentDetails['erc20_contract_address'] !== null) {
-            let erc20_abi = await getERC20ABI()
-            const contract = new provider.eth.Contract(
-                erc20_abi,
-                GlobalPretixEthState.paymentDetails['erc20_contract_address'],
-            );
+            const balance = await window.__web3modal.wagmi.core.readContract({
+                abi: window.__web3modal.wagmi.core.erc20ABI,
+                address: GlobalPretixEthState.paymentDetails['erc20_contract_address'],
+                functionName: 'balanceOf',
+                args: [GlobalPretixEthState.paymentDetails['erc20_contract_address']],
+            });
 
-            let balance = await contract.methods.balanceOf(GlobalPretixEthState.signedByAccount).call();
             if (BigInt(balance) < BigInt(GlobalPretixEthState.paymentDetails['amount'])) {
                 showError("Not enough balance to pay using this wallet, please use another currency or payment method, or transfer funds to your wallet and try again.", true);
                 return
             }
 
             displayOnlyId("send-transaction");
-            await contract.methods.transfer(
-                GlobalPretixEthState.paymentDetails['recipient_address'],
-                GlobalPretixEthState.paymentDetails['amount'],
-            ).send(
-                {from: GlobalPretixEthState.signedByAccount}
-            ).on('transactionHash', function(transactionHash){
-                submitSignature(
-                    transactionHash
-                );
-            }).on(
-                'error', showError
-            ).catch(
-                showError
-            );
+
+            try {
+                const config = await window.__web3modal.wagmi.core.prepareWriteContract({
+                    address: GlobalPretixEthState.paymentDetails['erc20_contract_address'],
+                    abi: window.__web3modal.wagmi.core.erc20ABI,
+                    functionName: 'transfer',
+                    args: [GlobalPretixEthState.paymentDetails['recipient_address'], GlobalPretixEthState.paymentDetails['amount']]
+                })
+
+                const result = await window.__web3modal.wagmi.core.writeContract(config)
+
+                await submitSignature(result.hash);
+            } catch (e) {
+                showError(e);
+            }
         } else { // crypto transfer
             displayOnlyId("send-transaction");
-            await provider.eth.sendTransaction(
-                {
-                    from: GlobalPretixEthState.signedByAccount,
-                    to: GlobalPretixEthState.paymentDetails['recipient_address'],
-                    value: GlobalPretixEthState.paymentDetails['amount'],
-                }
-            ).on(
-                'transactionHash',
-                function (transactionHash) {
-                    submitSignature(
-                        transactionHash,
-                    );
-                }
-            ).on(
-                'error', showError
-            ).catch(
-                showError
-            );
+
+            try {
+                const transactionConfig = await window.__web3modal.wagmi.core.prepareSendTransaction({
+                    request: {
+                        to: GlobalPretixEthState.paymentDetails['recipient_address'],
+                        value: GlobalPretixEthState.paymentDetails['amount']
+                    },
+                });
+
+                const result = await window.__web3modal.wagmi.core.sendTransaction(transactionConfig);
+
+                await submitSignature(
+                    result.hash,
+                );
+            } catch (e) {
+                showError(e);
+            }
         }
     }
     try {
@@ -186,14 +193,14 @@ async function submitSignature(transactionHash) {
             csrfmiddlewaretoken: csrf_cookie
         })
         fetch(url, {
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    'X-CSRF-TOKEN': csrf_cookie,
-                    'HTTP-X-CSRFTOKEN': csrf_cookie,
-                },
-                method: 'POST',
-                body: searchParams
-            }
+            headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+                'X-CSRF-TOKEN': csrf_cookie,
+                'HTTP-X-CSRFTOKEN': csrf_cookie,
+            },
+            method: 'POST',
+            body: searchParams
+        }
         ).then(
             async (response) => {
                 if (response.ok) {
@@ -212,4 +219,4 @@ async function submitSignature(transactionHash) {
     }
 }
 
-export {makePayment}
+export { makePayment }

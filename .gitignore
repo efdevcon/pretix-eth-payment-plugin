@@ -72,3 +72,5 @@ data/
 /.idea
 
 venv
+
+node_modules

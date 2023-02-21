@@ -64,7 +64,11 @@ class PaymentTransactionDetailsView(GenericViewSet):
         signed_message = request.data.get('signedMessage')
 
         typed_data = serializer.data.get('message')
+        print(typed_data, 'typed data')
         typed_data['message']['sender_address'] = sender_address
+        print(typed_data, 'typed data after sender address modificatio')
+
+        print(signed_message, 'signed message')
 
         w3 = Web3(
             load_provider_from_uri(
@@ -75,8 +79,15 @@ class PaymentTransactionDetailsView(GenericViewSet):
             )
         )
 
+        print(w3, 'hello from w3')
+
         encoded_data = encode_structured_data(text=json.dumps(typed_data))
         recovered_address = w3.eth.account.recover_message(encoded_data, signature=signed_message)
+
+        print(encoded_data, 'encoded data')
+        print(signed_message, 'signed message')
+        print(recovered_address, 'recovered address')
+        print(sender_address, 'sender address')
 
         if recovered_address.lower() != sender_address.lower():
             raise

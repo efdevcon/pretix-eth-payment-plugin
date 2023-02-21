@@ -36,38 +36,40 @@ const GlobalPretixEthState = {
     web3Modal: null
 }
 
-
-async function getProvider() {
-    if (window.web3_provider) {
-        return window.web3_provider
-    }
-    let provider;
+async function signIn() {
     try {
-        provider = await GlobalPretixEthState.web3Modal.connect();
+        const account = await window.__web3modal.wagmi.core.getAccount();
+
+        if (account.isConnected) {
+            return true;
+        }
+
+        await GlobalPretixEthState.web3Modal.openModal()
     } catch (e) {
-        console.log("Web3Modal exception:", e)
-        provider = window.ethereum
-    }
-    if (!provider) {
-        // no provider found
-        throw "Failed to connect to a wallet provider. Please make sure you have Metamask or another injected provider set up in this browser.";
-    }
-    window.web3_provider = new Web3(provider);
+        console.error(e, 'Sign in failed')
 
-    // Subscribe to accounts change
-    provider.on("accountsChanged", (accounts) => {
-        location.reload();
-    });
+        throw e;
+    }
 
-    return window.web3_provider
+    return false;
 }
 
 async function getAccount() {
-    let provider = await getProvider();
-    // Get a Web3 instance for the wallet
-    const accounts = await provider.eth.getAccounts();
-    // MetaMask does not give you all accounts, only the selected account
-    return accounts[0];
+    try {
+        // If already signed just return the account
+        let account = await window.__web3modal.wagmi.core.getAccount();
+
+        if (!account.isConnected) {
+            // If succesfully signed in, account is retrievable
+            account = await window.__web3modal.wagmi.core.getAccount();
+        }
+
+        return account.address;
+    } catch (e) {
+        console.error(e, 'Sign in failed')
+
+        return;
+    }
 }
 
 function getTransactionDetailsURL() {
@@ -78,14 +80,17 @@ async function getPaymentTransactionData(refresh = false) {
     if (!refresh && GlobalPretixEthState.paymentDetails !== null) {
         return GlobalPretixEthState.paymentDetails
     }
-    let walletAddress = await getAccount();
+
+    const walletAddress = await getAccount();
     const url = getTransactionDetailsURL();
     const response = await fetch(url + '?' + new URLSearchParams({
         sender_address: walletAddress
     }));
+
     if (response.status >= 400) {
         throw "Failed to fetch order details. If this problem persists, please contact the organizer directly.";
     }
+
     return await response.json();
 }
 
@@ -115,14 +120,17 @@ function getCookie(name) {
 
 async function loadChainsJSON() {
     let url = GlobalPretixEthState.elements.aOrderDetailURL.getAttribute("data-chains-json-url");
-    await fetch(url).then(res => res.json()).then(
-        (chains) => {
-            chains.forEach(item => {
-                GlobalPretixEthState.chains[item.chain] = GlobalPretixEthState.chains[item.chain] || [];
-                GlobalPretixEthState.chains[item.chain][item.networkId] = item
-            })
-        }
-    ).catch(err => console.error(err));
+    await fetch(url)
+        .then(res => res.json()).then(
+            (chains) => {
+                GlobalPretixEthState.chainsRaw = chains;
+
+                chains.forEach(item => {
+                    GlobalPretixEthState.chains[item.chain] = GlobalPretixEthState.chains[item.chain] || [];
+                    GlobalPretixEthState.chains[item.chain][item.networkId] = item
+                })
+            }
+        ).catch(err => console.error(err));
 }
 
 function convertHashToExplorerLink(chain_id, transactionHash) {
@@ -197,7 +205,7 @@ function resetErrorMessage() {
 
 function displayOnlyId(divId) {
     GlobalPretixEthState.selectors.paymentSteps.forEach(
-        function(div) {
+        function (div) {
             if (div.id === divId) {
                 div.style.display = "block";
             } else {
@@ -221,5 +229,6 @@ export {
     convertHashToExplorerLink,
     getTransactionDetailsURL, getERC20ABI,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount, getProvider
+    showSuccessMessage, getAccount,
+    signIn
 };

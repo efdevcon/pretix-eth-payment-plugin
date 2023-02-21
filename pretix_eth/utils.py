@@ -50,6 +50,8 @@ def get_rpc_url_for_network(payment_provider, network_id):
 
     expected_network_rpc_url_key = f"{network_id}_RPC_URL"
 
+    print('hello', network_id)
+
     if expected_network_rpc_url_key in rpc_urls:
         return rpc_urls[expected_network_rpc_url_key]
     else:
