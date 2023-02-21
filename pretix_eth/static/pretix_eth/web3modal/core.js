@@ -37,7 +37,6 @@ async function makePayment() {
             },
         } = window.__web3modal
 
-
         const network = await getNetwork();
         const networkIsWrong = network.chain.id !== GlobalPretixEthState.paymentDetails.chain_id
 
@@ -45,12 +44,15 @@ async function makePayment() {
             // Switch network is non-blocking so we can't just await it - we'll be signing on the wrong chain then
             // Instead we switch network and wait for the user to accept, and whenever the network changes we call makePayment again (happens outside this function)
             try {
-                const eh = await switchNetwork({
+                console.log('huehue')
+                displayOnlyId("switching-chains");
+
+                await switchNetwork({
                     chainId: GlobalPretixEthState.paymentDetails.chain_id,
                 })
-
-                console.log(eh, 'eh')
             } catch (e) {
+                // showError("Please wait for other payments from your wallet to be confirmed before submitting another transaction.")
+
                 showError(e)
             }
         } else {
@@ -104,7 +106,6 @@ async function signMessage() {
         }
     }
     try {
-        console.log('signing message')
         await _signMessage();
     } catch (error) {
         showError(error);

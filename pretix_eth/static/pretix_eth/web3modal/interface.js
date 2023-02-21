@@ -171,7 +171,9 @@ function showError(message = '', reset_state = true) {
         GlobalPretixEthState.signatureRequested = false;
 
         if (typeof message === "object") {
-            if (message.message !== undefined) {
+            if (message.data && message.data.message) {
+                message = message.data.message + ". Please try again."
+            } else if (message.message !== undefined) {
                 message = message.message + ". Please try again."
             } else if (message.error !== undefined && message.error.message !== undefined) {
                 message = message.error.message + ". Please try again.";

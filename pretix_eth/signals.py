@@ -63,7 +63,9 @@ def signal_process_response(sender, request, response, **kwargs):
             "https://cloudflare-eth.com/",
             "wss://www.walletlink.org/",
             "https://www.sepoliarpc.space/",
-            "https://rpc.sepolia.org/"
+            "https://rpc.sepolia.org/",
+            "https://arb1.arbitrum.io/rpc",
+            "https://mainnet.optimism.io/"
         ],
         'manifest-src': ["'self'"],
     })

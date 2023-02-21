@@ -70,6 +70,10 @@ button#uniswap_btn:hover {
   display: none;
 }
 
+#web3modal #switching-chains {
+  display: none;
+}
+
 #web3modal #sign-a-message {
   display: none;
 }
