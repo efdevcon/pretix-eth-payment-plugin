@@ -1,6 +1,6 @@
 import { signTypedData, erc20ABI, configureChains, createClient, getAccount, watchAccount, watchNetwork, getNetwork, switchNetwork, signMessage, sendTransaction, prepareSendTransaction, readContract, prepareWriteContract, writeContract } from "@wagmi/core";
 
-import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia } from "@wagmi/core/chains";
+import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync } from "@wagmi/core/chains";
 
 import { Web3Modal } from "@web3modal/html";
 
@@ -42,6 +42,7 @@ window.__web3modal = {
       goerli,
       optimism,
       optimismGoerli,
+      zkSync
     }
   },
   web3modal: {

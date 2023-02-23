@@ -466,6 +466,38 @@ class ETHRinkebyArbitrum(RinkebyArbitrum):
     TOKEN_SYMBOL = "ETH"
 
 
+""" ZkSync Networks """
+
+
+class ZkSync(L1):
+    """
+    Implementation for ZkSync networks
+    """
+
+    NETWORK_IDENTIFIER = "ZkSync"
+    NETWORK_VERBOSE_NAME = "ZkSync Mainnet"
+    CHAIN_ID = 324
+    EIP3091_EXPLORER_URL = "https://explorer.zksync.io"
+
+
+class ETHZkSync(ZkSync):
+    """
+    Ethereum on ZkSync mainnet Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
+
+
+class DaiZkSync(ZkSync):
+    """
+    DAI on ZkSync Mainnet
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
+
+
 registry = [
     EthL1(),
     DaiL1(),
@@ -481,6 +513,8 @@ registry = [
     ETHArbitrum(),
     DaiArbitrum(),
     ETHRinkebyArbitrum(),
+    ETHZkSync(),
+    DaiZkSync()
 ]
 all_network_verbose_names_to_ids = {}
 for token in registry:

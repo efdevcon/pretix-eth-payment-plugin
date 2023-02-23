@@ -58,7 +58,8 @@ async function init() {
                 sepolia,
                 goerli,
                 optimism,
-                optimismGoerli
+                optimismGoerli,
+                zkSync
             }
         },
         web3modal: {
@@ -85,6 +86,7 @@ async function init() {
         goerli,
         optimism,
         optimismGoerli,
+        zkSync,
         sepolia
     ];
 

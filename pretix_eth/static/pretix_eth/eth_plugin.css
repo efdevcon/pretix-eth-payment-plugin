@@ -93,3 +93,8 @@ button#uniswap_btn:hover {
 #web3modal #message-error {
   display: block;
 }
+
+w3m-core-button {
+  display: block;
+  margin-top: 10px;
+}

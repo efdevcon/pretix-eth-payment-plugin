@@ -43,19 +43,18 @@ def signal_process_response(sender, request, response, **kwargs):
             "https://*.bridge.walletconnect.org/",
         ],
         'script-src': [
-            # web3modal-HOTFIX.js
-            "'sha256-G0alWBi3d/qUeACYUzGOmJ34+fZaiiZaP2XpCEg7UFA='",
-            # web3.min-1.7.5.js
-            "'sha256-sqlmDxtDyZOFztnt94HoSfNbtRvmgNuCqYTRVVH6X3k='",
             "https://unpkg.com/",
             "https://cdn.jsdelivr.net"
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
+            "https://zksync2-mainnet.zksync.io/",
             "https://rpc.ankr.com/eth_goerli",
             "https://registry.walletconnect.com/",
             "https://*.bridge.walletconnect.org/",
             "wss://*.bridge.walletconnect.org/",
+            "https://bridge.walletconnect.org/",
+            "wss://bridge.walletconnect.org/",
             "https://explorer-api.walletconnect.com/",
             "https://*.infura.io/",
             "wss://*.infura.io/",
