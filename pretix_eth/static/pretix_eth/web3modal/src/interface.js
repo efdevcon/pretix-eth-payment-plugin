@@ -1,7 +1,8 @@
 "use strict";
 
-// files that interact with the page DOM
+import { getAccount } from "@wagmi/core";
 
+// files that interact with the page DOM
 
 const GlobalPretixEthState = {
     selectedAccount: null,  // address of the currently connected account
@@ -38,7 +39,7 @@ const GlobalPretixEthState = {
 
 async function signIn() {
     try {
-        const account = await window.__web3modal.wagmi.core.getAccount();
+        const account = await getAccount();
 
         if (account.isConnected) {
             return true;
@@ -54,23 +55,6 @@ async function signIn() {
     return false;
 }
 
-async function getAccount() {
-    try {
-        // If already signed just return the account
-        let account = await window.__web3modal.wagmi.core.getAccount();
-
-        if (!account.isConnected) {
-            // If succesfully signed in, account is retrievable
-            account = await window.__web3modal.wagmi.core.getAccount();
-        }
-
-        return account.address;
-    } catch (e) {
-        console.error(e, 'Sign in failed')
-
-        return;
-    }
-}
 
 function getTransactionDetailsURL() {
     return GlobalPretixEthState.elements.buttonConnect.getAttribute("data-transaction-details-url");
@@ -81,7 +65,7 @@ async function getPaymentTransactionData(refresh = false) {
         return GlobalPretixEthState.paymentDetails
     }
 
-    const walletAddress = await getAccount();
+    const walletAddress = await getAccount()?.address;
     const url = getTransactionDetailsURL();
     const response = await fetch(url + '?' + new URLSearchParams({
         sender_address: walletAddress
@@ -93,7 +77,6 @@ async function getPaymentTransactionData(refresh = false) {
 
     return await response.json();
 }
-
 
 function getCookie(name) {
     // Add the = sign
@@ -146,20 +129,9 @@ function convertHashToExplorerLink(chain_id, transactionHash) {
     }
 }
 
-async function getERC20ABI() {
-    let url = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-erc20-abi-url");
-    let response = await fetch(url);
-    if (response.ok) {
-        return response.json()
-    } else {
-        showError("Failed to fetch ERC20 ABI.")
-    }
-}
-
 /*
 * Success and error handling
 */
-
 function showError(message = '', reset_state = true) {
     if (GlobalPretixEthState.transactionHashSubmitted) {
         // do not display errors or reset state after the transaction hash has been successfully submitted to the BE
@@ -199,11 +171,9 @@ function showError(message = '', reset_state = true) {
     return false
 }
 
-
 function resetErrorMessage() {
     GlobalPretixEthState.elements.divError.innerHTML = '';
 }
-
 
 function displayOnlyId(divId) {
     GlobalPretixEthState.selectors.paymentSteps.forEach(
@@ -229,8 +199,8 @@ export {
     getCookie, GlobalPretixEthState,
     getPaymentTransactionData, loadChainsJSON,
     convertHashToExplorerLink,
-    getTransactionDetailsURL, getERC20ABI,
+    getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount,
+    showSuccessMessage,
     signIn
 };

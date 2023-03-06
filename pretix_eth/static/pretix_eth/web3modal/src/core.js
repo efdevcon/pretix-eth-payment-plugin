@@ -1,10 +1,11 @@
 "use strict";
 
+import { signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, prepareSendTransaction, readContract, prepareWriteContract, writeContract } from "@wagmi/core";
 import {
     getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount,
-    getCookie, GlobalPretixEthState, getPaymentTransactionData, getERC20ABI
+    showSuccessMessage,
+    getCookie, GlobalPretixEthState, getPaymentTransactionData,
 } from './interface.js';
 import { runPeriodicCheck } from './periodic_check.js';
 
@@ -28,15 +29,6 @@ async function makePayment() {
             return
         }
 
-        const {
-            wagmi: {
-                core: {
-                    switchNetwork,
-                    getNetwork
-                },
-            },
-        } = window.__web3modal
-
         const network = await getNetwork();
         const networkIsWrong = network.chain.id !== GlobalPretixEthState.paymentDetails.chain_id
 
@@ -44,21 +36,17 @@ async function makePayment() {
             // Switch network is non-blocking so we can't just await it - we'll be signing on the wrong chain then
             // Instead we switch network and wait for the user to accept, and whenever the network changes we call makePayment again (happens outside this function)
             try {
-                console.log('huehue')
                 displayOnlyId("switching-chains");
 
                 await switchNetwork({
                     chainId: GlobalPretixEthState.paymentDetails.chain_id,
                 })
             } catch (e) {
-                // showError("Please wait for other payments from your wallet to be confirmed before submitting another transaction.")
-
                 showError(e)
             }
         } else {
             await signMessage();
         }
-
     }
 
     resetErrorMessage();
@@ -73,7 +61,7 @@ async function makePayment() {
 /* Step 2 */
 async function signMessage() {
     async function _signMessage() {
-        GlobalPretixEthState.selectedAccount = await getAccount();
+        GlobalPretixEthState.selectedAccount = await getAccount()?.address;
         GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
 
         // sign the message
@@ -90,7 +78,7 @@ async function signMessage() {
 
                 const message = GlobalPretixEthState.paymentDetails['message'];
 
-                const signature = await window.__web3modal.wagmi.core.signTypedData({
+                const signature = await signTypedData({
                     domain: message.domain,
                     types: message.types,
                     value: message.message
@@ -105,6 +93,7 @@ async function signMessage() {
             }
         }
     }
+
     try {
         await _signMessage();
     } catch (error) {
@@ -126,8 +115,8 @@ async function submitTransaction() {
 
         // make the payment
         if (GlobalPretixEthState.paymentDetails['erc20_contract_address'] !== null) {
-            const balance = await window.__web3modal.wagmi.core.readContract({
-                abi: window.__web3modal.wagmi.core.erc20ABI,
+            const balance = await readContract({
+                abi: erc20ABI,
                 address: GlobalPretixEthState.paymentDetails['erc20_contract_address'],
                 functionName: 'balanceOf',
                 args: [GlobalPretixEthState.paymentDetails['erc20_contract_address']],
@@ -141,14 +130,14 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const config = await window.__web3modal.wagmi.core.prepareWriteContract({
+                const config = await prepareWriteContract({
+                    abi: erc20ABI,
                     address: GlobalPretixEthState.paymentDetails['erc20_contract_address'],
-                    abi: window.__web3modal.wagmi.core.erc20ABI,
                     functionName: 'transfer',
                     args: [GlobalPretixEthState.paymentDetails['recipient_address'], GlobalPretixEthState.paymentDetails['amount']]
                 })
 
-                const result = await window.__web3modal.wagmi.core.writeContract(config)
+                const result = await writeContract(config)
 
                 await submitSignature(result.hash);
             } catch (e) {
@@ -158,14 +147,14 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const transactionConfig = await window.__web3modal.wagmi.core.prepareSendTransaction({
+                const transactionConfig = await prepareSendTransaction({
                     request: {
                         to: GlobalPretixEthState.paymentDetails['recipient_address'],
                         value: GlobalPretixEthState.paymentDetails['amount']
                     },
                 });
 
-                const result = await window.__web3modal.wagmi.core.sendTransaction(transactionConfig);
+                const result = await sendTransaction(transactionConfig);
 
                 await submitSignature(
                     result.hash,

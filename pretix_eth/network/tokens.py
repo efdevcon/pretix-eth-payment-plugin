@@ -514,7 +514,6 @@ registry = [
     DaiArbitrum(),
     ETHRinkebyArbitrum(),
     ETHZkSync(),
-    DaiZkSync()
 ]
 all_network_verbose_names_to_ids = {}
 for token in registry:

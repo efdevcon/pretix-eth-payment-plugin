@@ -43,8 +43,10 @@ def signal_process_response(sender, request, response, **kwargs):
             "https://*.bridge.walletconnect.org/",
         ],
         'script-src': [
-            "https://unpkg.com/",
-            "https://cdn.jsdelivr.net"
+            # unsafe-inline/eval required for webpack bundles (we cannot know names in advance)
+            "'unsafe-inline'",
+            "'unsafe-eval'",
+            "https://cdn.jsdelivr.net",
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
@@ -64,7 +66,7 @@ def signal_process_response(sender, request, response, **kwargs):
             "https://www.sepoliarpc.space/",
             "https://rpc.sepolia.org/",
             "https://arb1.arbitrum.io/rpc",
-            "https://mainnet.optimism.io/"
+            "https://mainnet.optimism.io/",
         ],
         'manifest-src': ["'self'"],
     })

@@ -1,9 +1,5 @@
 {% csrf_token %}
 {% load eventurl %}
-<!-- Our logic: -->
-<script type="module" src="/static/pretix_eth/web3modal/web3modal.js"></script> 
-<!-- Web3modal/walletconnect related packages (third party): -->
-<script src="/static/3rd_party/web3modal/web3modal.bundle.js"></script>
 
 <div id="web3modal">
     <div id="prepare" class="pretix-eth-payment-steps">
@@ -11,9 +7,6 @@
             Connect wallet and pay
         </button>
     </div>
-
-     <!--<w3m-network-switch></w3m-network-switch> -->
-    <!-- <w3m-core-button></w3m-core-button> -->
 
     <div id="switching-chains" class="pretix-eth-payment-steps">
         <strong>Switching chains. If nothing happens, you may need to add the chain in your chosen wallet, reload the page, and try again.</strong>
@@ -34,3 +27,17 @@
     </div>
     <div><strong><span id="message-error"></span></strong></div>
 </div>
+
+<script>
+    // Fetch build manifest on page load (cache: no-store is to ensure the manifest is always up to date - the bundles referenced in the manifest will still be cached as normal)
+    fetch("/static/pretix_eth/web3modal-dist/manifest.json", { cache: "no-store" })
+        .then(resp => resp.json())
+        .then(manifest => {
+            const web3modalModule = document.createElement('script');
+
+            web3modalModule.setAttribute('src', manifest['main.js']);
+            web3modalModule.setAttribute('type', 'text/javascript');
+
+            document.body.appendChild(web3modalModule);
+        })
+</script>
