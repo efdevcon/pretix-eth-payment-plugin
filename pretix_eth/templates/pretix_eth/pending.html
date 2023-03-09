@@ -15,8 +15,20 @@
    data-network-name="{{ network_name }}"></a>
 
 {% if submitted_transation_hash %}
-<script type="module"
-        src="/static/pretix_eth/web3modal/run_periodic_check.js"></script>
+<script>
+  // Fetch build manifest on page load (cache: no-store is to ensure the manifest is always up to date - the bundles referenced in the manifest will still be cached as normal)
+  fetch("/static/pretix_eth/web3modal-dist/manifest.json", { cache: "no-store" })
+      .then(resp => resp.json())
+      .then(manifest => {
+          const web3modalModule = document.createElement('script');
+
+          web3modalModule.setAttribute('src', manifest['periodicCheck.js']);
+          web3modalModule.setAttribute('type', 'text/javascript');
+
+          document.body.appendChild(web3modalModule);
+      })
+</script>
+
 <div>
     <p>A payment for this order has already been submitted in transaction
         <strong><span
