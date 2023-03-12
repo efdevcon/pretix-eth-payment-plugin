@@ -1,6 +1,6 @@
 "use strict";
 
-import { signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, prepareSendTransaction, readContract, prepareWriteContract, writeContract } from "@wagmi/core";
+import { signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, prepareSendTransaction, readContract, prepareWriteContract, writeContract, getProvider } from "@wagmi/core";
 import {
     getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
@@ -33,8 +33,6 @@ async function makePayment() {
         const networkIsWrong = network.chain.id !== GlobalPretixEthState.paymentDetails.chain_id
 
         if (networkIsWrong) {
-            // Switch network is non-blocking so we can't just await it - we'll be signing on the wrong chain then
-            // Instead we switch network and wait for the user to accept, and whenever the network changes we call makePayment again (happens outside this function)
             try {
                 displayOnlyId("switching-chains");
 
@@ -74,6 +72,18 @@ async function signMessage() {
         } else {
             if (!GlobalPretixEthState.signatureRequested) {
                 displayOnlyId("sign-a-message");
+
+                const provider = getProvider();
+                const code = await provider.getCode(GlobalPretixEthState.selectedAccount);
+                const isSmartContractWallet = code !== '0x';
+
+                if (isSmartContractWallet) {
+                    // TODO: ERC1271
+                    showError('Smart contract wallets do not work with this version of the plugin.')
+
+                    return;
+                }
+
                 GlobalPretixEthState.signatureRequested = true;
 
                 const message = GlobalPretixEthState.paymentDetails['message'];

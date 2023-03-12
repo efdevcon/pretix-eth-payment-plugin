@@ -39,7 +39,7 @@
 
 {% if order_accepting_payments %}
 <div id="pretix-eth-payment-summary">Please pay {{amount_manual}} on
-  {{network_name}} using the button below.
+  {{network_name}} by connecting a wallet below.
 </div>
 {% include "pretix_eth/web3modal.html" with payment=payment event=event %}
 {% endif %}

@@ -1,6 +1,6 @@
 "use strict";
 
-import { configureChains, createClient, watchAccount, watchNetwork } from "@wagmi/core";
+import { configureChains, createClient, watchAccount, watchNetwork, getProvider } from "@wagmi/core";
 import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync } from "@wagmi/core/chains";
 import { Web3Modal } from "@web3modal/html";
 import {
@@ -11,8 +11,13 @@ import {
 import { showError, GlobalPretixEthState, signIn } from './interface.js';
 import { makePayment } from './core.js';
 
+// TODO: Feed in from env
+const walletConnectProjectId = 'c1b5ad74fb26a47cd04679fb8044eff0';
+
 async function init() {
     GlobalPretixEthState.elements.divPrepare.style.display = "block";
+
+    const desiredChainID = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-chain-id");
 
     const chains = [
         arbitrum,
@@ -23,12 +28,11 @@ async function init() {
         optimismGoerli,
         zkSync,
         sepolia
-    ];
+    ].filter(chain => chain.id === parseInt(desiredChainID));
 
-    // Wagmi Core Client
     const { provider } = configureChains(chains, [
         walletConnectProvider({
-            projectId: "c1b5ad74fb26a47cd04679fb8044eff0",
+            projectId: walletConnectProjectId,
             version: 2,
             chains
         }),
@@ -44,12 +48,11 @@ async function init() {
     const ethereumClient = new EthereumClient(wagmiClient, chains);
 
     GlobalPretixEthState.web3Modal = new Web3Modal(
-        { projectId: "c1b5ad74fb26a47cd04679fb8044eff0" },
+        { projectId: walletConnectProjectId },
         ethereumClient
     );
 
     // Switch to user chosen chain before showing modal
-    const desiredChainID = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-chain-id");
     const desiredChain = chains.find(chain => chain.id === parseInt(desiredChainID));
 
     if (desiredChain) {
@@ -59,11 +62,6 @@ async function init() {
     let lastAccountStatus = null;
 
     watchAccount(async (accountState) => {
-        // Reload if user disconnects
-        if (lastAccountStatus === 'connected' && accountState.status === 'disconnected') {
-            location.reload();
-        }
-
         // Detect when sign-in is succesful and automatically proceed to makePayment
         if (lastAccountStatus === 'connecting' && accountState.status === 'connected') {
             try {
@@ -76,31 +74,15 @@ async function init() {
         lastAccountStatus = accountState.status;
     });
 
-    let lastNetwork = null;
-
-    watchNetwork(async (network) => {
-        // Whenever user switches network, call makePayment again
-        if (lastNetwork !== null) {
-            try {
-                await makePayment();
-            } catch (error) {
-                showError(error)
-            }
-        }
-
-        lastNetwork = network?.chain.id;
-    });
-
     GlobalPretixEthState.elements.buttonConnect.addEventListener(
         "click",
         async () => {
             try {
-                // If user refreshes the page after signing in, the user will still be logged in - we then call makePayment directly
+                // If user is already logged in we call makePayment, otherwise signIn will open the walletconnect modal, and makePayment will instead be called when the user connects
                 const alreadySignedIn = await signIn();
 
                 if (alreadySignedIn) {
-                    // Sign out
-                    makePayment();
+                    await makePayment();
                 }
             } catch (e) {
                 showError(error)

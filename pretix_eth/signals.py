@@ -26,16 +26,7 @@ def signal_process_response(sender, request, response, **kwargs):
         h = _parse_csp(response['Content-Security-Policy'])
     _merge_csp(h, {
         'style-src': [
-            "'sha256-9h9aPS509wv9tZVxhu0nafBWlh+iaLnprlcvGgGBrdc='",
-            "'sha256-DcyKFer0/PNr8zSoqGvI+uLTvhcd7+ZrM8+TmG2QAvM='",
-            "'sha256-tExE+c+cPIPjfUjwNtUK/J5aPbrI03LPmDpjHbcju/I='",
-            "'sha256-PuESmRo5xLKq9p5zvWn/yHwOcA+VaQ0L6ObRcRKsl3g='",
-            "'sha256-/Y8sOmVZLE8kYkmzpX15FodnMH6ygvqAz1FyNpY8qoo='",
-            "'sha256-VMErMRuzD9JGQOwDtb0NWk6Ei1jibuo0S7h0b3Zt5Nw='",
-            "'sha256-thB/1uQ6hZv+vTQDSxOw21131dHhE475xakO9wp4pxo='",
-            "'sha256-4CSX0cSvsqdXksjA6mWUlZWOxhEmilc7TqCXOuzQjd8='",
-            "'sha256-QIjW/+aUzfg58HcITJNHkkCTGmLovNUIQbL+Zq2TsIE='",
-            "https://*.bridge.walletconnect.org/",
+            "'unsafe-inline'"
         ],
         'img-src': [
             'https://registry.walletconnect.com',

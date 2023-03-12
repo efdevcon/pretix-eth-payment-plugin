@@ -3,8 +3,10 @@
 
 <div id="web3modal">
     <div id="prepare" class="pretix-eth-payment-steps">
+        <w3m-core-button></w3m-core-button>
+
         <button class="btn btn-primary" id="btn-connect" data-chain-id="{{ chain_id }}" data-transaction-details-url="{% eventurl event 'plugins:pretix_eth:event.order.transaction_details' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret pk=payment.pk %}" data-erc20-abi-url="{% eventurl event 'plugins:pretix_eth:erc2O_abi'  organizer=payment.order.event.organizer.slug event=payment.order.event.slug %}">
-            Connect wallet and pay
+            Click here to pay
         </button>
     </div>
 
