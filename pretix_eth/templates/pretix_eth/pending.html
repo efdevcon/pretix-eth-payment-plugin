@@ -41,7 +41,8 @@
 <div id="pretix-eth-payment-summary">Please pay {{amount_manual}} on
   {{network_name}} by connecting a wallet below.
 </div>
-{% include "pretix_eth/web3modal.html" with payment=payment event=event %}
+{% include "pretix_eth/web3modal.html" with payment=payment event=event walletconnect_project_id=walletconnect_project_id %}
+
 {% endif %}
 <p>
   {% blocktrans trimmed %}

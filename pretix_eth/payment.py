@@ -102,6 +102,14 @@ class Ethereum(BasePaymentProvider):
                     )
                 ),
                 (
+                    "WALLETCONNECT_PROJECT_ID",
+                    forms.CharField(
+                        label=_("WalletConnect project ID."),
+                        help_text=_(
+                            "Every project using WalletConnect SDKs (including Web3Modal) needs to obtain projectId from WalletConnect Cloud. This is absolutely free and only takes a few minutes.")
+                    )
+                ),
+                (
                     "NETWORK_RPC_URL",
                     forms.JSONField(
                         label=_("RPC URLs for networks"),
@@ -174,11 +182,18 @@ class Ethereum(BasePaymentProvider):
         if not single_receiver_mode_configured:
             logger.error("Single receiver addresses not configured properly")
 
+        walletconnect_project_id_configured = self.settings.WALLETCONNECT_PROJECT_ID is not None and len(
+            self.settings.WALLETCONNECT_PROJECT_ID) > 0
+
+        if not walletconnect_project_id_configured:
+            logger.error("Walletconnect project id is required for web3modal to work.")
+
         return all(
             (
                 one_or_more_currencies_configured,
                 at_least_one_network_configured,
                 single_receiver_mode_configured,
+                walletconnect_project_id_configured,
                 super().is_allowed(request),
             )
         )
@@ -324,11 +339,15 @@ class Ethereum(BasePaymentProvider):
             wallet_address, payment_amount, amount_in_ether_or_token
         )
 
+        walletconnect_project_id = payment.payment_provider.settings.get(
+            "WALLETCONNECT_PROJECT_ID", as_type=str, default="")
+
         ctx.update(instructions)
         ctx["network_name"] = token.NETWORK_VERBOSE_NAME
         ctx["chain_id"] = token.CHAIN_ID
         ctx["token_symbol"] = token.TOKEN_SYMBOL
         ctx["transaction_details_url"] = payment.pk
+        ctx["walletconnect_project_id"] = walletconnect_project_id
 
         latest_signed_message = payment.signed_messages.last()
 

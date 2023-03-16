@@ -1,7 +1,7 @@
 {% csrf_token %}
 {% load eventurl %}
 
-<div id="web3modal">
+<div id="web3modal" data-walletconnect-id="{{ walletconnect_project_id }}">
     <div id="prepare" class="pretix-eth-payment-steps">
         <w3m-core-button></w3m-core-button>
 

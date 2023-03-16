@@ -11,13 +11,11 @@ import {
 import { showError, GlobalPretixEthState, signIn } from './interface.js';
 import { makePayment } from './core.js';
 
-// TODO: Feed in from env
-const walletConnectProjectId = 'c1b5ad74fb26a47cd04679fb8044eff0';
-
 async function init() {
     GlobalPretixEthState.elements.divPrepare.style.display = "block";
 
     const desiredChainID = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-chain-id");
+    const walletConnectProjectId = document.getElementById('web3modal').getAttribute('data-walletconnect-id');
 
     const chains = [
         arbitrum,

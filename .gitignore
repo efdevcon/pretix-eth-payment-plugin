@@ -74,4 +74,4 @@ data/
 venv
 
 node_modules
-web3modal-dist
+.DS_Store

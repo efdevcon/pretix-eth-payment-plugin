@@ -34,7 +34,7 @@ def signal_process_response(sender, request, response, **kwargs):
             "https://*.bridge.walletconnect.org/",
         ],
         'script-src': [
-            # unsafe-inline/eval required for webpack bundles (we cannot know names in advance)
+            # unsafe-inline/eval required for webpack bundles (we cannot know names in advance).
             "'unsafe-inline'",
             "'unsafe-eval'",
             "https://cdn.jsdelivr.net",
