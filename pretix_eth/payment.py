@@ -106,7 +106,7 @@ class Ethereum(BasePaymentProvider):
                     forms.CharField(
                         label=_("WalletConnect project ID."),
                         help_text=_(
-                            "Every project using WalletConnect SDKs (including Web3Modal) needs to obtain projectId from WalletConnect Cloud. This is absolutely free and only takes a few minutes.")
+                            "Every project using WalletConnect SDKs (including Web3Modal) needs to obtain projectId from WalletConnect Cloud. This is absolutely free and only takes a few minutes.")  # noqa: E501
                     )
                 ),
                 (
@@ -182,7 +182,7 @@ class Ethereum(BasePaymentProvider):
         if not single_receiver_mode_configured:
             logger.error("Single receiver addresses not configured properly")
 
-        walletconnect_project_id_configured = self.settings.WALLETCONNECT_PROJECT_ID is not None and len(
+        walletconnect_project_id_configured = self.settings.WALLETCONNECT_PROJECT_ID is not None and len(  # noqa: E501
             self.settings.WALLETCONNECT_PROJECT_ID) > 0
 
         if not walletconnect_project_id_configured:
