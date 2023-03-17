@@ -41,6 +41,8 @@ def test_provider_is_allowed(event, provider):
     provider.settings.set("NETWORK_RPC_URL", dict())
     provider.settings.set("SINGLE_RECEIVER_ADDRESS",
                           "0x0000000000000000000000000000000000000000")
+    provider.settings.set("WALLETCONNECT_PROJECT_ID",
+                          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     assert not provider.is_allowed(request)
 
     # now test with right values:
