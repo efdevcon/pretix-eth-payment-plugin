@@ -1,1 +1,0 @@
-(self.webpackChunkweb3modal=self.webpackChunkweb3modal||[]).push([[563],{6563:()=>{}}]);

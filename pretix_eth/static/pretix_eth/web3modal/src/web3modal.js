@@ -1,14 +1,10 @@
 "use strict";
 
-import { configureChains, createClient, watchAccount, watchNetwork, getProvider } from "@wagmi/core";
+import { configureChains, createClient, watchAccount, watchNetwork } from "@wagmi/core";
+import { EthereumClient, w3mConnectors, w3mProvider } from '@web3modal/ethereum'
 import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync } from "@wagmi/core/chains";
 import { Web3Modal } from "@web3modal/html";
-import {
-    EthereumClient,
-    modalConnectors,
-    walletConnectProvider,
-} from "@web3modal/ethereum";
-import { showError, GlobalPretixEthState, signIn } from './interface.js';
+import { showError, GlobalPretixEthState, signIn, displayOnlyId } from './interface.js';
 import { makePayment } from './core.js';
 
 async function init() {
@@ -28,17 +24,11 @@ async function init() {
         sepolia
     ].filter(chain => chain.id === parseInt(desiredChainID));
 
-    const { provider } = configureChains(chains, [
-        walletConnectProvider({
-            projectId: walletConnectProjectId,
-            version: 2,
-            chains
-        }),
-    ]);
+    const { provider } = configureChains(chains, [w3mProvider({ projectId: walletConnectProjectId })])
 
     const wagmiClient = createClient({
         autoConnect: true,
-        connectors: modalConnectors({ appName: "web3Modal", chains }),
+        connectors: [...w3mConnectors({ projectId: walletConnectProjectId, version: 2, chains })],
         provider,
     });
 
@@ -50,14 +40,7 @@ async function init() {
         ethereumClient
     );
 
-    // Switch to user chosen chain before showing modal
-    const desiredChain = chains.find(chain => chain.id === parseInt(desiredChainID));
-
-    if (desiredChain) {
-        GlobalPretixEthState.web3Modal.setSelectedChain(desiredChain);
-    }
-
-    let lastAccountStatus = null;
+    let lastAccountStatus;
 
     watchAccount(async (accountState) => {
         // Detect when sign-in is succesful and automatically proceed to makePayment
@@ -70,6 +53,11 @@ async function init() {
         }
 
         lastAccountStatus = accountState.status;
+    });
+
+    // Clear any errors/statuses upon switching chain
+    watchNetwork(() => {
+        displayOnlyId('prepare');
     });
 
     GlobalPretixEthState.elements.buttonConnect.addEventListener(

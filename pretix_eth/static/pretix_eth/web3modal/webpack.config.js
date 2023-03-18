@@ -3,7 +3,6 @@ const { WebpackManifestPlugin } = require('webpack-manifest-plugin');
 
 module.exports = {
   mode: 'production',
-  // entry: './src/web3modal.js',
   entry: {
     main: './src/web3modal.js',
     periodicCheck: './src/run_periodic_check.js'

@@ -41,6 +41,9 @@ def signal_process_response(sender, request, response, **kwargs):
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
+            "wss://relay.walletconnect.com",
+            "https://explorer-api.walletconnect.com",
+            "https://rpc.walletconnect.com",
             "https://zksync2-mainnet.zksync.io/",
             "https://rpc.ankr.com/eth_goerli",
             "https://registry.walletconnect.com/",
@@ -48,10 +51,8 @@ def signal_process_response(sender, request, response, **kwargs):
             "wss://*.bridge.walletconnect.org/",
             "https://bridge.walletconnect.org/",
             "wss://bridge.walletconnect.org/",
-            "https://explorer-api.walletconnect.com/",
             "https://*.infura.io/",
             "wss://*.infura.io/",
-            "https://rpc.walletconnect.com/",
             "https://cloudflare-eth.com/",
             "wss://www.walletlink.org/",
             "https://www.sepoliarpc.space/",
