@@ -28,7 +28,7 @@ async function init() {
 
     const wagmiClient = createClient({
         autoConnect: true,
-        connectors: [...w3mConnectors({ projectId: walletConnectProjectId, version: 2, chains })],
+        connectors: w3mConnectors({ projectId: walletConnectProjectId, version: 1 /* Setting version 2 gives a range of issues https://github.com/WalletConnect/web3modal/issues/937 */, chains }),
         provider,
     });
 
