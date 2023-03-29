@@ -8,10 +8,11 @@ import { showError, GlobalPretixEthState, signIn, displayOnlyId } from './interf
 import { makePayment } from './core.js';
 
 async function init() {
-    GlobalPretixEthState.elements.divPrepare.style.display = "block";
-
     const desiredChainID = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-chain-id");
     const walletConnectProjectId = document.getElementById('web3modal').getAttribute('data-walletconnect-id');
+
+    // Argent reads the page title and presents it to the user in the wallet - the pretix generated one looks confusing, so we override it before instantiating web3modal
+    document.title = 'Pretix Payment';
 
     const chains = [
         arbitrum,
@@ -27,7 +28,7 @@ async function init() {
     const { provider } = configureChains(chains, [w3mProvider({ projectId: walletConnectProjectId })])
 
     const wagmiClient = createClient({
-        autoConnect: true,
+        // autoConnect: true,
         connectors: w3mConnectors({ projectId: walletConnectProjectId, version: 1 /* Setting version 2 gives a range of issues https://github.com/WalletConnect/web3modal/issues/937 */, chains }),
         provider,
     });
@@ -60,6 +61,9 @@ async function init() {
         displayOnlyId('prepare');
     });
 
+    GlobalPretixEthState.elements.divPrepare.style.display = "block";
+    document.getElementById('spinner').style.display = 'none';
+
     GlobalPretixEthState.elements.buttonConnect.addEventListener(
         "click",
         async () => {
@@ -77,6 +81,4 @@ async function init() {
     );
 }
 
-window.addEventListener('load', async () => {
-    await init();
-});
+init();

@@ -30,14 +30,13 @@ def signal_process_response(sender, request, response, **kwargs):
         ],
         'img-src': [
             'https://registry.walletconnect.com',
-            "https://explorer-api.walletconnect.com/",
-            "https://*.bridge.walletconnect.org/",
+            "https://explorer-api.walletconnect.com",
+            "https://*.bridge.walletconnect.org",
         ],
         'script-src': [
             # unsafe-inline/eval required for webpack bundles (we cannot know names in advance).
             "'unsafe-inline'",
-            "'unsafe-eval'",
-            "https://cdn.jsdelivr.net",
+            "'unsafe-eval'"
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [

@@ -40,7 +40,9 @@ async function makePayment() {
                     chainId: GlobalPretixEthState.paymentDetails.chain_id,
                 })
             } catch (e) {
-                showError(e)
+                console.error(e);
+
+                showError("There was an error switching chains. You may have to manually switch to the appropriate chain in your connected wallet, and then try again.")
             }
         } else {
             await signMessage();

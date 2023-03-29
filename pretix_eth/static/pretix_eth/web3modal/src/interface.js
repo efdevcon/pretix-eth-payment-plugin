@@ -159,6 +159,7 @@ function showError(message = '', reset_state = true) {
     }
 
     GlobalPretixEthState.elements.divError.innerHTML = message;
+
     if (reset_state === true) {
         displayOnlyId("prepare");
     }

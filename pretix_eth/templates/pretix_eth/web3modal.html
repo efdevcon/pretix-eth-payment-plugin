@@ -1,6 +1,9 @@
 {% csrf_token %}
 {% load eventurl %}
 
+
+<div class="lds-ring" id="spinner"><div></div><div></div><div></div><div></div></div>
+
 <div id="web3modal" data-walletconnect-id="{{ walletconnect_project_id }}">
     <div id="prepare" class="pretix-eth-payment-steps">
         <w3m-core-button></w3m-core-button>
@@ -30,7 +33,7 @@
     <div><strong><span id="message-error"></span></strong></div>
 </div>
 
-<script>
+<script async>
     // Fetch build manifest on page load (cache: no-store is to ensure the manifest is always up to date - the bundles referenced in the manifest will still be cached as normal)
     fetch("/static/pretix_eth/web3modal-dist/manifest.json", { cache: "no-store" })
         .then(resp => resp.json())
