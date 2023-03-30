@@ -1,5 +1,6 @@
 const path = require('path');
 const { WebpackManifestPlugin } = require('webpack-manifest-plugin');
+const webpack = require('webpack');
 
 module.exports = {
   mode: 'production',
@@ -11,9 +12,13 @@ module.exports = {
     publicPath: '/static/pretix_eth/web3modal-dist/',
     path: path.resolve(__dirname, '..', 'web3modal-dist'),
     filename: 'web3modal.[contenthash].js',
-    clean: true
+    clean: true,
+
   },
   plugins: [
+    new webpack.optimize.LimitChunkCountPlugin({
+      maxChunks: 1,
+    }),
     new WebpackManifestPlugin()
   ],
 };
