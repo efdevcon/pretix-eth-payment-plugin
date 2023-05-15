@@ -25,7 +25,7 @@ eip1271abi = [{"inputs": [{"name": "_hash", "type": "bytes32"}, {"name": "_signa
 
 
 def is_smart_contract(address, w3):
-    bytecode = w3.eth.getCode(address)
+    bytecode = w3.eth.get_code(address)
     return bytecode != b''
 
 
@@ -85,7 +85,7 @@ class PaymentTransactionDetailsView(GenericViewSet):
         order_payment: OrderPayment = self.get_object()
         serializer = self.get_serializer(order_payment)
 
-        sender_address = request.data.get('selectedAccount').lower()
+        sender_address = request.data.get('selectedAccount')
         signed_message = request.data.get('signedMessage')
 
         typed_data = serializer.data.get('message')
@@ -100,7 +100,11 @@ class PaymentTransactionDetailsView(GenericViewSet):
             )
         )
 
+        print(sender_address, 'sender')
+
         is_smart_contract_wallet = is_smart_contract(sender_address, w3)
+
+        print(is_smart_contract_wallet, 'is sc wallet')
 
         if is_smart_contract_wallet:
             message_hash = reconstruct_message_hash(

@@ -196,7 +196,7 @@ async function submitTransaction() {
 
                 const { hash } = await writeContract(config)
 
-                await submitSignature({ hash });
+                await submitSignature(hash);
             } catch (e) {
                 showError(e);
             }
@@ -204,15 +204,13 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const { hash } = await sendTransaction({
+                const { hash, ...rest } = await sendTransaction({
                     to: GlobalPretixEthState.paymentDetails['recipient_address'],
                     value: GlobalPretixEthState.paymentDetails['amount'],
                     data: '' // Argent needs this to be defined for some reason
                 });
 
-                await submitSignature({
-                    hash
-                });
+                await submitSignature(hash);
             } catch (e) {
                 showError(e);
             }
