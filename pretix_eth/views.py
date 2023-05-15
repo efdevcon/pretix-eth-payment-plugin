@@ -1,7 +1,7 @@
 import json
 
 from web3 import Web3
-from eth_account.messages import encode_structured_data, encode_defunct, defunct_hash_message
+from eth_account.messages import encode_structured_data, defunct_hash_message
 from web3.providers.auto import load_provider_from_uri
 
 from django.http import HttpResponseBadRequest
@@ -11,7 +11,7 @@ from pretix.base.models import Order, OrderPayment
 
 from rest_framework.response import Response
 from rest_framework.views import APIView
-from rest_framework.viewsets import GenericViewSet, ModelViewSet
+from rest_framework.viewsets import GenericViewSet
 from rest_framework import permissions, mixins
 
 from pretix_eth import serializers
@@ -20,7 +20,7 @@ from pretix_eth.utils import get_rpc_url_for_network
 from pretix_eth.network import tokens
 
 magic_value = '0x1626ba7e'
-eip1271abi = [{"inputs": [{"name": "_hash", "type": "bytes32"}, {"name": "_signature", "type": "bytes"}], "name": "isValidSignature", "outputs": [
+eip1271abi = [{"inputs": [{"name": "_hash", "type": "bytes32"}, {"name": "_signature", "type": "bytes"}], "name": "isValidSignature", "outputs": [  # noqa: E501
     {"name": "magicValue", "type": "bytes4"}], "stateMutability": "view", "type": "function"}]
 
 
@@ -104,7 +104,7 @@ class PaymentTransactionDetailsView(GenericViewSet):
 
         if is_smart_contract_wallet:
             message_hash = reconstruct_message_hash(
-                typed_data['message']['sender_address'], typed_data['message']['receiver_address'], typed_data['message']['order_code'], typed_data['message']['chain_id'])
+                typed_data['message']['sender_address'], typed_data['message']['receiver_address'], typed_data['message']['order_code'], typed_data['message']['chain_id'])  # noqa: E501
             validate_eip1271_signature(sender_address, signed_message, message_hash, w3)
         else:
             encoded_data = encode_structured_data(text=json.dumps(typed_data))
@@ -148,7 +148,7 @@ class PaymentTransactionDetailsView(GenericViewSet):
         )
 
         message_hash = reconstruct_message_hash(
-            typed_data['message']['sender_address'], typed_data['message']['receiver_address'], typed_data['message']['order_code'], typed_data['message']['chain_id'])
+            typed_data['message']['sender_address'], typed_data['message']['receiver_address'], typed_data['message']['order_code'], typed_data['message']['chain_id'])  # noqa: E501
 
         # This will raise an exception if validation fails
         validate_eip1271_signature(sender_address, signature, message_hash, w3)
