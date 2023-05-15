@@ -1,6 +1,6 @@
 "use strict";
 
-import { signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, prepareSendTransaction, readContract, prepareWriteContract, writeContract, getProvider } from "@wagmi/core";
+import { signMessage, signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, readContract, prepareWriteContract, writeContract, getPublicClient } from "@wagmi/core";
 import {
     getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
@@ -8,6 +8,7 @@ import {
     getCookie, GlobalPretixEthState, getPaymentTransactionData,
 } from './interface.js';
 import { runPeriodicCheck } from './periodic_check.js';
+// import { hashMessage } from 'viem'
 
 /*
 * Called on "Connect wallet and pay" button click and every chain/account change
@@ -45,7 +46,7 @@ async function makePayment() {
                 showError("There was an error switching chains. You may have to manually switch to the appropriate chain in your connected wallet, and then try again.")
             }
         } else {
-            await signMessage();
+            await sign();
         }
     }
 
@@ -59,8 +60,8 @@ async function makePayment() {
 }
 
 /* Step 2 */
-async function signMessage() {
-    async function _signMessage() {
+async function sign() {
+    async function _sign() {
         GlobalPretixEthState.selectedAccount = await getAccount()?.address;
         GlobalPretixEthState.paymentDetails = await getPaymentTransactionData();
 
@@ -74,32 +75,76 @@ async function signMessage() {
         } else {
             if (!GlobalPretixEthState.signatureRequested) {
                 displayOnlyId("sign-a-message");
-
-                const provider = getProvider();
-                const code = await provider.getCode(GlobalPretixEthState.selectedAccount);
-                const isSmartContractWallet = code !== '0x';
-
-                if (isSmartContractWallet) {
-                    // TODO: ERC1271
-                    showError('Smart contract wallets do not work with this version of the plugin.')
-
-                    return;
-                }
-
                 GlobalPretixEthState.signatureRequested = true;
 
                 const message = GlobalPretixEthState.paymentDetails['message'];
+                const client = getPublicClient();
+                const code = await client.getBytecode({ address: GlobalPretixEthState.selectedAccount });
+                const isSmartContractWallet = !!code;
 
-                const signature = await signTypedData({
-                    domain: message.domain,
-                    types: message.types,
-                    value: message.message
-                })
+                // Safe stuff, doesn't work for now...
+                // await client.request({
+                //     method: 'safe_setSettings',
+                //     params: [{ offChainSigning: true }],
+                // })
 
-                GlobalPretixEthState.messageSignature = signature;
-                GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
+                // If connected wallet is an SC wallet, conform to EIP1271
+                if (isSmartContractWallet) {
+                    // Constructing the message to sign. 
+                    // TODO: could sign using EIP721 but wasn't sure how to generate a corresponding hash for this
+                    const formattedMessage = GlobalPretixEthState.selectedAccount + message.message['receiver_address'] + message.message['order_code'] + message.message['chain_id'];
+                    const signature = await signMessage({ message: formattedMessage });
+                    // const msgHash = hashMessage(formattedMessage);
 
-                await submitTransaction();
+                    // const eip1271Abi = [
+                    //     {
+                    //         inputs: [{ name: "_hash", type: "bytes32" }, { name: "_signature", type: "bytes" }],
+                    //         name: "isValidSignature",
+                    //         outputs: [{ name: "magicValue", type: "bytes4" }],
+                    //         stateMutability: "view",
+                    //         type: "function",
+                    //     }
+                    // ];
+
+                    // const magicValue = '0x1626ba7e';
+                    // const response = await readContract({
+                    //     abi: eip1271Abi,
+                    //     address: GlobalPretixEthState.selectedAccount,
+                    //     functionName: 'isValidSignature',
+                    //     args: [msgHash, signature],
+                    // });
+
+                    const url = new URL(window.location.origin + window.__validateSignatureUrl);
+                    url.searchParams.append('signature', signature);
+                    url.searchParams.append('sender', GlobalPretixEthState.selectedAccount);
+                    const csrf_cookie = getCookie('pretix_csrftoken')
+                    const response = await fetch(url.href, {
+                        headers: {
+                            "Content-Type": "application/x-www-form-urlencoded",
+                            'X-CSRF-TOKEN': csrf_cookie,
+                            'HTTP-X-CSRFTOKEN': csrf_cookie,
+                        },
+                        method: 'GET'
+                    });
+
+                    GlobalPretixEthState.messageSignature = signature;
+                    GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
+
+                    if (response.ok) {
+                        await submitTransaction();
+                    } else {
+                        showError('EIP1271 error: unable to verify signature; your wallet may not be supported.')
+
+                        return;
+                    }
+                } else {
+                    const signature = await signTypedData(message)
+
+                    GlobalPretixEthState.messageSignature = signature;
+                    GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
+
+                    await submitTransaction();
+                }
             } else {
                 console.log("Requesting more than one message signature.");
             }
@@ -107,7 +152,7 @@ async function signMessage() {
     }
 
     try {
-        await _signMessage();
+        await _sign();
     } catch (error) {
         showError(error);
         GlobalPretixEthState.signatureRequested = false;
@@ -149,9 +194,9 @@ async function submitTransaction() {
                     args: [GlobalPretixEthState.paymentDetails['recipient_address'], GlobalPretixEthState.paymentDetails['amount']]
                 })
 
-                const result = await writeContract(config)
+                const { hash } = await writeContract(config)
 
-                await submitSignature(result.hash);
+                await submitSignature({ hash });
             } catch (e) {
                 showError(e);
             }
@@ -159,18 +204,15 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const transactionConfig = await prepareSendTransaction({
-                    request: {
-                        to: GlobalPretixEthState.paymentDetails['recipient_address'],
-                        value: GlobalPretixEthState.paymentDetails['amount']
-                    },
+                const { hash } = await sendTransaction({
+                    to: GlobalPretixEthState.paymentDetails['recipient_address'],
+                    value: GlobalPretixEthState.paymentDetails['amount'],
+                    data: '' // Argent needs this to be defined for some reason
                 });
 
-                const result = await sendTransaction(transactionConfig);
-
-                await submitSignature(
-                    result.hash,
-                );
+                await submitSignature({
+                    hash
+                });
             } catch (e) {
                 showError(e);
             }

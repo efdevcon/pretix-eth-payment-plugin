@@ -1,20 +1,20 @@
 "use strict";
 
-import { configureChains, createClient, watchAccount, watchNetwork } from "@wagmi/core";
+import { configureChains, createConfig, watchAccount, watchNetwork } from "@wagmi/core";
 import { EthereumClient, w3mConnectors, w3mProvider } from '@web3modal/ethereum'
 import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync } from "@wagmi/core/chains";
 import { Web3Modal } from "@web3modal/html";
-import { showError, GlobalPretixEthState, signIn, displayOnlyId } from './interface.js';
+import { showError, GlobalPretixEthState, signIn, displayOnlyId, getCookie } from './interface.js';
 import { makePayment } from './core.js';
 
 async function init() {
     const desiredChainID = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-chain-id");
     const walletConnectProjectId = document.getElementById('web3modal').getAttribute('data-walletconnect-id');
 
-    // Argent reads the page title and presents it to the user in the wallet - the pretix generated one looks confusing, so we override it before instantiating web3modal
+    // Some wallets read the page title and presents it to the user in the wallet - the pretix generated one looks confusing, so we override it before instantiating web3modal
     document.title = 'Pretix Payment';
 
-    const chains = [
+    const desiredChain = [
         arbitrum,
         arbitrumGoerli,
         mainnet,
@@ -25,17 +25,23 @@ async function init() {
         sepolia
     ].filter(chain => chain.id === parseInt(desiredChainID));
 
-    const { provider } = configureChains(chains, [w3mProvider({ projectId: walletConnectProjectId })])
+    const { publicClient } = configureChains(desiredChain, [w3mProvider({ projectId: walletConnectProjectId })])
 
-    const wagmiClient = createClient({
+    const wagmiClient = createConfig({
         autoConnect: true,
-        connectors: w3mConnectors({ projectId: walletConnectProjectId, version: 1 /* Setting version 2 gives a range of issues https://github.com/WalletConnect/web3modal/issues/937 */, chains }),
-        provider,
+        connectors: [
+            ...w3mConnectors({
+                projectId:
+                    walletConnectProjectId,
+                version: 1 /* Setting version 2 gives a range of issues https://github.com/WalletConnect/web3modal/issues/937 - flip to version 2 when more wallets are onboard */,
+                chains: desiredChain
+            })
+        ],
+        publicClient,
     });
 
     // Web3Modal and Ethereum Client
-    const ethereumClient = new EthereumClient(wagmiClient, chains);
-
+    const ethereumClient = new EthereumClient(wagmiClient, desiredChain);
     GlobalPretixEthState.web3Modal = new Web3Modal(
         { projectId: walletConnectProjectId },
         ethereumClient

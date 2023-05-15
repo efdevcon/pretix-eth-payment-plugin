@@ -10,10 +10,9 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@wagmi/core": "^0.10.2",
-    "@web3modal/ethereum": "^2.2.2",
-    "@web3modal/html": "^2.2.2",
-    "ethers": "^5.7.2",
+    "@wagmi/core": "^1.0.1",
+    "@web3modal/ethereum": "^2.4.1",
+    "@web3modal/html": "^2.4.1",
     "webpack": "^5.75.0"
   },
   "devDependencies": {

@@ -10,6 +10,10 @@
         <button class="btn btn-primary" id="btn-connect" data-chain-id="{{ chain_id }}" data-transaction-details-url="{% eventurl event 'plugins:pretix_eth:event.order.transaction_details' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret pk=payment.pk %}" data-erc20-abi-url="{% eventurl event 'plugins:pretix_eth:erc2O_abi'  organizer=payment.order.event.organizer.slug event=payment.order.event.slug %}">
             Click here to pay
         </button>
+
+        <script>
+            window.__validateSignatureUrl = "{% eventurl event 'plugins:pretix_eth:event.order.validate_signature' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret pk=payment.pk %}"
+        </script>
     </div>
 
     <div id="switching-chains" class="pretix-eth-payment-steps">
