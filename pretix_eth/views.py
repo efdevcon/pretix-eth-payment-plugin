@@ -19,7 +19,9 @@ from pretix_eth.models import SignedMessage
 from pretix_eth.utils import get_rpc_url_for_network
 from pretix_eth.network import tokens
 
+# Magic value in accordance to EIP1271 specification
 magic_value = '0x1626ba7e'
+# ABI for EIP1271
 eip1271abi = [{"inputs": [{"name": "_hash", "type": "bytes32"}, {"name": "_signature", "type": "bytes"}], "name": "isValidSignature", "outputs": [  # noqa: E501
     {"name": "magicValue", "type": "bytes4"}], "stateMutability": "view", "type": "function"}]
 
@@ -33,11 +35,12 @@ def reconstruct_message_hash(sender=str, receiver=str, order=str, chain_id=int):
     return defunct_hash_message(text=sender + receiver + order + str(chain_id))
 
 
-def validate_eip1271_signature(sender, signature, hash, w3):
+def validate_eip1271_signature(sender, signature, hashAsBytes, w3):
     signatureAsBytes = Web3.to_bytes(hexstr=signature)
+    # hashAsBytes = Web3.to_bytes(hexstr=hash)
 
     contract = w3.eth.contract(address=sender, abi=eip1271abi)
-    response = contract.functions.isValidSignature(hash, signatureAsBytes).call()
+    response = contract.functions.isValidSignature(hashAsBytes, signatureAsBytes).call()
     response_parsed = Web3.to_hex(response)
 
     if response_parsed != magic_value:
@@ -150,6 +153,23 @@ class PaymentTransactionDetailsView(GenericViewSet):
                 )
             )
         )
+
+        # encode_structured_data(text=json.dumps(typed_data)).body
+        # message_hash = w3.eth.accounts.hashMessage(typed_data)
+
+        # return Response(message_hash)
+
+        # print(message_hash.hex())
+
+        # print(typed_data, 'typed data')
+
+        # message_hash = encode_typed_data(typed_data)
+
+        # message_hash = encode_structured_data(text=json.dumps(typed_data))
+
+        # print(message_hash.body, 'winning')
+
+        # print(message_hash.hex(), 'hash')
 
         message_hash = reconstruct_message_hash(
             typed_data['message']['sender_address'], typed_data['message']['receiver_address'], typed_data['message']['order_code'], typed_data['message']['chain_id'])  # noqa: E501

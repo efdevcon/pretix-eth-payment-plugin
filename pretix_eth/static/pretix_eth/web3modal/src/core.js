@@ -8,7 +8,7 @@ import {
     getCookie, GlobalPretixEthState, getPaymentTransactionData,
 } from './interface.js';
 import { runPeriodicCheck } from './periodic_check.js';
-// import { hashMessage } from 'viem'
+// import { hashTypedData, hashMessage } from 'viem'
 
 /*
 * Called on "Connect wallet and pay" button click and every chain/account change
@@ -82,19 +82,16 @@ async function sign() {
                 const code = await client.getBytecode({ address: GlobalPretixEthState.selectedAccount });
                 const isSmartContractWallet = !!code;
 
-                // Safe stuff, doesn't work for now...
-                // await client.request({
-                //     method: 'safe_setSettings',
-                //     params: [{ offChainSigning: true }],
-                // })
-
                 // If connected wallet is an SC wallet, conform to EIP1271
                 if (isSmartContractWallet) {
                     // Constructing the message to sign. 
-                    // TODO: could sign using EIP721 but wasn't sure how to generate a corresponding hash for this
                     const formattedMessage = GlobalPretixEthState.selectedAccount + message.message['receiver_address'] + message.message['order_code'] + message.message['chain_id'];
                     const signature = await signMessage({ message: formattedMessage });
                     // const msgHash = hashMessage(formattedMessage);
+                    // WIP: Typed data signing - does not work on python side yet:
+                    // const signature = await signTypedData(message);
+                    // message.message['order_code'] = 'break';
+                    // const msgHash = hashTypedData(message);
 
                     // const eip1271Abi = [
                     //     {
@@ -107,13 +104,16 @@ async function sign() {
                     // ];
 
                     // const magicValue = '0x1626ba7e';
-                    // const response = await readContract({
+                    // const localResp = await readContract({
                     //     abi: eip1271Abi,
                     //     address: GlobalPretixEthState.selectedAccount,
                     //     functionName: 'isValidSignature',
                     //     args: [msgHash, signature],
                     // });
 
+                    // console.log(localResp, 'should be magic value')
+
+                    // Validate signature on the backend before proceeding:
                     const url = new URL(window.location.origin + window.__validateSignatureUrl);
                     url.searchParams.append('signature', signature);
                     url.searchParams.append('sender', GlobalPretixEthState.selectedAccount);
@@ -130,6 +130,7 @@ async function sign() {
                     GlobalPretixEthState.messageSignature = signature;
                     GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
 
+                    // When signature is valid response will be 200 and we can proceed, otherwise show error
                     if (response.ok) {
                         await submitTransaction();
                     } else {
@@ -204,10 +205,10 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const { hash, ...rest } = await sendTransaction({
+                const { hash } = await sendTransaction({
                     to: GlobalPretixEthState.paymentDetails['recipient_address'],
                     value: GlobalPretixEthState.paymentDetails['amount'],
-                    data: '' // Argent needs this to be defined for some reason
+                    // data: '' // Argent needs data to be defined to even prompt the user for a tx, and safe needs it to be undefined or it errors out, so that's a problem
                 });
 
                 await submitSignature(hash);
