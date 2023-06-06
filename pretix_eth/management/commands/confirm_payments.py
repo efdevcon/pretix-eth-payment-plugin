@@ -121,7 +121,7 @@ class Command(BaseCommand):
                         )
 
                 try:
-                    # Custom safe transaction handling - can be removed once we create a smart contract for payment handling
+                    # Custom safe transaction handling - can be removed once we create a smart contract for payment handling # noqa: E501
                     if signed_message.safe_app_transaction_url:
                         try:
                             resp = requests.get(signed_message.safe_app_transaction_url)
@@ -138,18 +138,18 @@ class Command(BaseCommand):
                                 if log_verbosity > 0:
                                     logger.info(
                                         f"   * Safe App Transaction"
-                                        f" safe_tx={signed_message.safe_app_transaction_url} did not execute/is not succesful,"
+                                        f" safe_tx={signed_message.safe_app_transaction_url} did not execute/is not succesful,"  # noqa: E501
                                         f" skipping."
                                     )
 
                                 if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
                                     signed_message.invalidate()
                                 continue
-                        except:
+                        except Exception:
                             if log_verbosity > 0:
                                 logger.info(
                                     f"   * Safe App Transaction"
-                                    f" safe_tx={signed_message.safe_app_transaction_url} could not be processed,"
+                                    f" safe_tx={signed_message.safe_app_transaction_url} could not be processed,"  # noqa: E501
                                     f" skipping."
                                 )
 
