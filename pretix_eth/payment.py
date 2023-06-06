@@ -352,13 +352,16 @@ class Ethereum(BasePaymentProvider):
         latest_signed_message = payment.signed_messages.last()
 
         submitted_transaction_hash = None
+        safe_app_transaction_url = None
         order_accepting_payments = True
         if latest_signed_message is not None:
             submitted_transaction_hash = latest_signed_message.transaction_hash
+            safe_app_transaction_url = latest_signed_message.safe_app_transaction_url
             order_accepting_payments = not latest_signed_message.another_signature_submitted
 
         ctx["submitted_transation_hash"] = submitted_transaction_hash
         ctx["order_accepting_payments"] = order_accepting_payments
+        ctx["safe_app_transaction_url"] = safe_app_transaction_url
 
         return template.render(ctx.flatten())
 

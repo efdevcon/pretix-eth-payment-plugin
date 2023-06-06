@@ -1,6 +1,6 @@
 "use strict";
 
-import { signMessage, signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, readContract, prepareWriteContract, writeContract, getPublicClient } from "@wagmi/core";
+import { signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, readContract, prepareWriteContract, writeContract, getPublicClient } from "@wagmi/core";
 import {
     getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
@@ -8,7 +8,6 @@ import {
     getCookie, GlobalPretixEthState, getPaymentTransactionData,
 } from './interface.js';
 import { runPeriodicCheck } from './periodic_check.js';
-// import { hashTypedData, hashMessage } from 'viem'
 
 /*
 * Called on "Connect wallet and pay" button click and every chain/account change
@@ -82,36 +81,26 @@ async function sign() {
                 const code = await client.getBytecode({ address: GlobalPretixEthState.selectedAccount });
                 const isSmartContractWallet = !!code;
 
-                // If connected wallet is an SC wallet, conform to EIP1271
                 if (isSmartContractWallet) {
-                    // Constructing the message to sign. 
-                    const formattedMessage = GlobalPretixEthState.selectedAccount + message.message['receiver_address'] + message.message['order_code'] + message.message['chain_id'];
-                    const signature = await signMessage({ message: formattedMessage });
-                    // const msgHash = hashMessage(formattedMessage);
-                    // WIP: Typed data signing - does not work on python side yet:
-                    // const signature = await signTypedData(message);
-                    // message.message['order_code'] = 'break';
-                    // const msgHash = hashTypedData(message);
+                    const checkIsSafeWallet = async () => {
+                        const safeUrl = `https://safe-transaction-${GlobalPretixEthState.safeNetworkIdentifier}.safe.global/api/v1/safes/${GlobalPretixEthState.selectedAccount}`;
+                        const response = await fetch(safeUrl);
 
-                    // const eip1271Abi = [
-                    //     {
-                    //         inputs: [{ name: "_hash", type: "bytes32" }, { name: "_signature", type: "bytes" }],
-                    //         name: "isValidSignature",
-                    //         outputs: [{ name: "magicValue", type: "bytes4" }],
-                    //         stateMutability: "view",
-                    //         type: "function",
-                    //     }
-                    // ];
+                        return response.ok;
+                    }
 
-                    // const magicValue = '0x1626ba7e';
-                    // const localResp = await readContract({
-                    //     abi: eip1271Abi,
-                    //     address: GlobalPretixEthState.selectedAccount,
-                    //     functionName: 'isValidSignature',
-                    //     args: [msgHash, signature],
-                    // });
+                    const isSafeWallet = await checkIsSafeWallet();
 
-                    // console.log(localResp, 'should be magic value')
+                    // We only support safe in this version of the plugin
+                    if (!isSafeWallet) {
+                        showError('This version of the crypto payment plugin only supports Safe wallet (on supported networks) and EOA wallets. Please connect another wallet.');
+
+                        GlobalPretixEthState.signatureRequested = false;
+
+                        return;
+                    }
+
+                    const signature = await signTypedData(message);
 
                     // Validate signature on the backend before proceeding:
                     const url = new URL(window.location.origin + window.__validateSignatureUrl);
@@ -135,6 +124,8 @@ async function sign() {
                         await submitTransaction();
                     } else {
                         showError('EIP1271 error: unable to verify signature; your wallet may not be supported.')
+
+                        GlobalPretixEthState.signatureRequested = false;
 
                         return;
                     }
@@ -226,12 +217,33 @@ async function submitTransaction() {
 
 /* Step 4 */
 async function submitSignature(transactionHash) {
+    // If we're on Safe app, our transaction hash is the safe transaction hash - we'll need to check if it's a safe transaction and if so, save the url for later
+    const checkIfSafeAppTransaction = async (transactionHash) => {
+        // Wrapping in try/catch for the edge case that its a safe transaction but their endpoint is down and fetch errors out - at least we'll still have some information to work with 
+        // during manual resolution rather than the TX hash being entirely lost on our end
+        try {
+            const safeUrl = `https://safe-transaction-${GlobalPretixEthState.safeNetworkIdentifier}.safe.global/api/v1/multisig-transactions/${transactionHash}`
+            const response = await fetch(safeUrl);
+
+            // If 2xx reply we'll know we have a safe transaction - we'll return the url so we can use it later when confirming payment
+            // We could also return the safe tx and construct the url on the python side, 
+            // but I think it's better to do it here so we only have to do it once / only need to maintain the api list in one place
+            if (response.ok) {
+                return safeUrl;
+            }
+        } catch (e) {
+            return;
+        }
+    }
+
     async function _submitSignature(transactionHash) {
+        const safeAppTransactionUrl = await checkIfSafeAppTransaction(transactionHash);
         const csrf_cookie = getCookie('pretix_csrftoken')
         const url = getTransactionDetailsURL();
         let searchParams = new URLSearchParams({
             signedMessage: GlobalPretixEthState.messageSignature,
             transactionHash: transactionHash,
+            safeAppTransactionUrl: safeAppTransactionUrl,
             selectedAccount: GlobalPretixEthState.signedByAccount,
             csrfmiddlewaretoken: csrf_cookie
         })

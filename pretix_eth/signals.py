@@ -52,6 +52,7 @@ def signal_process_response(sender, request, response, **kwargs):
             "wss://bridge.walletconnect.org/",
             "https://*.infura.io/",
             "wss://*.infura.io/",
+            "https://*.safe.global",
             "https://cloudflare-eth.com/",
             "wss://www.walletlink.org/",
             "https://www.sepoliarpc.space/",

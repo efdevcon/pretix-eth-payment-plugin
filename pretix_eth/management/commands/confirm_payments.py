@@ -12,6 +12,7 @@ from web3.exceptions import TransactionNotFound
 
 from pretix.base.models import OrderPayment
 from pretix.base.models.event import Event
+import requests
 
 from pretix_eth.network.tokens import (
     IToken,
@@ -104,20 +105,66 @@ class Command(BaseCommand):
 
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
+                transaction_hash = signed_message.transaction_hash
+                is_safe_app_tx = False
+
                 if log_verbosity > 0:
-                    logger.info(
-                        f"   * Looking for a receip for a transaction with "
-                        f"hash={signed_message.transaction_hash}"
-                    )
+                    if is_safe_app_tx:
+                        logger.info(
+                            f"   * Processing safe app transaction with "
+                            f"safe_internal_tx_url={signed_message.safe_app_transaction_url}"
+                        )
+                    else:
+                        logger.info(
+                            f"   * Looking for a receipt for a transaction with "
+                            f"hash={transaction_hash}"
+                        )
+
                 try:
+                    # Custom safe transaction handling - can be removed once we create a smart contract for payment handling
+                    if signed_message.safe_app_transaction_url:
+                        try:
+                            resp = requests.get(signed_message.safe_app_transaction_url)
+
+                            jsonResp = resp.json()
+
+                            if jsonResp.get('isExecuted') and jsonResp.get('isSuccessful'):
+                                is_safe_app_tx = True
+                                safe_tx_sender = jsonResp.get('safe').lower()
+                                safe_tx_receiver = jsonResp.get('to').lower()
+                                payment_amount = int(jsonResp.get('value'))
+                                transaction_hash = jsonResp.get('transactionHash')
+                            else:
+                                if log_verbosity > 0:
+                                    logger.info(
+                                        f"   * Safe App Transaction"
+                                        f" safe_tx={signed_message.safe_app_transaction_url} did not execute/is not succesful,"
+                                        f" skipping."
+                                    )
+
+                                if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
+                                    signed_message.invalidate()
+                                continue
+                        except:
+                            if log_verbosity > 0:
+                                logger.info(
+                                    f"   * Safe App Transaction"
+                                    f" safe_tx={signed_message.safe_app_transaction_url} could not be processed,"
+                                    f" skipping."
+                                )
+
+                            if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
+                                signed_message.invalidate()
+                            continue
+
                     receipt = w3.eth.get_transaction_receipt(
-                        signed_message.transaction_hash
+                        transaction_hash
                     )
                 except TransactionNotFound:
                     if log_verbosity > 0:
                         logger.info(
                             f"   * Transaction"
-                            f" hash={signed_message.transaction_hash} not found,"
+                            f" hash={transaction_hash} not found,"
                             f" skipping."
                         )
                     if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
@@ -127,7 +174,7 @@ class Command(BaseCommand):
                 if receipt.status == 0:
                     if log_verbosity > 0:
                         logger.info(
-                            f"   * Transaction hash={signed_message.transaction_hash}"
+                            f"   * Transaction hash={transaction_hash}"
                             f" was has status=0, invalidating."
                         )
                     signed_message.invalidate()
@@ -153,12 +200,17 @@ class Command(BaseCommand):
 
                 if token.IS_NATIVE_ASSET:
                     # ETH
-                    payment_amount = w3.eth.get_transaction(
-                        signed_message.transaction_hash
-                    ).value
-                    receipt_reciever = receipt.to.lower()
+                    if is_safe_app_tx:
+                        receipt_receiver = safe_tx_receiver
+                    else:
+                        receipt_receiver = receipt.to.lower()
+
+                        payment_amount = w3.eth.get_transaction(
+                            transaction_hash
+                        ).value
+
                     correct_recipient = (
-                        receipt_reciever == signed_message.recipient_address.lower()
+                        receipt_receiver == signed_message.recipient_address.lower()
                     )
 
                 else:
@@ -173,12 +225,16 @@ class Command(BaseCommand):
                     correct_contract = token.ADDRESS.lower() == receipt.to.lower()
                     # take recipient address from the topics,
                     # not from the "from" field, as that's the contract address
-                    receipt_reciever = receipt.logs[0].topics[2][12:].hex().lower()
+                    receipt_receiver = receipt.logs[0].topics[2][12:].hex().lower()
                     correct_recipient = correct_contract and (
-                        receipt_reciever == signed_message.recipient_address.lower()
+                        receipt_receiver == signed_message.recipient_address.lower()
                     )
 
-                receipt_sender = getattr(receipt, "from").lower()
+                if is_safe_app_tx:
+                    receipt_sender = safe_tx_sender
+                else:
+                    receipt_sender = getattr(receipt, "from").lower()
+
                 correct_sender = receipt_sender == signed_message.sender_address.lower()
 
                 if not (correct_sender and correct_recipient):
@@ -192,7 +248,7 @@ class Command(BaseCommand):
                             f"expected sender={signed_message.sender_address.lower()}"
                         )
                         logger.info(
-                            f"receipt recipient={receipt_reciever}, "
+                            f"receipt recipient={receipt_receiver}, "
                             f"expected recipient={signed_message.recipient_address.lower()}"
                         )
                     continue

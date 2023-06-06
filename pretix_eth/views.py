@@ -21,7 +21,7 @@ from pretix_eth.network import tokens
 
 # Magic value in accordance to EIP1271 specification
 magic_value = '0x1626ba7e'
-# ABI for EIP1271
+# ABI for EIP1271 isValidSignature function
 eip1271abi = [{"inputs": [{"name": "_hash", "type": "bytes32"}, {"name": "_signature", "type": "bytes"}], "name": "isValidSignature", "outputs": [  # noqa: E501
     {"name": "magicValue", "type": "bytes4"}], "stateMutability": "view", "type": "function"}]
 
@@ -35,12 +35,9 @@ def reconstruct_message_hash(sender=str, receiver=str, order=str, chain_id=int):
     return defunct_hash_message(text=sender + receiver + order + str(chain_id))
 
 
-def validate_eip1271_signature(sender, signature, hashAsBytes, w3):
-    signatureAsBytes = Web3.to_bytes(hexstr=signature)
-    # hashAsBytes = Web3.to_bytes(hexstr=hash)
-
+def validate_eip1271_signature(sender, signature, hash, w3):
     contract = w3.eth.contract(address=sender, abi=eip1271abi)
-    response = contract.functions.isValidSignature(hashAsBytes, signatureAsBytes).call()
+    response = contract.functions.isValidSignature(hash, signature).call()
     response_parsed = Web3.to_hex(response)
 
     if response_parsed != magic_value:
@@ -103,18 +100,18 @@ class PaymentTransactionDetailsView(GenericViewSet):
             )
         )
 
-        print(sender_address, 'sender')
+        encoded_data = encode_structured_data(text=json.dumps(typed_data))
 
         is_smart_contract_wallet = is_smart_contract(sender_address, w3)
 
-        print(is_smart_contract_wallet, 'is sc wallet')
-
         if is_smart_contract_wallet:
-            message_hash = reconstruct_message_hash(
-                typed_data['message']['sender_address'], typed_data['message']['receiver_address'], typed_data['message']['order_code'], typed_data['message']['chain_id'])  # noqa: E501
-            validate_eip1271_signature(sender_address, signed_message, message_hash, w3)
+            joined = b"\x19" + encoded_data.version + encoded_data.header + encoded_data.body
+
+            message_hash = Web3.keccak(joined).hex()
+
+            validate_eip1271_signature(sender_address, Web3.to_bytes(
+                hexstr=signed_message), message_hash, w3)
         else:
-            encoded_data = encode_structured_data(text=json.dumps(typed_data))
             recovered_address = w3.eth.account.recover_message(
                 encoded_data, signature=signed_message)
 
@@ -122,6 +119,11 @@ class PaymentTransactionDetailsView(GenericViewSet):
                 raise
 
         transaction_hash = request.data.get('transactionHash').lower()
+        safe_app_transaction_url = None
+
+        if request.data.get('safeAppTransactionUrl'):
+            safe_app_transaction_url = request.data.get('safeAppTransactionUrl')
+
         message_obj = SignedMessage(
             signature=signed_message,
             raw_message=json.dumps(typed_data),
@@ -129,7 +131,8 @@ class PaymentTransactionDetailsView(GenericViewSet):
             recipient_address=serializer.data.get('recipient_address'),
             chain_id=serializer.data.get('chain_id'),
             order_payment=order_payment,
-            transaction_hash=transaction_hash
+            transaction_hash=transaction_hash,
+            safe_app_transaction_url=safe_app_transaction_url,
         )
         message_obj.save()
         return Response(status=201)
@@ -154,28 +157,15 @@ class PaymentTransactionDetailsView(GenericViewSet):
             )
         )
 
-        # encode_structured_data(text=json.dumps(typed_data)).body
-        # message_hash = w3.eth.accounts.hashMessage(typed_data)
+        message = encode_structured_data(text=json.dumps(typed_data))
 
-        # return Response(message_hash)
+        joined = b"\x19" + message.version + message.header + message.body
 
-        # print(message_hash.hex())
-
-        # print(typed_data, 'typed data')
-
-        # message_hash = encode_typed_data(typed_data)
-
-        # message_hash = encode_structured_data(text=json.dumps(typed_data))
-
-        # print(message_hash.body, 'winning')
-
-        # print(message_hash.hex(), 'hash')
-
-        message_hash = reconstruct_message_hash(
-            typed_data['message']['sender_address'], typed_data['message']['receiver_address'], typed_data['message']['order_code'], typed_data['message']['chain_id'])  # noqa: E501
+        message_hash = Web3.keccak(joined).hex()
 
         # This will raise an exception if validation fails
-        validate_eip1271_signature(sender_address, signature, message_hash, w3)
+        validate_eip1271_signature(sender_address, Web3.to_bytes(
+            hexstr=signature), message_hash, w3)
 
         return Response(status=200)
 

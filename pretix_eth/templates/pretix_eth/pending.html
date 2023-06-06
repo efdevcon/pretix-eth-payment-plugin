@@ -30,10 +30,17 @@
 </script>
 
 <div>
-    <p>A payment for this order has already been submitted in transaction
-        <strong><span
-                id="pretix-eth-submitted-transaction-hash">{{ submitted_transation_hash }}</span></strong>.
-    </p>
+  <p>A payment for this order has already been submitted in transaction 
+    <strong>
+        {% if safe_app_transaction_url %}
+          <a href="{{ safe_app_transaction_url }}">{{ safe_app_transaction_url }}</a>
+        {% else %}
+          <span id="pretix-eth-submitted-transaction-hash">
+            {{ submitted_transation_hash }} 
+          </span>.
+        {% endif %}
+    </strong>
+  </p>
 </div>
 {% endif %}
 

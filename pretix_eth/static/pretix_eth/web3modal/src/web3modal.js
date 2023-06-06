@@ -2,10 +2,10 @@
 
 import { configureChains, createConfig, watchAccount, watchNetwork } from "@wagmi/core";
 import { EthereumClient, w3mConnectors, w3mProvider } from '@web3modal/ethereum'
-import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync } from "@wagmi/core/chains";
 import { Web3Modal } from "@web3modal/html";
 import { showError, GlobalPretixEthState, signIn, displayOnlyId, getCookie } from './interface.js';
 import { makePayment } from './core.js';
+import chains from "./chains.js";
 
 async function init() {
     const desiredChainID = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-chain-id");
@@ -14,18 +14,15 @@ async function init() {
     // Some wallets read the page title and presents it to the user in the wallet - the pretix generated one looks confusing, so we override it before instantiating web3modal
     document.title = 'Pretix Payment';
 
-    const desiredChain = [
-        arbitrum,
-        arbitrumGoerli,
-        mainnet,
-        goerli,
-        optimism,
-        optimismGoerli,
-        zkSync,
-        sepolia
-    ].filter(chain => chain.id === parseInt(desiredChainID));
+    const desiredChain = chains.filter(chainInfo => chainInfo.chain.id === parseInt(desiredChainID));
 
-    const { publicClient } = configureChains(desiredChain, [w3mProvider({ projectId: walletConnectProjectId })])
+    if (desiredChain.length < 1) {
+        showError('Invalid chain ID');
+
+        return;
+    }
+
+    const { publicClient } = configureChains([desiredChain[0].chain], [w3mProvider({ projectId: walletConnectProjectId })])
 
     const wagmiClient = createConfig({
         autoConnect: true,
@@ -34,7 +31,7 @@ async function init() {
                 projectId:
                     walletConnectProjectId,
                 version: 1 /* Setting version 2 gives a range of issues https://github.com/WalletConnect/web3modal/issues/937 - flip to version 2 when more wallets are onboard */,
-                chains: desiredChain
+                chains: [desiredChain[0].chain]
             })
         ],
         publicClient,
@@ -46,6 +43,7 @@ async function init() {
         { projectId: walletConnectProjectId },
         ethereumClient
     );
+    GlobalPretixEthState.safeNetworkIdentifier = desiredChain[0].safeNetworkIdentifier;
 
     let lastAccountStatus;
 

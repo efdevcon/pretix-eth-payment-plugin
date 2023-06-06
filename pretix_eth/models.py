@@ -17,6 +17,7 @@ class SignedMessage(models.Model):
         related_name='signed_messages',
     )
     transaction_hash = models.CharField(max_length=66, null=True)
+    safe_app_transaction_url = models.TextField(null=True)
     invalid = models.BooleanField(default=False)
     created_at = models.DateTimeField(editable=False, null=True)
     is_confirmed = models.BooleanField(

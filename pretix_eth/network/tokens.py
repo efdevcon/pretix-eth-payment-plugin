@@ -501,18 +501,18 @@ class DaiZkSync(ZkSync):
 registry = [
     EthL1(),
     DaiL1(),
-    EthRinkebyL1(),
-    DaiRinkebyL1(),
+    # EthRinkebyL1(),
+    # DaiRinkebyL1(),
     EthGoerliL1(),
     DaiGoerliL1(),
     EthSepoliaL1(),
     EthOptimism(),
     DaiOptimism(),
-    EthKovanOptimism(),
-    DaiKovanOptimism(),
+    # EthKovanOptimism(),
+    # DaiKovanOptimism(),
     ETHArbitrum(),
     DaiArbitrum(),
-    ETHRinkebyArbitrum(),
+    # ETHRinkebyArbitrum(),
     ETHZkSync(),
 ]
 all_network_verbose_names_to_ids = {}
