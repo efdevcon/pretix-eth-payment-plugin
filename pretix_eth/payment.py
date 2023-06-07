@@ -354,6 +354,7 @@ class Ethereum(BasePaymentProvider):
         submitted_transaction_hash = None
         safe_app_transaction_url = None
         order_accepting_payments = True
+
         if latest_signed_message is not None:
             submitted_transaction_hash = latest_signed_message.transaction_hash
             safe_app_transaction_url = latest_signed_message.safe_app_transaction_url

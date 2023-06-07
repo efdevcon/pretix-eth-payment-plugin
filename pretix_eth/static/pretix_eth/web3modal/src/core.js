@@ -243,10 +243,14 @@ async function submitSignature(transactionHash) {
         let searchParams = new URLSearchParams({
             signedMessage: GlobalPretixEthState.messageSignature,
             transactionHash: transactionHash,
-            safeAppTransactionUrl: safeAppTransactionUrl,
             selectedAccount: GlobalPretixEthState.signedByAccount,
             csrfmiddlewaretoken: csrf_cookie
         })
+
+        if (safeAppTransactionUrl) {
+            searchParams.append('safeAppTransactionUrl', safeAppTransactionUrl);
+        }
+
         fetch(url, {
             headers: {
                 "Content-Type": "application/x-www-form-urlencoded",
@@ -259,7 +263,7 @@ async function submitSignature(transactionHash) {
         ).then(
             async (response) => {
                 if (response.ok) {
-                    showSuccessMessage(transactionHash);
+                    showSuccessMessage(transactionHash, safeAppTransactionUrl);
                     await runPeriodicCheck();
                 } else {
                     showError("There was an error processing your payment, please contact support. Your payment was sent in transaction " + transactionHash + ".", false)

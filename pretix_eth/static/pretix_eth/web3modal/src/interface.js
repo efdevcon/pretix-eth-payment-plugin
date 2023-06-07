@@ -188,10 +188,14 @@ function displayOnlyId(divId) {
     );
 }
 
-function showSuccessMessage(transactionHash) {
+function showSuccessMessage(transactionHash, safeUrl) {
     GlobalPretixEthState.transactionHashSubmitted = true;
     const chain_id = GlobalPretixEthState.elements.aNetworkData.getAttribute("data-chain-id")
-    GlobalPretixEthState.elements.divTransactionHash.innerHTML = convertHashToExplorerLink(chain_id, transactionHash);
+    if (safeUrl) {
+        GlobalPretixEthState.elements.divTransactionHash.innerHTML = safeUrl
+    } else {
+        GlobalPretixEthState.elements.divTransactionHash.innerHTML = convertHashToExplorerLink(chain_id, transactionHash);
+    }
     displayOnlyId();
     GlobalPretixEthState.elements.divSuccess.style.display = "block";
 }
