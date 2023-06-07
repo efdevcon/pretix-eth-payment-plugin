@@ -142,7 +142,7 @@ class Command(BaseCommand):
                                         f" skipping."
                                     )
 
-                                if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
+                                if int(signed_message.age) > int(order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT):  # noqa: E501
                                     signed_message.invalidate()
                                 continue
                         except Exception:
@@ -153,7 +153,7 @@ class Command(BaseCommand):
                                     f" skipping."
                                 )
 
-                            if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
+                            if int(signed_message.age) > int(order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT):  # noqa: E501
                                 signed_message.invalidate()
                             continue
 
@@ -167,7 +167,8 @@ class Command(BaseCommand):
                             f" hash={transaction_hash} not found,"
                             f" skipping."
                         )
-                    if signed_message.age > order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT:  # noqa: E501
+
+                    if int(signed_message.age) > int(order_payment.payment_provider.settings.PAYMENT_NOT_RECIEVED_RETRY_TIMEOUT):  # noqa: E501
                         signed_message.invalidate()
                     continue
 
