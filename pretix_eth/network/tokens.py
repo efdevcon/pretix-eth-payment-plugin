@@ -225,36 +225,6 @@ class L1(IToken):
         }
 
 
-class RinkebyL1(L1):
-    """
-    Constants for Rinkeby Ethereum Testnet
-    """
-
-    NETWORK_IDENTIFIER = "Rinkeby"
-    NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
-    CHAIN_ID = 4
-    EIP3091_EXPLORER_URL = "https://rinkeby.etherscan.io"
-    DISABLED = True
-
-
-class EthRinkebyL1(RinkebyL1):
-    """
-    Ethereum on Rinkeby L1 Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
-
-
-class DaiRinkebyL1(RinkebyL1):
-    """
-    DAI on Rinkeby L1 Network
-    """
-
-    TOKEN_SYMBOL = "DAI"
-    IS_NATIVE_ASSET = False
-    ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
-
-
 class GoerliL1(L1):
     """
     Constants for Goerli Ethereum Testnet
@@ -282,25 +252,6 @@ class DaiGoerliL1(GoerliL1):
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0x11fE4B6AE13d2a6055C8D9cF65c55bac32B5d844"
-
-
-class SepoliaL1(L1):
-    """
-    Constants for Goerli Ethereum Testnet
-    """
-
-    NETWORK_IDENTIFIER = "Sepolia"
-    NETWORK_VERBOSE_NAME = "Sepolia Ethereum Testnet"
-    CHAIN_ID = 11155111
-    EIP3091_EXPLORER_URL = "https://sepolia.etherscan.io"
-
-
-class EthSepoliaL1(SepoliaL1):
-    """
-    Ethereum on Sepolia L1 Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
 
 
 class EthL1(L1):
@@ -335,35 +286,6 @@ class Optimism(L1):
     EIP3091_EXPLORER_URL = "https://optimistic.etherscan.io"
 
 
-class KovanOptimism(Optimism):
-    """
-    Constants for the Optimism Kovan Testnet
-    """
-
-    NETWORK_IDENTIFIER = "KovanOptimism"
-    NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
-    CHAIN_ID = 69
-    EIP3091_EXPLORER_URL = "https://kovan-optimistic.etherscan.io"
-
-
-class EthKovanOptimism(KovanOptimism):
-    """
-    Ethereum on Kovan Testnet Optimism Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
-
-
-class DaiKovanOptimism(KovanOptimism):
-    """
-    DAI on Kovan Testnet Optimism Network
-    """
-
-    TOKEN_SYMBOL = "DAI"
-    IS_NATIVE_ASSET = False
-    ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
-
-
 class EthOptimism(Optimism):
     """
     Ethereum on Optimism Mainnet
@@ -380,6 +302,30 @@ class DaiOptimism(Optimism):
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
+
+
+class ETHGoerliOptimism(Optimism):
+    """
+    Ethereum on Optimism Goerli Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
+    NETWORK_IDENTIFIER = "GoerliOptimism"
+    NETWORK_VERBOSE_NAME = "Goerli Optimism Testnet"
+    CHAIN_ID = 420
+    EIP3091_EXPLORER_URL = "https://goerli-optimism.etherscan.io"
+
+
+class DaiGoerliOptimism(Optimism):
+    """
+    Dai on Optimism Goerli Network
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    NETWORK_IDENTIFIER = "GoerliOptimism"
+    NETWORK_VERBOSE_NAME = "Goerli Optimism Testnet"
+    CHAIN_ID = 420
+    EIP3091_EXPLORER_URL = "https://goerli-optimism.etherscan.io"
 
 
 """ Arbitrum Networks """
@@ -446,27 +392,30 @@ class DaiArbitrum(Arbitrum):
     ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
 
 
-class RinkebyArbitrum(Arbitrum):
+class ETHGoerliArbitrum(Arbitrum):
     """
-    Constants for the Optimism Mainnet
-    """
-
-    NETWORK_IDENTIFIER = "RinkebyArbitrum"
-    NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
-    CHAIN_ID = 421611
-    EIP3091_EXPLORER_URL = "https://rinkeby-explorer.arbitrum.io"
-    DISABLED = True
-
-
-class ETHRinkebyArbitrum(RinkebyArbitrum):
-    """
-    Ethereum on Arbitrum Rinkeby Network
+    Ethereum on Arbitrum Goerli Network
     """
 
     TOKEN_SYMBOL = "ETH"
+    NETWORK_IDENTIFIER = "GoerliArbitrum"
+    NETWORK_VERBOSE_NAME = "Goerli Arbitrum Testnet"
+    CHAIN_ID = 421613
+    EIP3091_EXPLORER_URL = "https://goerli.arbiscan.io"
 
 
-""" ZkSync Networks """
+class DaiGoerliArbitrum(Arbitrum):
+    """
+    Dai on Arbitrum Goerli Network
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    NETWORK_IDENTIFIER = "GoerliArbitrum"
+    NETWORK_VERBOSE_NAME = "Goerli Arbitrum Testnet"
+    CHAIN_ID = 421613
+    EIP3091_EXPLORER_URL = "https://goerli.arbiscan.io"
+
+# """ ZkSync Networks """
 
 
 class ZkSync(L1):
@@ -501,18 +450,16 @@ class DaiZkSync(ZkSync):
 registry = [
     EthL1(),
     DaiL1(),
-    EthRinkebyL1(),
-    DaiRinkebyL1(),
     EthGoerliL1(),
     DaiGoerliL1(),
-    EthSepoliaL1(),
     EthOptimism(),
     DaiOptimism(),
-    EthKovanOptimism(),
-    DaiKovanOptimism(),
+    ETHGoerliOptimism(),
+    DaiGoerliOptimism(),
     ETHArbitrum(),
     DaiArbitrum(),
-    ETHRinkebyArbitrum(),
+    ETHGoerliArbitrum(),
+    DaiGoerliArbitrum(),
     ETHZkSync(),
 ]
 all_network_verbose_names_to_ids = {}

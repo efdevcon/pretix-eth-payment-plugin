@@ -179,14 +179,12 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const config = await prepareWriteContract({
+                const { hash } = await writeContract({
                     abi: erc20ABI,
                     address: GlobalPretixEthState.paymentDetails['erc20_contract_address'],
                     functionName: 'transfer',
                     args: [GlobalPretixEthState.paymentDetails['recipient_address'], GlobalPretixEthState.paymentDetails['amount']]
                 })
-
-                const { hash } = await writeContract(config)
 
                 await submitSignature(hash);
             } catch (e) {

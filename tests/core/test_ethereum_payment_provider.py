@@ -82,7 +82,7 @@ def test_provider_payment_form_fields_only_DAI_L1(provider):
 @pytest.mark.django_db
 def test_provider_payment_form_fields_multiple_networks_single_currency(provider):
     provider.settings.set("TOKEN_RATES", {"DAI_RATE": TEST_DAI_RATE})
-    provider.settings.set("_NETWORKS", ["L1", "Goerli", "KovanOptimism"])
+    provider.settings.set("_NETWORKS", ["L1", "Goerli", "GoerliOptimism"])
 
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
@@ -90,7 +90,7 @@ def test_provider_payment_form_fields_multiple_networks_single_currency(provider
     assert len(currency_type_field.choices) == 3
     assert currency_type_field.choices[0][0] == "DAI - Ethereum Mainnet"
     assert currency_type_field.choices[1][0] == "DAI - Goerli Ethereum Testnet"
-    assert currency_type_field.choices[2][0] == "DAI - Kovan Optimism Testnet"
+    assert currency_type_field.choices[2][0] == "DAI - Goerli Optimism Testnet"
 
 
 @pytest.mark.django_db

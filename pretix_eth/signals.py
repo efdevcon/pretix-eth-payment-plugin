@@ -38,6 +38,9 @@ def signal_process_response(sender, request, response, **kwargs):
             "'unsafe-inline'",
             "'unsafe-eval'"
         ],
+        'frame-src': [
+            'https://verify.walletconnect.com/'
+        ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
             "wss://relay.walletconnect.com",
@@ -58,7 +61,7 @@ def signal_process_response(sender, request, response, **kwargs):
             "https://www.sepoliarpc.space/",
             "https://rpc.sepolia.org/",
             "https://arb1.arbitrum.io/rpc",
-            "https://mainnet.optimism.io/",
+            "https://mainnet.optimism.io/"
         ],
         'manifest-src': ["'self'"],
     })
