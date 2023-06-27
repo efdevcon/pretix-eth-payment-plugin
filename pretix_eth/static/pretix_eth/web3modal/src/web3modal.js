@@ -30,7 +30,7 @@ async function init() {
             ...w3mConnectors({
                 projectId:
                     walletConnectProjectId,
-                version: 2 /* Setting version 2 gives a range of issues https://github.com/WalletConnect/web3modal/issues/937 - flip to version 2 when more wallets are onboard */,
+                version: 2,
                 chains: [desiredChain[0].chain]
             })
         ],

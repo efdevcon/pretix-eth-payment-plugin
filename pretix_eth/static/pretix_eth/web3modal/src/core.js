@@ -102,6 +102,7 @@ async function sign() {
 
                     const signature = await signTypedData(message);
 
+
                     // Validate signature on the backend before proceeding:
                     const url = new URL(window.location.origin + window.__validateSignatureUrl);
                     url.searchParams.append('signature', signature);
@@ -164,11 +165,13 @@ async function submitTransaction() {
 
         // make the payment
         if (GlobalPretixEthState.paymentDetails['erc20_contract_address'] !== null) {
+            const daiContractAddress = GlobalPretixEthState.paymentDetails['erc20_contract_address'];
+
             const balance = await readContract({
                 abi: erc20ABI,
-                address: GlobalPretixEthState.paymentDetails['erc20_contract_address'],
+                address: daiContractAddress,
                 functionName: 'balanceOf',
-                args: [GlobalPretixEthState.paymentDetails['erc20_contract_address']],
+                args: [daiContractAddress],
             });
 
             if (BigInt(balance) < BigInt(GlobalPretixEthState.paymentDetails['amount'])) {
@@ -181,7 +184,7 @@ async function submitTransaction() {
             try {
                 const { hash } = await writeContract({
                     abi: erc20ABI,
-                    address: GlobalPretixEthState.paymentDetails['erc20_contract_address'],
+                    address: daiContractAddress,
                     functionName: 'transfer',
                     args: [GlobalPretixEthState.paymentDetails['recipient_address'], GlobalPretixEthState.paymentDetails['amount']]
                 })
@@ -196,8 +199,7 @@ async function submitTransaction() {
             try {
                 const { hash } = await sendTransaction({
                     to: GlobalPretixEthState.paymentDetails['recipient_address'],
-                    value: GlobalPretixEthState.paymentDetails['amount'],
-                    // data: '' // Argent needs data to be defined to even prompt the user for a tx, and safe needs it to be undefined or it errors out, so that's a problem
+                    value: GlobalPretixEthState.paymentDetails['amount']
                 });
 
                 await submitSignature(hash);

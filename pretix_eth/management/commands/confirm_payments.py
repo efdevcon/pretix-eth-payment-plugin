@@ -106,7 +106,7 @@ class Command(BaseCommand):
                 # Get balance
                 w3 = Web3(load_provider_from_uri(network_rpc_url))
                 transaction_hash = signed_message.transaction_hash
-                is_safe_app_tx = False
+                is_safe_app_tx = signed_message.safe_app_transaction_url
 
                 if log_verbosity > 0:
                     if is_safe_app_tx:
@@ -129,9 +129,8 @@ class Command(BaseCommand):
                             jsonResp = resp.json()
 
                             if jsonResp.get('isExecuted') and jsonResp.get('isSuccessful'):
-                                is_safe_app_tx = True
                                 safe_tx_sender = jsonResp.get('safe').lower()
-                                safe_tx_receiver = jsonResp.get('to').lower()
+                                safe_tx_receiver = jsonResp.get('to')
                                 payment_amount = int(jsonResp.get('value'))
                                 transaction_hash = jsonResp.get('transactionHash')
                             else:
@@ -218,18 +217,23 @@ class Command(BaseCommand):
                     # DAI
                     contract = w3.eth.contract(address=token.ADDRESS,
                                                abi=TOKEN_ABI)
+
+                    # This may warn about mismatched ABI if its a smart contract wallet tx because of intermediary function calls - but it'll still process the Transfer event correctly # noqa: E501
                     transaction_details = (
                         contract.events.Transfer().processReceipt(receipt)[0].args
                     )
+
                     payment_amount = transaction_details.value
-                    # check that the payment happened on the right contract address
-                    correct_contract = token.ADDRESS.lower() == receipt.to.lower()
-                    # take recipient address from the topics,
-                    # not from the "from" field, as that's the contract address
-                    receipt_receiver = receipt.logs[0].topics[2][12:].hex().lower()
+                    receipt_receiver = transaction_details.to.lower()
+
+                    # Safe has intermediary function calls (which is not the token address), so we'll need to pull the receiver address from the internal safe transaction rather than the tx receipt # noqa: E501
+                    if is_safe_app_tx:
+                        correct_contract = token.ADDRESS.lower() == safe_tx_receiver.lower()
+                    else:
+                        correct_contract = token.ADDRESS.lower() == receipt.to.lower()
+
                     correct_recipient = correct_contract and (
-                        receipt_receiver == signed_message.recipient_address.lower()
-                    )
+                        receipt_receiver == signed_message.recipient_address.lower())
 
                 if is_safe_app_tx:
                     receipt_sender = safe_tx_sender
