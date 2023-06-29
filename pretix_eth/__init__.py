@@ -1,5 +1,5 @@
 from django.apps import AppConfig
-from django.utils.translation import ugettext_lazy
+from django.utils.translation import gettext_lazy
 
 
 class PluginApp(AppConfig):
@@ -7,10 +7,10 @@ class PluginApp(AppConfig):
     verbose_name = 'Pretix Ethereum Payment Provider'
 
     class PretixPluginMeta:
-        name = ugettext_lazy('Pretix Ethereum Payment Provider')
+        name = gettext_lazy('Pretix Ethereum Payment Provider')
         author = 'Pretix Ethereum Payment Plugin Contributors'
         category = 'PAYMENT'
-        description = ugettext_lazy('An ethereum payment provider plugin for pretix software')
+        description = gettext_lazy('An ethereum payment provider plugin for pretix software')
         visible = True
         version = '2.0.6-dev'
 
