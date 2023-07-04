@@ -24,6 +24,7 @@ extras_require = {
     'test': [
         'pytest>=5.1,<7',
         'pytest-django>=3.5,<4',
+        'celery==4.4.7'
     ],
     'lint': [
         'flake8>=3.7,<5',
