@@ -1,6 +1,7 @@
 "use strict";
 
 import { getAccount } from "@wagmi/core";
+import chains from "./chains.js";
 
 // files that interact with the page DOM
 
@@ -101,29 +102,16 @@ function getCookie(name) {
     }
 }
 
-async function loadChainsJSON() {
-    let url = GlobalPretixEthState.elements.aOrderDetailURL.getAttribute("data-chains-json-url");
-    await fetch(url)
-        .then(res => res.json()).then(
-            (chains) => {
-                GlobalPretixEthState.chainsRaw = chains;
-
-                chains.forEach(item => {
-                    GlobalPretixEthState.chains[item.chain] = GlobalPretixEthState.chains[item.chain] || [];
-                    GlobalPretixEthState.chains[item.chain][item.networkId] = item
-                })
-            }
-        ).catch(err => console.error(err));
-}
-
 function convertHashToExplorerLink(chain_id, transactionHash) {
-    if (
-        GlobalPretixEthState.chains.ETH !== undefined
-        && GlobalPretixEthState.chains.ETH[chain_id] !== undefined
-        && GlobalPretixEthState.chains.ETH[chain_id].explorers !== undefined
-    ) {
-        const url = GlobalPretixEthState.chains['ETH'][chain_id].explorers[0].url
-        return '<a href="' + url + '/tx/' + transactionHash + '" target="_blank">' + transactionHash + "</a>"
+    const chainMatch = chains.filter(chainInfo => chainInfo.chain.id === parseInt(chain_id));
+    let chain;
+
+    if (chainMatch) chain = chainMatch[0].chain;
+
+    const explorerURL = chain?.blockExplorers?.etherscan?.url;
+
+    if (explorerURL) {
+        return '<a href="' + explorerURL + '/tx/' + transactionHash + '" target="_blank">' + transactionHash + "</a>"
     } else {
         return transactionHash
     }
@@ -202,7 +190,7 @@ function showSuccessMessage(transactionHash, safeUrl) {
 
 export {
     getCookie, GlobalPretixEthState,
-    getPaymentTransactionData, loadChainsJSON,
+    getPaymentTransactionData,
     convertHashToExplorerLink,
     getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,

@@ -24,6 +24,8 @@ async function init() {
 
     const { publicClient } = configureChains([desiredChain[0].chain], [w3mProvider({ projectId: walletConnectProjectId })])
 
+    console.log(chains, 'chains')
+
     const wagmiClient = createConfig({
         autoConnect: true,
         connectors: [

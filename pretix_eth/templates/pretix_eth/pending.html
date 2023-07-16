@@ -9,8 +9,7 @@
 <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
 
 <a id="pretix-order-detail-url"
-   data-order-detail-url="{% eventurl event 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"
-   data-chains-json-url="{% static '3rd_party/chains-2022-09-27.json' %}"></a>
+   data-order-detail-url="{% eventurl event 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"></a>
 <a id="pretix-data-chain-info" data-chain-id="{{ chain_id }}"
    data-network-name="{{ network_name }}"></a>
 
