@@ -171,7 +171,7 @@ async function submitTransaction() {
                 abi: erc20ABI,
                 address: daiContractAddress,
                 functionName: 'balanceOf',
-                args: [daiContractAddress],
+                args: [GlobalPretixEthState.selectedAccount],
             });
 
             if (BigInt(balance) < BigInt(GlobalPretixEthState.paymentDetails['amount'])) {
