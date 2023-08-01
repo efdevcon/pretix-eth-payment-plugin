@@ -194,7 +194,7 @@ class Ethereum(BasePaymentProvider):
                 at_least_one_network_configured,
                 single_receiver_mode_configured,
                 walletconnect_project_id_configured,
-                super().is_allowed(request),
+                super().is_allowed(request, **kwargs),
             )
         )
 
