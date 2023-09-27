@@ -195,7 +195,7 @@ class Command(BaseCommand):
                     ):
                         logger.warning(
                             f"  * Transfer found in a block that is too young, "
-                            f"waiting until at least {safety_block_count} more blocks are confirmed."
+                            f"waiting until at least {safety_block_count} more blocks are confirmed."  # noqa: E501
                         )
                         continue
 
