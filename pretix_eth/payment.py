@@ -16,7 +16,7 @@ from pretix.base.models import (
     OrderPayment,
     OrderRefund,
 )
-from pretix.base.payment import BasePaymentProvider
+from pretix.base.payment import BasePaymentProvider, PaymentProviderForm
 
 from eth_utils import from_wei
 
@@ -52,12 +52,16 @@ class TokenRatesJSONDecoder(JSONDecoder):
                 raise JSONDecodeError("Please supply integers or floats as values.", "aaabbb", 0)
         return decoded
 
+class EthereumPaymentForm(PaymentProviderForm):
+    class Media:
+        js = ('pretix_eth/eth_payment_form.js',)
 
 class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
     verbose_name = _("ETH or DAI")
     public_name = _("ETH or DAI")
     test_mode_message = "Paying in Test Mode"
+    payment_form_class = EthereumPaymentForm
 
     @property
     def settings_form_fields(self):
@@ -74,6 +78,7 @@ class Ethereum(BasePaymentProvider):
                             "E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."
                         ),
                         decoder=TokenRatesJSONDecoder,
+                        initial="{}",
                     ),
                 ),
                 # Based on pretix source code, MultipleChoiceField breaks
@@ -235,7 +240,7 @@ class Ethereum(BasePaymentProvider):
                     forms.ChoiceField(
                         label=_("Payment currency"),
                         help_text=_("Select the currency you will use for payment."),
-                        widget=forms.RadioSelect,
+                        #widget=forms.RadioSelect,
                         choices=currency_type_choices,
                         initial="ETH",
                     ),
@@ -244,6 +249,16 @@ class Ethereum(BasePaymentProvider):
         )
 
         return form_fields
+
+    def payment_form_render(self, request, total, order=None):
+        """
+        copy&paste of the pretix.base.payment.BasePaymentProvider.payment_form_render
+        only to change the template file
+        """
+        form = self.payment_form(request)
+        template = get_template('pretix_eth/checkout_payment_form.html')
+        ctx = {'request': request, 'form': form}
+        return template.render(ctx)
 
     def checkout_confirm_render(self, request):
         template = get_template("pretix_eth/checkout_payment_confirm.html")
