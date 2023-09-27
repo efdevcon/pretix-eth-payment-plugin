@@ -69,12 +69,15 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("Token Rate"),
                         help_text=_(
-                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in the fiat currency you have chosen. E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."  # noqa: E501
+                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount "
+                            "for a token in the fiat currency you have chosen. "
+                            "E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."
                         ),
                         decoder=TokenRatesJSONDecoder,
                     ),
                 ),
-                # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works... # noqa: E501
+                # Based on pretix source code, MultipleChoiceField breaks
+                # if settings doesnt start with an "_". No idea how this works...
                 (
                     "_NETWORKS",
                     forms.MultipleChoiceField(
@@ -106,7 +109,10 @@ class Ethereum(BasePaymentProvider):
                     forms.CharField(
                         label=_("WalletConnect project ID."),
                         help_text=_(
-                            "Every project using WalletConnect SDKs (including Web3Modal) needs to obtain projectId from WalletConnect Cloud. This is absolutely free and only takes a few minutes.")  # noqa: E501
+                            "Every project using WalletConnect SDKs (including Web3Modal) "
+                            "needs to obtain projectId from WalletConnect Cloud. "
+                            "This is absolutely free and only takes a few minutes."
+                        )
                     )
                 ),
                 (
@@ -114,7 +120,8 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("RPC URLs for networks"),
                         help_text=_(
-                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url of the network RPC endpoint you are using"  # noqa: E501
+                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url "
+                            "of the network RPC endpoint you are using"
                         ),
                     ),
                 ),
@@ -124,7 +131,8 @@ class Ethereum(BasePaymentProvider):
                         label=_("Payment retry timeout in seconds"),
                         help_text=_(
                             "Customers will be allowed to pay again after their previous payment "
-                            "hasn't arrived for a given time. 1800s (30min) is a reasonable starting value"  # noqa: E501
+                            "hasn't arrived for a given time. "
+                            "1800s (30min) is a reasonable starting value"
                         ),
                         initial=30 * 60,
                     )
@@ -133,9 +141,12 @@ class Ethereum(BasePaymentProvider):
                     "SAFETY_BLOCK_COUNT",
                     forms.IntegerField(
                         label=_(
-                            "Number of blocks to be mined after a transaction for it to be considered accepted by the chain."),  # noqa: E501
+                            "Number of blocks to be mined after a transaction for it "
+                            "to be considered accepted by the chain."
+                        ),
                         help_text=_(
-                            "Higher value means better protection from (hypothetical) double spending attacks, "  # noqa: E501
+                            "Higher value means better protection from (hypothetical) "
+                            "double spending attacks, "
                             "at the cost of payment confirmation latency."
                         ),
                         initial=5,
@@ -176,14 +187,18 @@ class Ethereum(BasePaymentProvider):
             logger.error("No networks configured")
 
         receiving_address = self.get_receiving_address()
-        single_receiver_mode_configured = receiving_address is not None and len(
-            receiving_address) > 0
+        single_receiver_mode_configured = bool(
+            receiving_address is not None
+            and len(receiving_address) > 0
+        )
 
         if not single_receiver_mode_configured:
             logger.error("Single receiver addresses not configured properly")
 
-        walletconnect_project_id_configured = self.settings.WALLETCONNECT_PROJECT_ID is not None and len(  # noqa: E501
-            self.settings.WALLETCONNECT_PROJECT_ID) > 0
+        walletconnect_project_id_configured = bool(
+            self.settings.WALLETCONNECT_PROJECT_ID is not None
+            and len(self.settings.WALLETCONNECT_PROJECT_ID) > 0
+        )
 
         if not walletconnect_project_id_configured:
             logger.error("Walletconnect project id is required for web3modal to work.")
