@@ -10,10 +10,10 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@wagmi/core": "^1.3.9",
-    "@web3modal/ethereum": "^2.7.1",
-    "@web3modal/html": "^2.7.1",
-    "viem": "^1.5.4",
+    "@wagmi/core": "^1.3.2",
+    "@web3modal/ethereum": "^2.6.1",
+    "@web3modal/html": "^2.6.1",
+    "viem": "^1.1.6",
     "webpack": "^5.75.0"
   },
   "devDependencies": {
