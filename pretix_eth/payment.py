@@ -220,7 +220,7 @@ class Ethereum(BasePaymentProvider):
 
     @property
     def payment_form_fields(self):
-        currency_type_choices = ()
+        currency_type_choices = [("", "Choose Network and Token")]
 
         rates = self.get_token_rates_from_admin_settings()
         network_ids = self.get_networks_chosen_from_admin_settings()
