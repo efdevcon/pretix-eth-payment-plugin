@@ -63,8 +63,8 @@ def test_provider_payment_form_fields_only_ETH_L1(provider):
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"
 
 
 @pytest.mark.django_db
@@ -75,8 +75,8 @@ def test_provider_payment_form_fields_only_DAI_L1(provider):
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "DAI - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "DAI - Ethereum Mainnet"
 
 
 @pytest.mark.django_db
@@ -87,10 +87,10 @@ def test_provider_payment_form_fields_multiple_networks_single_currency(provider
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 3
-    assert currency_type_field.choices[0][0] == "DAI - Ethereum Mainnet"
-    assert currency_type_field.choices[1][0] == "DAI - Goerli Ethereum Testnet"
-    assert currency_type_field.choices[2][0] == "DAI - Goerli Optimism Testnet"
+    assert len(currency_type_field.choices) == 4
+    assert currency_type_field.choices[1][0] == "DAI - Ethereum Mainnet"
+    assert currency_type_field.choices[2][0] == "DAI - Goerli Ethereum Testnet"
+    assert currency_type_field.choices[3][0] == "DAI - Goerli Optimism Testnet"
 
 
 @pytest.mark.django_db
@@ -103,11 +103,11 @@ def test_provider_payment_form_fields_multiple_networks_multiple_currencies(prov
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 4
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
-    assert currency_type_field.choices[1][0] == "DAI - Ethereum Mainnet"
-    assert currency_type_field.choices[2][0] == "ETH - Goerli Ethereum Testnet"
-    assert currency_type_field.choices[3][0] == "DAI - Goerli Ethereum Testnet"
+    assert len(currency_type_field.choices) == 5
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"
+    assert currency_type_field.choices[2][0] == "DAI - Ethereum Mainnet"
+    assert currency_type_field.choices[3][0] == "ETH - Goerli Ethereum Testnet"
+    assert currency_type_field.choices[4][0] == "DAI - Goerli Ethereum Testnet"
 
 
 @pytest.mark.django_db
@@ -118,8 +118,8 @@ def test_provider_payment_form_fields_adding_extra_network_doesnt_fail(provider)
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"
 
 
 @pytest.mark.django_db
@@ -130,5 +130,5 @@ def test_provider_payment_form_fields_adding_extra_currency_doesnt_fail(provider
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"
