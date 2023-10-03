@@ -12,8 +12,8 @@ from pretix_eth.network.helpers import (
     make_checkout_web3modal_url,
     make_erc_681_url,
     make_uniswap_url,
+    get_eth_price_from_external_apis
 )
-
 
 TOKEN_ABI = [
     # Functions
@@ -115,18 +115,28 @@ class IToken(object):
             self.NETWORK_IDENTIFIER in network_ids
         ) and not self.DISABLED
 
-    def get_ticket_price_in_token(self, total, rates):
+    def get_ticket_price_in_token(self, total, rates, fiat_currency):
         if not (self.TOKEN_SYMBOL + "_RATE" in rates):
             raise ImproperlyConfigured(
                 f"Token Symbol not defined in TOKEN_RATES admin settings: {self.TOKEN_SYMBOL}"
             )
 
-        rounding_base = decimal.Decimal("1.00000")
         chosen_currency_rate = decimal.Decimal(rates[self.TOKEN_SYMBOL + "_RATE"])
+
+        # We can't dynamically fetch arbitrary fiat currencies as we have to ensure the exchange apis support them - we support EUR and USD for now
+        # Fall back to the manually set price in this case
+        if (self.TOKEN_SYMBOL == 'ETH' and (fiat_currency == 'USD' or fiat_currency == 'EUR')):
+            # If token is ETH, fetch the price from external apis - if this fails for some reason (endpoints down, unreliable results, etc.), use the manually set price instead
+            eth_price = get_eth_price_from_external_apis(fiat_currency)
+
+            if (eth_price is not None):
+                chosen_currency_rate = decimal.Decimal(eth_price)
+
+        rounding_base = decimal.Decimal("1.00000")
         rounded_price = (total / chosen_currency_rate).quantize(rounding_base)
         final_price = to_wei(rounded_price, "ether")
 
-        return final_price
+        return final_price, chosen_currency_rate.quantize(rounding_base)
 
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_token_base_unit

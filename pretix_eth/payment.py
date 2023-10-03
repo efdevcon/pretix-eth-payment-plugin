@@ -52,9 +52,11 @@ class TokenRatesJSONDecoder(JSONDecoder):
                 raise JSONDecodeError("Please supply integers or floats as values.", "aaabbb", 0)
         return decoded
 
+
 class EthereumPaymentForm(PaymentProviderForm):
     class Media:
         js = ('pretix_eth/eth_payment_form.js',)
+
 
 class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
@@ -240,7 +242,7 @@ class Ethereum(BasePaymentProvider):
                     forms.ChoiceField(
                         label=_("Payment currency"),
                         help_text=_("Select the currency you will use for payment."),
-                        #widget=forms.RadioSelect,
+                        # widget=forms.RadioSelect,
                         choices=currency_type_choices,
                         initial="ETH",
                     ),
@@ -320,29 +322,27 @@ class Ethereum(BasePaymentProvider):
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        rates = payment.payment_provider.settings.get("TOKEN_RATES", as_type=dict, default={})
-        token: IToken = all_token_and_network_ids_to_tokens[
-            request.session["payment_currency_type"]
-        ]
-
         payment.info_data = {
             "currency_type": request.session["payment_currency_type"],
             "time": request.session["payment_time"],
             "amount": request.session["payment_amount"],
-            "token_rate": rates[f"{token.TOKEN_SYMBOL}_RATE"],
+            "token_rate": request.session["token_rate"]
         }
+
         payment.save(update_fields=["info"])
 
     def _update_session_payment_amount(self, request: HttpRequest, total):
         token: IToken = all_token_and_network_ids_to_tokens[
             request.session["payment_currency_type"]
         ]
-        final_price = token.get_ticket_price_in_token(
-            total, self.get_token_rates_from_admin_settings()
+
+        final_price, token_rate = token.get_ticket_price_in_token(
+            total, self.get_token_rates_from_admin_settings(), self.event.currency
         )
 
         request.session["payment_amount"] = final_price
         request.session["payment_time"] = int(time.time())
+        request.session["token_rate"] = int(token_rate)
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/pending.html")
