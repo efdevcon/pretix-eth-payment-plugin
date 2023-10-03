@@ -1,7 +1,7 @@
 $(document).ready(function () {
     $("#id_payment_ethereum-currency_type")[0].style = 'display: inline-block; margin-left: 8px; width: auto; cursor: pointer;'
 
-    // Get currencies and their networks from the hidden select
+    // Get currencies and their networks from the main select
     const extractCurrenciesAndNetworks = () => {
         // Initialize an empty array to store the result
         const currenciesAndNetworks = [];
@@ -39,7 +39,7 @@ $(document).ready(function () {
         return currenciesAndNetworks;
     }
 
-    // Filters down the main select to only have the networks available for the given currency
+    // Filters down the main select to only contain the networks for the given currency
     const syncMainSelectOptions = (selectedCurrency, value) => {
         const { currency, networks } = selectedCurrency;
 
@@ -63,7 +63,7 @@ $(document).ready(function () {
         const currencySelect = $('<select class="form-control" style="width:auto;display:inline-block;margin-right:5px;cursor: pointer;" id="currencySelector"></select>');
         const mainSelect = $('#id_payment_ethereum-currency_type');
 
-        // Set available networks upon currency change, and sync the hidden select
+        // Set available networks upon currency change
         currencySelect.change(function () {
             const selectedCurrency = $(this).val();
             const selectedCurrencyEntry = networksByCurrency.find(function (entry) {
