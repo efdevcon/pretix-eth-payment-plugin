@@ -52,9 +52,11 @@ class TokenRatesJSONDecoder(JSONDecoder):
                 raise JSONDecodeError("Please supply integers or floats as values.", "aaabbb", 0)
         return decoded
 
+
 class EthereumPaymentForm(PaymentProviderForm):
     class Media:
         js = ('pretix_eth/eth_payment_form.js',)
+
 
 class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
@@ -240,7 +242,6 @@ class Ethereum(BasePaymentProvider):
                     forms.ChoiceField(
                         label=_("Payment currency"),
                         help_text=_("Select the currency you will use for payment."),
-                        #widget=forms.RadioSelect,
                         choices=currency_type_choices,
                         initial="ETH",
                     ),
