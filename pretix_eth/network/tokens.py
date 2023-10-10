@@ -415,9 +415,38 @@ class DaiGoerliArbitrum(Arbitrum):
     CHAIN_ID = 421613
     EIP3091_EXPLORER_URL = "https://goerli.arbiscan.io"
 
+
+# """ Polygon zk evm """
+class Polygon(L1):
+    """
+    Implementation for ZkSync networks
+    """
+
+    NETWORK_IDENTIFIER = "PolygonZkEVM"
+    NETWORK_VERBOSE_NAME = "Polygon zkEVM"
+    CHAIN_ID = 1101
+    EIP3091_EXPLORER_URL = "https://zkevm.polygonscan.com/"
+
+
+class ETHPolygonZkEvm(Polygon):
+    """
+    Ethereum on Polygon mainnet Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
+
+
+class DaiPolygonZkEvm(Polygon):
+    """
+    DAI on Polygon Mainnet
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0xC5015b9d9161Dca7e18e32f6f25C4aD850731Fd4"
+
+
 # """ ZkSync Networks """
-
-
 class ZkSync(L1):
     """
     Implementation for ZkSync networks
@@ -461,6 +490,8 @@ registry = [
     ETHGoerliArbitrum(),
     DaiGoerliArbitrum(),
     ETHZkSync(),
+    ETHPolygonZkEvm(),
+    DaiPolygonZkEvm()
 ]
 all_network_verbose_names_to_ids = {}
 for token in registry:

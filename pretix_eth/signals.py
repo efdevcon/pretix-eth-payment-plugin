@@ -44,6 +44,7 @@ def signal_process_response(sender, request, response, **kwargs):
         # Chrome correctly errors out without this CSP
         'connect-src': [
             "wss://relay.walletconnect.com",
+            "https://zkevm-rpc.com/",
             "https://explorer-api.walletconnect.com",
             "https://rpc.walletconnect.com",
             "https://zksync2-mainnet.zksync.io/",
