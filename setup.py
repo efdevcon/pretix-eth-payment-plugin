@@ -22,13 +22,13 @@ cmdclass = {
 
 extras_require = {
     'test': [
-        'pytest>=5.1,<7',
-        'pytest-django>=3.5,<4',
-        'celery==4.4.7'
+        'pytest>=5',
+        'pytest-django>=3.5',
+        'celery>=5',
     ],
     'lint': [
-        'flake8>=3.7,<5',
-        'mypy==0.931',
+        'flake8>=3.7',
+        'mypy>=0.931',
     ],
     'dev': [
         'tox>=3.14.5,<4',
@@ -53,11 +53,8 @@ setup(
     author_email='pretix-eth-payment-plugin@ethereum.org',
     license='Apache Software License',
     install_requires=[
-        "pretix>=3.8.0",
-        "web3==6.0.0-beta.8",
-        # Requests requires urllib3 <1.26.0.  Can delete this later after
-        # requests gets its act together.
-        "urllib3<1.27.0",
+        "pretix>=4.16",
+        "web3>=6",
         # django-bootstrap3 22.2 under py3.8, added for pip legacy resolver to avoid conflicts
         'importlib-metadata<3; python_version<"3.8"',
     ],
