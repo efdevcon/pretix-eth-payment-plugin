@@ -242,7 +242,6 @@ class Ethereum(BasePaymentProvider):
                     forms.ChoiceField(
                         label=_("Payment currency"),
                         help_text=_("Select the currency you will use for payment."),
-                        # widget=forms.RadioSelect,
                         choices=currency_type_choices,
                         initial="ETH",
                     ),
