@@ -123,12 +123,11 @@ class IToken(object):
 
         chosen_currency_rate = decimal.Decimal(rates[self.TOKEN_SYMBOL + "_RATE"])
 
-        # We can't dynamically fetch arbitrary fiat currencies as we have to ensure the exchange apis support them -
-        # We support EUR and USD for now
+        # We can't dynamically fetch arbitrary fiat currencies as we have to ensure the exchange apis support them - we support EUR and USD for now  # noqa: E501
         # Fall back to the manually set price in this case
         if (self.TOKEN_SYMBOL == 'ETH' and (fiat_currency == 'USD' or fiat_currency == 'EUR')):
             # If token is ETH, fetch the price from external apis -
-            # if this fails for some reason (endpoints down, unreliable results, etc.), use the manually set price instead
+            # if this fails for some reason (endpoints down, unreliable results, etc.), use the manually set price instead  # noqa: E501
             eth_price = get_eth_price_from_external_apis(fiat_currency)
 
             if (eth_price is not None):
