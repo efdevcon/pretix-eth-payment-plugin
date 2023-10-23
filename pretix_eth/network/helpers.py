@@ -58,6 +58,7 @@ api_endpoints = [
     "https://api.kraken.com/0/public/Ticker?pair=ETH{currency}",
     "https://api.binance.com/api/v3/ticker/bookTicker?symbol=ETH{currency}",
     "https://api.gemini.com/v1/pubticker/eth{currency}",
+    "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=${currency}"
 ]
 
 
@@ -69,7 +70,6 @@ def format_api_endpoint(api_endpoint, fiat_currency):
 
 
 def fetch_eth_price(api_endpoint, fiat_currency):
-    # api_endpoint.format(currency=fiat_currency)
     api_endpoint = format_api_endpoint(api_endpoint, fiat_currency)
 
     # Check if the data is already cached and within the 15-minute window
@@ -90,6 +90,8 @@ def fetch_eth_price(api_endpoint, fiat_currency):
             eth_price = float(data["bidPrice"])
         elif "gemini.com" in api_endpoint:
             eth_price = float(data["last"])
+        elif "coingecko.com" in api_endpoint:
+            eth_price = float(data['ethereum'][fiat_currency.lower()])
         else:
             eth_price = None
 
