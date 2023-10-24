@@ -221,7 +221,7 @@ class Command(BaseCommand):
 
                         # This may warn about mismatched ABI if its a smart contract wallet tx because of intermediary function calls - but it'll still process the Transfer event correctly # noqa: E501
                         transaction_details = (
-                            contract.events.Transfer().processReceipt(receipt)[0].args
+                            contract.events.Transfer().process_receipt(receipt)[0].args
                         )
 
                         payment_amount = transaction_details.value
