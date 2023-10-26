@@ -16,7 +16,8 @@ class SignedMessage(models.Model):
         on_delete=models.CASCADE,
         related_name='signed_messages',
     )
-    transaction_hash = models.CharField(max_length=66, null=True)
+    transaction_hash = models.CharField(max_length=66, null=True, unique=True)
+    safe_app_transaction_url = models.TextField(null=True, unique=True)
     invalid = models.BooleanField(default=False)
     created_at = models.DateTimeField(editable=False, null=True)
     is_confirmed = models.BooleanField(

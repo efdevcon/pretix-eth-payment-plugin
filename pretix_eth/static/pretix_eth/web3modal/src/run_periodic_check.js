@@ -1,15 +1,11 @@
-import {runPeriodicCheck} from "./periodic_check.js";
+import { runPeriodicCheck } from "./periodic_check.js";
 import {
     GlobalPretixEthState,
-    getPaymentTransactionData,
-    loadChainsJSON,
     convertHashToExplorerLink
 } from "./interface.js";
 
-
 window.addEventListener('load', async () => {
     // run periodic status check if possible
-    await loadChainsJSON();
     const transaction_hash_el = GlobalPretixEthState.elements.submittedTransactionHash
     if (transaction_hash_el !== null) {
         /*

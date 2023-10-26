@@ -2,7 +2,7 @@ from typing import Optional
 import decimal
 
 from django.core.exceptions import ImproperlyConfigured
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 from eth_utils import to_wei
 from web3 import Web3
@@ -12,8 +12,8 @@ from pretix_eth.network.helpers import (
     make_checkout_web3modal_url,
     make_erc_681_url,
     make_uniswap_url,
+    get_eth_price_from_external_apis
 )
-
 
 TOKEN_ABI = [
     # Functions
@@ -115,18 +115,29 @@ class IToken(object):
             self.NETWORK_IDENTIFIER in network_ids
         ) and not self.DISABLED
 
-    def get_ticket_price_in_token(self, total, rates):
+    def get_ticket_price_in_token(self, total, rates, fiat_currency):
         if not (self.TOKEN_SYMBOL + "_RATE" in rates):
             raise ImproperlyConfigured(
                 f"Token Symbol not defined in TOKEN_RATES admin settings: {self.TOKEN_SYMBOL}"
             )
 
-        rounding_base = decimal.Decimal("1.00000")
         chosen_currency_rate = decimal.Decimal(rates[self.TOKEN_SYMBOL + "_RATE"])
+
+        # We can't dynamically fetch arbitrary fiat currencies as we have to ensure the exchange apis support them - we support EUR and USD for now  # noqa: E501
+        # Fall back to the manually set price in this case
+        if (self.TOKEN_SYMBOL == 'ETH' and (fiat_currency == 'USD' or fiat_currency == 'EUR')):
+            # If token is ETH, fetch the price from external apis -
+            # if this fails for some reason (endpoints down, unreliable results, etc.), use the manually set price instead  # noqa: E501
+            eth_price = get_eth_price_from_external_apis(fiat_currency)
+
+            if (eth_price is not None):
+                chosen_currency_rate = decimal.Decimal(eth_price)
+
+        rounding_base = decimal.Decimal("1.00000")
         rounded_price = (total / chosen_currency_rate).quantize(rounding_base)
         final_price = to_wei(rounded_price, "ether")
 
-        return final_price
+        return final_price, chosen_currency_rate.quantize(rounding_base)
 
     def payment_instructions(
         self, wallet_address, payment_amount, amount_in_token_base_unit
@@ -225,36 +236,6 @@ class L1(IToken):
         }
 
 
-class RinkebyL1(L1):
-    """
-    Constants for Rinkeby Ethereum Testnet
-    """
-
-    NETWORK_IDENTIFIER = "Rinkeby"
-    NETWORK_VERBOSE_NAME = "Rinkeby Ethereum Testnet"
-    CHAIN_ID = 4
-    EIP3091_EXPLORER_URL = "https://rinkeby.etherscan.io"
-    DISABLED = True
-
-
-class EthRinkebyL1(RinkebyL1):
-    """
-    Ethereum on Rinkeby L1 Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
-
-
-class DaiRinkebyL1(RinkebyL1):
-    """
-    DAI on Rinkeby L1 Network
-    """
-
-    TOKEN_SYMBOL = "DAI"
-    IS_NATIVE_ASSET = False
-    ADDRESS = "0xc7AD46e0b8a400Bb3C915120d284AafbA8fc4735"
-
-
 class GoerliL1(L1):
     """
     Constants for Goerli Ethereum Testnet
@@ -282,25 +263,6 @@ class DaiGoerliL1(GoerliL1):
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0x11fE4B6AE13d2a6055C8D9cF65c55bac32B5d844"
-
-
-class SepoliaL1(L1):
-    """
-    Constants for Goerli Ethereum Testnet
-    """
-
-    NETWORK_IDENTIFIER = "Sepolia"
-    NETWORK_VERBOSE_NAME = "Sepolia Ethereum Testnet"
-    CHAIN_ID = 11155111
-    EIP3091_EXPLORER_URL = "https://sepolia.etherscan.io"
-
-
-class EthSepoliaL1(SepoliaL1):
-    """
-    Ethereum on Sepolia L1 Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
 
 
 class EthL1(L1):
@@ -335,35 +297,6 @@ class Optimism(L1):
     EIP3091_EXPLORER_URL = "https://optimistic.etherscan.io"
 
 
-class KovanOptimism(Optimism):
-    """
-    Constants for the Optimism Kovan Testnet
-    """
-
-    NETWORK_IDENTIFIER = "KovanOptimism"
-    NETWORK_VERBOSE_NAME = "Kovan Optimism Testnet"
-    CHAIN_ID = 69
-    EIP3091_EXPLORER_URL = "https://kovan-optimistic.etherscan.io"
-
-
-class EthKovanOptimism(KovanOptimism):
-    """
-    Ethereum on Kovan Testnet Optimism Network
-    """
-
-    TOKEN_SYMBOL = "ETH"
-
-
-class DaiKovanOptimism(KovanOptimism):
-    """
-    DAI on Kovan Testnet Optimism Network
-    """
-
-    TOKEN_SYMBOL = "DAI"
-    IS_NATIVE_ASSET = False
-    ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
-
-
 class EthOptimism(Optimism):
     """
     Ethereum on Optimism Mainnet
@@ -380,6 +313,30 @@ class DaiOptimism(Optimism):
     TOKEN_SYMBOL = "DAI"
     IS_NATIVE_ASSET = False
     ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
+
+
+class ETHGoerliOptimism(Optimism):
+    """
+    Ethereum on Optimism Goerli Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
+    NETWORK_IDENTIFIER = "GoerliOptimism"
+    NETWORK_VERBOSE_NAME = "Goerli Optimism Testnet"
+    CHAIN_ID = 420
+    EIP3091_EXPLORER_URL = "https://goerli-optimism.etherscan.io"
+
+
+class DaiGoerliOptimism(Optimism):
+    """
+    Dai on Optimism Goerli Network
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    NETWORK_IDENTIFIER = "GoerliOptimism"
+    NETWORK_VERBOSE_NAME = "Goerli Optimism Testnet"
+    CHAIN_ID = 420
+    EIP3091_EXPLORER_URL = "https://goerli-optimism.etherscan.io"
 
 
 """ Arbitrum Networks """
@@ -428,7 +385,6 @@ class Arbitrum(L1):
         }
 
 
-
 class ETHArbitrum(Arbitrum):
     """
     Ethereum on Arbitrum mainnet Network
@@ -447,41 +403,106 @@ class DaiArbitrum(Arbitrum):
     ADDRESS = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
 
 
-class RinkebyArbitrum(Arbitrum):
+class ETHGoerliArbitrum(Arbitrum):
     """
-    Constants for the Optimism Mainnet
+    Ethereum on Arbitrum Goerli Network
     """
 
-    NETWORK_IDENTIFIER = "RinkebyArbitrum"
-    NETWORK_VERBOSE_NAME = "Rinkeby Arbitrum Testnet"
-    CHAIN_ID = 421611
-    EIP3091_EXPLORER_URL = "https://rinkeby-explorer.arbitrum.io"
-    DISABLED = True
+    TOKEN_SYMBOL = "ETH"
+    NETWORK_IDENTIFIER = "GoerliArbitrum"
+    NETWORK_VERBOSE_NAME = "Goerli Arbitrum Testnet"
+    CHAIN_ID = 421613
+    EIP3091_EXPLORER_URL = "https://goerli.arbiscan.io"
 
 
-class ETHRinkebyArbitrum(RinkebyArbitrum):
+class DaiGoerliArbitrum(Arbitrum):
     """
-    Ethereum on Arbitrum Rinkeby Network
+    Dai on Arbitrum Goerli Network
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    NETWORK_IDENTIFIER = "GoerliArbitrum"
+    NETWORK_VERBOSE_NAME = "Goerli Arbitrum Testnet"
+    CHAIN_ID = 421613
+    EIP3091_EXPLORER_URL = "https://goerli.arbiscan.io"
+
+
+# """ Polygon zk evm """
+class Polygon(L1):
+    """
+    Implementation for ZkSync networks
+    """
+
+    NETWORK_IDENTIFIER = "PolygonZkEVM"
+    NETWORK_VERBOSE_NAME = "Polygon zkEVM"
+    CHAIN_ID = 1101
+    EIP3091_EXPLORER_URL = "https://zkevm.polygonscan.com/"
+
+
+class ETHPolygonZkEvm(Polygon):
+    """
+    Ethereum on Polygon mainnet Network
     """
 
     TOKEN_SYMBOL = "ETH"
 
 
+class DaiPolygonZkEvm(Polygon):
+    """
+    DAI on Polygon Mainnet
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0xC5015b9d9161Dca7e18e32f6f25C4aD850731Fd4"
+
+
+# """ ZkSync Networks """
+class ZkSync(L1):
+    """
+    Implementation for ZkSync networks
+    """
+
+    NETWORK_IDENTIFIER = "ZkSync"
+    NETWORK_VERBOSE_NAME = "ZkSync Mainnet"
+    CHAIN_ID = 324
+    EIP3091_EXPLORER_URL = "https://explorer.zksync.io"
+
+
+class ETHZkSync(ZkSync):
+    """
+    Ethereum on ZkSync mainnet Network
+    """
+
+    TOKEN_SYMBOL = "ETH"
+
+
+class DaiZkSync(ZkSync):
+    """
+    DAI on ZkSync Mainnet
+    """
+
+    TOKEN_SYMBOL = "DAI"
+    IS_NATIVE_ASSET = False
+    ADDRESS = "0x6b175474e89094c44da98b954eedeac495271d0f"
+
+
 registry = [
     EthL1(),
     DaiL1(),
-    EthRinkebyL1(),
-    DaiRinkebyL1(),
     EthGoerliL1(),
     DaiGoerliL1(),
-    EthSepoliaL1(),
     EthOptimism(),
     DaiOptimism(),
-    EthKovanOptimism(),
-    DaiKovanOptimism(),
+    ETHGoerliOptimism(),
+    DaiGoerliOptimism(),
     ETHArbitrum(),
     DaiArbitrum(),
-    ETHRinkebyArbitrum(),
+    ETHGoerliArbitrum(),
+    DaiGoerliArbitrum(),
+    ETHZkSync(),
+    ETHPolygonZkEvm(),
+    DaiPolygonZkEvm()
 ]
 all_network_verbose_names_to_ids = {}
 for token in registry:

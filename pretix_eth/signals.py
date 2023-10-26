@@ -26,22 +26,43 @@ def signal_process_response(sender, request, response, **kwargs):
         h = _parse_csp(response['Content-Security-Policy'])
     _merge_csp(h, {
         'style-src': [
-            "'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='",
-            "'sha256-O+AX3tWIOimhuzg+lrMfltcdtWo7Mp2Y9qJUkE6ysWE='",
+            "'unsafe-inline'"
+        ],
+        'img-src': [
+            'https://registry.walletconnect.com',
+            "https://explorer-api.walletconnect.com",
+            "https://*.bridge.walletconnect.org",
         ],
         'script-src': [
-            # web3modal-HOTFIX.js
-            "'sha256-G0alWBi3d/qUeACYUzGOmJ34+fZaiiZaP2XpCEg7UFA='",
-            # web3.min-1.7.5.js
-            "'sha256-sqlmDxtDyZOFztnt94HoSfNbtRvmgNuCqYTRVVH6X3k='",
+            # unsafe-inline/eval required for webpack bundles (we cannot know names in advance).
+            "'unsafe-inline'",
+            "'unsafe-eval'"
+        ],
+        'frame-src': [
+            'https://verify.walletconnect.com/'
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
+            "wss://relay.walletconnect.com",
+            "https://zkevm-rpc.com/",
+            "https://explorer-api.walletconnect.com",
+            "https://rpc.walletconnect.com",
+            "https://zksync2-mainnet.zksync.io/",
+            "https://rpc.ankr.com/eth_goerli",
             "https://registry.walletconnect.com/",
             "https://*.bridge.walletconnect.org/",
             "wss://*.bridge.walletconnect.org/",
+            "https://bridge.walletconnect.org/",
+            "wss://bridge.walletconnect.org/",
             "https://*.infura.io/",
             "wss://*.infura.io/",
+            "https://*.safe.global",
+            "https://cloudflare-eth.com/",
+            "wss://www.walletlink.org/",
+            "https://www.sepoliarpc.space/",
+            "https://rpc.sepolia.org/",
+            "https://arb1.arbitrum.io/rpc",
+            "https://mainnet.optimism.io/"
         ],
         'manifest-src': ["'self'"],
     })

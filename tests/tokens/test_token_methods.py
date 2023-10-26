@@ -24,7 +24,8 @@ def test_if_token_is_allowed():
 
 def test_token_get_ticket_price_in_token_is_correct():
     test_token: IToken = create_token()
-    price_in_token_weis = test_token.get_ticket_price_in_token(10, {"T_RATE": 1000})
+    price_in_token_weis, _ = test_token.get_ticket_price_in_token(
+        10, {"T_RATE": 1000}, 'SOME_FIAT_CURRENCY')
     # price of 1 T token = 1000. So 10$ = 0.001 T tokens or 10^16.
     assert price_in_token_weis == 10000000000000000
 
@@ -32,7 +33,7 @@ def test_token_get_ticket_price_in_token_is_correct():
 def test_token_get_price_in_token_gives_error_if_no_rate_given():
     test_token: IToken = create_token()
     with pytest.raises(ImproperlyConfigured) as execinfo:
-        test_token.get_ticket_price_in_token(10, {"ANOTHER_TOKEN_RATE": 1000})
+        test_token.get_ticket_price_in_token(10, {"ANOTHER_TOKEN_RATE": 1000}, 'SOME_FIAT_CURRENCY')
     assert (
         execinfo.value.args[0]
         == "Token Symbol not defined in TOKEN_RATES admin settings: T"

@@ -1,7 +1,9 @@
 "use strict";
 
-// files that interact with the page DOM
+import { getAccount } from "@wagmi/core";
+import chains from "./chains.js";
 
+// files that interact with the page DOM
 
 const GlobalPretixEthState = {
     selectedAccount: null,  // address of the currently connected account
@@ -36,39 +38,24 @@ const GlobalPretixEthState = {
     web3Modal: null
 }
 
-
-async function getProvider() {
-    if (window.web3_provider) {
-        return window.web3_provider
-    }
-    let provider;
+async function signIn() {
     try {
-        provider = await GlobalPretixEthState.web3Modal.connect();
+        const account = await getAccount();
+
+        if (account.isConnected) {
+            return true;
+        }
+
+        await GlobalPretixEthState.web3Modal.openModal()
     } catch (e) {
-        console.log("Web3Modal exception:", e)
-        provider = window.ethereum
-    }
-    if (!provider) {
-        // no provider found
-        throw "Failed to connect to a wallet provider. Please make sure you have Metamask or another injected provider set up in this browser.";
-    }
-    window.web3_provider = new Web3(provider);
+        console.error(e, 'Sign in failed')
 
-    // Subscribe to accounts change
-    provider.on("accountsChanged", (accounts) => {
-        location.reload();
-    });
+        throw e;
+    }
 
-    return window.web3_provider
+    return false;
 }
 
-async function getAccount() {
-    let provider = await getProvider();
-    // Get a Web3 instance for the wallet
-    const accounts = await provider.eth.getAccounts();
-    // MetaMask does not give you all accounts, only the selected account
-    return accounts[0];
-}
 
 function getTransactionDetailsURL() {
     return GlobalPretixEthState.elements.buttonConnect.getAttribute("data-transaction-details-url");
@@ -78,17 +65,19 @@ async function getPaymentTransactionData(refresh = false) {
     if (!refresh && GlobalPretixEthState.paymentDetails !== null) {
         return GlobalPretixEthState.paymentDetails
     }
-    let walletAddress = await getAccount();
+
+    const walletAddress = await getAccount()?.address;
     const url = getTransactionDetailsURL();
     const response = await fetch(url + '?' + new URLSearchParams({
         sender_address: walletAddress
     }));
+
     if (response.status >= 400) {
         throw "Failed to fetch order details. If this problem persists, please contact the organizer directly.";
     }
+
     return await response.json();
 }
-
 
 function getCookie(name) {
     // Add the = sign
@@ -113,45 +102,24 @@ function getCookie(name) {
     }
 }
 
-async function loadChainsJSON() {
-    let url = GlobalPretixEthState.elements.aOrderDetailURL.getAttribute("data-chains-json-url");
-    await fetch(url).then(res => res.json()).then(
-        (chains) => {
-            chains.forEach(item => {
-                GlobalPretixEthState.chains[item.chain] = GlobalPretixEthState.chains[item.chain] || [];
-                GlobalPretixEthState.chains[item.chain][item.networkId] = item
-            })
-        }
-    ).catch(err => console.error(err));
-}
-
 function convertHashToExplorerLink(chain_id, transactionHash) {
-    if (
-        GlobalPretixEthState.chains.ETH !== undefined
-        && GlobalPretixEthState.chains.ETH[chain_id] !== undefined
-        && GlobalPretixEthState.chains.ETH[chain_id].explorers !== undefined
-    ) {
-        const url = GlobalPretixEthState.chains['ETH'][chain_id].explorers[0].url
-        return '<a href="' + url + '/tx/' + transactionHash + '" target="_blank">' + transactionHash + "</a>"
+    const chainMatch = chains.filter(chainInfo => chainInfo.chain.id === parseInt(chain_id));
+    let chain;
+
+    if (chainMatch) chain = chainMatch[0].chain;
+
+    const explorerURL = chain?.blockExplorers?.etherscan?.url;
+
+    if (explorerURL) {
+        return '<a href="' + explorerURL + '/tx/' + transactionHash + '" target="_blank">' + transactionHash + "</a>"
     } else {
         return transactionHash
-    }
-}
-
-async function getERC20ABI() {
-    let url = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-erc20-abi-url");
-    let response = await fetch(url);
-    if (response.ok) {
-        return response.json()
-    } else {
-        showError("Failed to fetch ERC20 ABI.")
     }
 }
 
 /*
 * Success and error handling
 */
-
 function showError(message = '', reset_state = true) {
     if (GlobalPretixEthState.transactionHashSubmitted) {
         // do not display errors or reset state after the transaction hash has been successfully submitted to the BE
@@ -163,7 +131,9 @@ function showError(message = '', reset_state = true) {
         GlobalPretixEthState.signatureRequested = false;
 
         if (typeof message === "object") {
-            if (message.message !== undefined) {
+            if (message.data && message.data.message) {
+                message = message.data.message + ". Please try again."
+            } else if (message.message !== undefined) {
                 message = message.message + ". Please try again."
             } else if (message.error !== undefined && message.error.message !== undefined) {
                 message = message.error.message + ". Please try again.";
@@ -177,6 +147,7 @@ function showError(message = '', reset_state = true) {
     }
 
     GlobalPretixEthState.elements.divError.innerHTML = message;
+
     if (reset_state === true) {
         displayOnlyId("prepare");
     }
@@ -189,15 +160,13 @@ function showError(message = '', reset_state = true) {
     return false
 }
 
-
 function resetErrorMessage() {
     GlobalPretixEthState.elements.divError.innerHTML = '';
 }
 
-
 function displayOnlyId(divId) {
     GlobalPretixEthState.selectors.paymentSteps.forEach(
-        function(div) {
+        function (div) {
             if (div.id === divId) {
                 div.style.display = "block";
             } else {
@@ -207,19 +176,24 @@ function displayOnlyId(divId) {
     );
 }
 
-function showSuccessMessage(transactionHash) {
+function showSuccessMessage(transactionHash, safeUrl) {
     GlobalPretixEthState.transactionHashSubmitted = true;
     const chain_id = GlobalPretixEthState.elements.aNetworkData.getAttribute("data-chain-id")
-    GlobalPretixEthState.elements.divTransactionHash.innerHTML = convertHashToExplorerLink(chain_id, transactionHash);
+    if (safeUrl) {
+        GlobalPretixEthState.elements.divTransactionHash.innerHTML = safeUrl
+    } else {
+        GlobalPretixEthState.elements.divTransactionHash.innerHTML = convertHashToExplorerLink(chain_id, transactionHash);
+    }
     displayOnlyId();
     GlobalPretixEthState.elements.divSuccess.style.display = "block";
 }
 
 export {
     getCookie, GlobalPretixEthState,
-    getPaymentTransactionData, loadChainsJSON,
+    getPaymentTransactionData,
     convertHashToExplorerLink,
-    getTransactionDetailsURL, getERC20ABI,
+    getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
-    showSuccessMessage, getAccount, getProvider
+    showSuccessMessage,
+    signIn
 };

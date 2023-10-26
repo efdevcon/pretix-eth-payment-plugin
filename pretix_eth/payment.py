@@ -9,14 +9,14 @@ from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template import RequestContext
 from django.template.loader import get_template
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
 
 from pretix.base.models import (
     OrderPayment,
     OrderRefund,
 )
-from pretix.base.payment import BasePaymentProvider
+from pretix.base.payment import BasePaymentProvider, PaymentProviderForm
 
 from eth_utils import from_wei
 
@@ -53,11 +53,17 @@ class TokenRatesJSONDecoder(JSONDecoder):
         return decoded
 
 
+class EthereumPaymentForm(PaymentProviderForm):
+    class Media:
+        js = ('pretix_eth/eth_payment_form.js',)
+
+
 class Ethereum(BasePaymentProvider):
     identifier = "ethereum"
     verbose_name = _("ETH or DAI")
     public_name = _("ETH or DAI")
     test_mode_message = "Paying in Test Mode"
+    payment_form_class = EthereumPaymentForm
 
     @property
     def settings_form_fields(self):
@@ -69,12 +75,16 @@ class Ethereum(BasePaymentProvider):
                     forms.JSONField(
                         label=_("Token Rate"),
                         help_text=_(
-                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in the fiat currency you have chosen. E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."  # noqa: E501
+                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount "
+                            "for a token in the fiat currency you have chosen. "
+                            "E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."
                         ),
                         decoder=TokenRatesJSONDecoder,
+                        initial="{}",
                     ),
                 ),
-                # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works... # noqa: E501
+                # Based on pretix source code, MultipleChoiceField breaks
+                # if settings doesnt start with an "_". No idea how this works...
                 (
                     "_NETWORKS",
                     forms.MultipleChoiceField(
@@ -102,11 +112,23 @@ class Ethereum(BasePaymentProvider):
                     )
                 ),
                 (
+                    "WALLETCONNECT_PROJECT_ID",
+                    forms.CharField(
+                        label=_("WalletConnect project ID."),
+                        help_text=_(
+                            "Every project using WalletConnect SDKs (including Web3Modal) "
+                            "needs to obtain projectId from WalletConnect Cloud. "
+                            "This is absolutely free and only takes a few minutes."
+                        )
+                    )
+                ),
+                (
                     "NETWORK_RPC_URL",
                     forms.JSONField(
                         label=_("RPC URLs for networks"),
                         help_text=_(
-                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url of the network RPC endpoint you are using"  # noqa: E501
+                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url "
+                            "of the network RPC endpoint you are using"
                         ),
                     ),
                 ),
@@ -116,17 +138,22 @@ class Ethereum(BasePaymentProvider):
                         label=_("Payment retry timeout in seconds"),
                         help_text=_(
                             "Customers will be allowed to pay again after their previous payment "
-                            "hasn't arrived for a given time. 1800s (30min) is a reasonable starting value"
+                            "hasn't arrived for a given time. "
+                            "1800s (30min) is a reasonable starting value"
                         ),
-                        initial=30*60,
+                        initial=30 * 60,
                     )
                 ),
                 (
                     "SAFETY_BLOCK_COUNT",
                     forms.IntegerField(
-                        label=_("Number of blocks to be mined after a transaction for it to be considered accepted by the chain."),
+                        label=_(
+                            "Number of blocks to be mined after a transaction for it "
+                            "to be considered accepted by the chain."
+                        ),
                         help_text=_(
-                            "Higher value means better protection from (hypothetical) double spending attacks, "
+                            "Higher value means better protection from (hypothetical) "
+                            "double spending attacks, "
                             "at the cost of payment confirmation latency."
                         ),
                         initial=5,
@@ -167,24 +194,35 @@ class Ethereum(BasePaymentProvider):
             logger.error("No networks configured")
 
         receiving_address = self.get_receiving_address()
-        single_receiver_mode_configured = receiving_address is not None and len(
-            receiving_address) > 0
+        single_receiver_mode_configured = bool(
+            receiving_address is not None
+            and len(receiving_address) > 0
+        )
 
         if not single_receiver_mode_configured:
             logger.error("Single receiver addresses not configured properly")
+
+        walletconnect_project_id_configured = bool(
+            self.settings.WALLETCONNECT_PROJECT_ID is not None
+            and len(self.settings.WALLETCONNECT_PROJECT_ID) > 0
+        )
+
+        if not walletconnect_project_id_configured:
+            logger.error("Walletconnect project id is required for web3modal to work.")
 
         return all(
             (
                 one_or_more_currencies_configured,
                 at_least_one_network_configured,
                 single_receiver_mode_configured,
-                super().is_allowed(request),
+                walletconnect_project_id_configured,
+                super().is_allowed(request, **kwargs),
             )
         )
 
     @property
     def payment_form_fields(self):
-        currency_type_choices = ()
+        currency_type_choices = [("", "Choose Network and Token")]
 
         rates = self.get_token_rates_from_admin_settings()
         network_ids = self.get_networks_chosen_from_admin_settings()
@@ -204,7 +242,6 @@ class Ethereum(BasePaymentProvider):
                     forms.ChoiceField(
                         label=_("Payment currency"),
                         help_text=_("Select the currency you will use for payment."),
-                        widget=forms.RadioSelect,
                         choices=currency_type_choices,
                         initial="ETH",
                     ),
@@ -213,6 +250,16 @@ class Ethereum(BasePaymentProvider):
         )
 
         return form_fields
+
+    def payment_form_render(self, request, total, order=None):
+        """
+        copy&paste of the pretix.base.payment.BasePaymentProvider.payment_form_render
+        only to change the template file
+        """
+        form = self.payment_form(request)
+        template = get_template('pretix_eth/checkout_payment_form.html')
+        ctx = {'request': request, 'form': form}
+        return template.render(ctx)
 
     def checkout_confirm_render(self, request):
         template = get_template("pretix_eth/checkout_payment_confirm.html")
@@ -274,29 +321,27 @@ class Ethereum(BasePaymentProvider):
         )
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        rates = payment.payment_provider.settings.get("TOKEN_RATES", as_type=dict, default={})
-        token: IToken = all_token_and_network_ids_to_tokens[
-            request.session["payment_currency_type"]
-        ]
-
         payment.info_data = {
             "currency_type": request.session["payment_currency_type"],
             "time": request.session["payment_time"],
             "amount": request.session["payment_amount"],
-            "token_rate": rates[f"{token.TOKEN_SYMBOL}_RATE"],
+            "token_rate": request.session["token_rate"]
         }
+
         payment.save(update_fields=["info"])
 
     def _update_session_payment_amount(self, request: HttpRequest, total):
         token: IToken = all_token_and_network_ids_to_tokens[
             request.session["payment_currency_type"]
         ]
-        final_price = token.get_ticket_price_in_token(
-            total, self.get_token_rates_from_admin_settings()
+
+        final_price, token_rate = token.get_ticket_price_in_token(
+            total, self.get_token_rates_from_admin_settings(), self.event.currency
         )
 
         request.session["payment_amount"] = final_price
         request.session["payment_time"] = int(time.time())
+        request.session["token_rate"] = int(token_rate)
 
     def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/pending.html")
@@ -323,22 +368,30 @@ class Ethereum(BasePaymentProvider):
             wallet_address, payment_amount, amount_in_ether_or_token
         )
 
+        walletconnect_project_id = payment.payment_provider.settings.get(
+            "WALLETCONNECT_PROJECT_ID", as_type=str, default="")
+
         ctx.update(instructions)
         ctx["network_name"] = token.NETWORK_VERBOSE_NAME
         ctx["chain_id"] = token.CHAIN_ID
         ctx["token_symbol"] = token.TOKEN_SYMBOL
         ctx["transaction_details_url"] = payment.pk
+        ctx["walletconnect_project_id"] = walletconnect_project_id
 
         latest_signed_message = payment.signed_messages.last()
 
         submitted_transaction_hash = None
+        safe_app_transaction_url = None
         order_accepting_payments = True
+
         if latest_signed_message is not None:
             submitted_transaction_hash = latest_signed_message.transaction_hash
+            safe_app_transaction_url = latest_signed_message.safe_app_transaction_url
             order_accepting_payments = not latest_signed_message.another_signature_submitted
 
         ctx["submitted_transation_hash"] = submitted_transaction_hash
         ctx["order_accepting_payments"] = order_accepting_payments
+        ctx["safe_app_transaction_url"] = safe_app_transaction_url
 
         return template.render(ctx.flatten())
 

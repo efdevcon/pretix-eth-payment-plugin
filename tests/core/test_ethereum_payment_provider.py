@@ -41,6 +41,8 @@ def test_provider_is_allowed(event, provider):
     provider.settings.set("NETWORK_RPC_URL", dict())
     provider.settings.set("SINGLE_RECEIVER_ADDRESS",
                           "0x0000000000000000000000000000000000000000")
+    provider.settings.set("WALLETCONNECT_PROJECT_ID",
+                          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     assert not provider.is_allowed(request)
 
     # now test with right values:
@@ -61,8 +63,8 @@ def test_provider_payment_form_fields_only_ETH_L1(provider):
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"
 
 
 @pytest.mark.django_db
@@ -73,22 +75,22 @@ def test_provider_payment_form_fields_only_DAI_L1(provider):
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "DAI - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "DAI - Ethereum Mainnet"
 
 
 @pytest.mark.django_db
 def test_provider_payment_form_fields_multiple_networks_single_currency(provider):
     provider.settings.set("TOKEN_RATES", {"DAI_RATE": TEST_DAI_RATE})
-    provider.settings.set("_NETWORKS", ["L1", "Goerli", "KovanOptimism"])
+    provider.settings.set("_NETWORKS", ["L1", "Goerli", "GoerliOptimism"])
 
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 3
-    assert currency_type_field.choices[0][0] == "DAI - Ethereum Mainnet"
-    assert currency_type_field.choices[1][0] == "DAI - Goerli Ethereum Testnet"
-    assert currency_type_field.choices[2][0] == "DAI - Kovan Optimism Testnet"
+    assert len(currency_type_field.choices) == 4
+    assert currency_type_field.choices[1][0] == "DAI - Ethereum Mainnet"
+    assert currency_type_field.choices[2][0] == "DAI - Goerli Ethereum Testnet"
+    assert currency_type_field.choices[3][0] == "DAI - Goerli Optimism Testnet"
 
 
 @pytest.mark.django_db
@@ -101,11 +103,11 @@ def test_provider_payment_form_fields_multiple_networks_multiple_currencies(prov
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 4
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
-    assert currency_type_field.choices[1][0] == "DAI - Ethereum Mainnet"
-    assert currency_type_field.choices[2][0] == "ETH - Goerli Ethereum Testnet"
-    assert currency_type_field.choices[3][0] == "DAI - Goerli Ethereum Testnet"
+    assert len(currency_type_field.choices) == 5
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"
+    assert currency_type_field.choices[2][0] == "DAI - Ethereum Mainnet"
+    assert currency_type_field.choices[3][0] == "ETH - Goerli Ethereum Testnet"
+    assert currency_type_field.choices[4][0] == "DAI - Goerli Ethereum Testnet"
 
 
 @pytest.mark.django_db
@@ -116,8 +118,8 @@ def test_provider_payment_form_fields_adding_extra_network_doesnt_fail(provider)
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"
 
 
 @pytest.mark.django_db
@@ -128,5 +130,5 @@ def test_provider_payment_form_fields_adding_extra_currency_doesnt_fail(provider
     payment_form_fields = provider.payment_form_fields
     currency_type_field = payment_form_fields["currency_type"]
 
-    assert len(currency_type_field.choices) == 1
-    assert currency_type_field.choices[0][0] == "ETH - Ethereum Mainnet"
+    assert len(currency_type_field.choices) == 2
+    assert currency_type_field.choices[1][0] == "ETH - Ethereum Mainnet"

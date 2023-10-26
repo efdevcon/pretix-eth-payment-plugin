@@ -14,5 +14,5 @@ class Migration(migrations.Migration):
             model_name='signedmessage',
             name='transaction_hash',
             field=models.CharField(max_length=66, null=True),
-        ),
+        )
     ]
