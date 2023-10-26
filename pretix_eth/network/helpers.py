@@ -58,7 +58,7 @@ api_endpoints = [
     "https://api.kraken.com/0/public/Ticker?pair=ETH{currency}",
     "https://api.binance.com/api/v3/ticker/bookTicker?symbol=ETH{currency}",
     "https://api.gemini.com/v1/pubticker/eth{currency}",
-    "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=${currency}"
+    "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies={currency}"
 ]
 
 
