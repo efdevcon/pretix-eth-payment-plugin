@@ -57,4 +57,5 @@ jobs:
       - name: ${{ matrix.toxenv }}
         run: tox
         env:
+          WEB3_PROVIDER_URI: ${{ secrets.WEB3_PROVIDER_URI }}
           TOXENV: ${{ matrix.toxenv }}
