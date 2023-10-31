@@ -16,9 +16,6 @@ from pretix.base.models import (
     Team,
 )
 import pytest
-from pytest_django.fixtures import (
-    _disable_native_migrations,
-)
 
 from pretix_eth.payment import Ethereum
 from rest_framework.test import APIClient
@@ -135,67 +132,6 @@ def get_order_and_payment(django_db_reset_sequences, event, get_organizer_scope)
         return order, payment
 
     return _get_order_and_payment
-
-
-@pytest.fixture(scope="function")
-def django_db_setup(
-    request,
-    django_test_environment,
-    django_db_blocker,
-    django_db_use_migrations,
-    django_db_keepdb,
-    django_db_createdb,
-    django_db_modify_db_settings,
-):
-    """
-    Copied and pasted from here:
-    https://github.com/pytest-dev/pytest-django/blob/d2973e21c34d843115acdbccdd7a16cb2714f4d3/pytest_django/fixtures.py#L84
-
-    We override this fixture and give it a "function" scope as a hack to force
-    the test database to be re-created per test case.  This causes the same
-    database ids to be used for payment records in each test run.  Usage of the
-    `reset_sequences` flag provided by pytest-django isn't always sufficient
-    since it can depend on whether or not a particular database supports
-    sequence resets.
-
-    As an example of why sequence resets are necessary, tests in the
-    `tests.integration.test_confirm_payments` module will fail if database ids
-    are not reset per test function.  This is because the test wallet on the
-    Goerli test net must hardcode payment ids into transactions and token
-    transfers.  If payment ids don't deterministically begin at 1 per test
-    case, payment ids in the Goerli test wallet won't correctly correspond to
-    payment ids generated during test runs.
-    """
-    from pytest_django.compat import setup_databases, teardown_databases
-
-    setup_databases_args = {}
-
-    if not django_db_use_migrations:
-        _disable_native_migrations()
-
-    if django_db_keepdb and not django_db_createdb:
-        setup_databases_args["keepdb"] = True
-
-    with django_db_blocker.unblock():
-        db_cfg = setup_databases(
-            verbosity=request.config.option.verbose,
-            interactive=False,
-            **setup_databases_args
-        )
-
-    def teardown_database():
-        with django_db_blocker.unblock():
-            try:
-                teardown_databases(db_cfg, verbosity=request.config.option.verbose)
-            except Exception as exc:
-                request.node.warn(
-                    pytest.PytestWarning(
-                        "Error when trying to teardown test databases: %r" % exc
-                    )
-                )
-
-    if not django_db_keepdb:
-        request.addfinalizer(teardown_database)
 
 
 def pytest_addoption(parser):
