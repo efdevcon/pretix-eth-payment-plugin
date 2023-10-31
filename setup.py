@@ -23,6 +23,7 @@ cmdclass = {
 extras_require = {
     'test': [
         'pytest>=5',
+        'pytest-django>=3.5',
         'celery>=5',
     ],
     'lint': [
