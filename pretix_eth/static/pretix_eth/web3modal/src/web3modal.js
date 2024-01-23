@@ -1,11 +1,10 @@
 "use strict";
 
-import { configureChains, createConfig, watchAccount, watchNetwork } from "@wagmi/core";
-import { EthereumClient, w3mConnectors, w3mProvider } from '@web3modal/ethereum'
-import { Web3Modal } from "@web3modal/html";
+import { watchAccount, watchNetwork } from "@wagmi/core";
+import { createWeb3Modal, defaultWagmiConfig } from '@web3modal/wagmi1/react'
 import { showError, GlobalPretixEthState, signIn, displayOnlyId, getCookie } from './interface.js';
 import { makePayment } from './core.js';
-import chains from "./chains.js";
+import chainsInfo from "./chains.js";
 
 async function init() {
     const desiredChainID = GlobalPretixEthState.elements.buttonConnect.getAttribute("data-chain-id");
@@ -14,7 +13,7 @@ async function init() {
     // Some wallets read the page title and presents it to the user in the wallet - the pretix generated one looks confusing, so we override it before instantiating web3modal
     document.title = 'Pretix Payment';
 
-    const desiredChain = chains.filter(chainInfo => chainInfo.chain.id === parseInt(desiredChainID));
+    const desiredChain = chainsInfo.filter(chainInfo => chainInfo.chain.id === parseInt(desiredChainID));
 
     if (desiredChain.length < 1) {
         showError('Invalid chain ID');
@@ -22,27 +21,19 @@ async function init() {
         return;
     }
 
-    const { publicClient } = configureChains([desiredChain[0].chain], [w3mProvider({ projectId: walletConnectProjectId })])
+    const metadata = {
+        name: 'Pretix Payment Plugin',
+        description: 'Pretix Payment Plugin',
+        url: window.location.origin,
+        icons: ['https://avatars.githubusercontent.com/u/37784886']
+    }
+    const chains = [desiredChain[0].chain, desiredChain[0].chain];
+    const wagmiConfig = defaultWagmiConfig({ chains, projectId: walletConnectProjectId, appName: metadata.name })
 
-    const wagmiClient = createConfig({
-        autoConnect: true,
-        connectors: [
-            ...w3mConnectors({
-                projectId:
-                    walletConnectProjectId,
-                version: 2,
-                chains: [desiredChain[0].chain]
-            })
-        ],
-        publicClient,
-    });
+    GlobalPretixEthState.web3Modal = createWeb3Modal({
+        wagmiConfig, projectId: walletConnectProjectId, chains, themeMode: 'light'
+    })
 
-    // Web3Modal and Ethereum Client
-    const ethereumClient = new EthereumClient(wagmiClient, desiredChain);
-    GlobalPretixEthState.web3Modal = new Web3Modal(
-        { projectId: walletConnectProjectId },
-        ethereumClient
-    );
     GlobalPretixEthState.safeNetworkIdentifier = desiredChain[0].safeNetworkIdentifier;
 
     let lastAccountStatus;

@@ -46,7 +46,7 @@ async function signIn() {
             return true;
         }
 
-        await GlobalPretixEthState.web3Modal.openModal()
+        await GlobalPretixEthState.web3Modal.open()
     } catch (e) {
         console.error(e, 'Sign in failed')
 

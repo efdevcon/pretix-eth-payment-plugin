@@ -1,6 +1,6 @@
 "use strict";
 
-import { signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, readContract, prepareWriteContract, writeContract, getPublicClient } from "@wagmi/core";
+import { signTypedData, erc20ABI, getAccount, getNetwork, switchNetwork, sendTransaction, readContract, writeContract, getPublicClient } from "@wagmi/core";
 import {
     getTransactionDetailsURL,
     showError, resetErrorMessage, displayOnlyId,
@@ -8,6 +8,22 @@ import {
     getCookie, GlobalPretixEthState, getPaymentTransactionData,
 } from './interface.js';
 import { runPeriodicCheck } from './periodic_check.js';
+
+function validate_txhash(addr) {
+    return /^0x([A-Fa-f0-9]{64})$/.test(addr);
+}
+
+const checkResult = (result) => {
+    try {
+        const parsed = JSON.parse(result);
+
+        if (parsed.error) {
+            throw parsed.error;
+        }
+    } catch (e) {
+
+    }
+}
 
 /*
 * Called on "Connect wallet and pay" button click and every chain/account change
@@ -102,6 +118,8 @@ async function sign() {
 
                     const signature = await signTypedData(message);
 
+                    // For some ungodly reason wagmi doesn't error out on some errors - have to check the return value for errors to avoid any issues
+                    checkResult(signature);
 
                     // Validate signature on the backend before proceeding:
                     const url = new URL(window.location.origin + window.__validateSignatureUrl);
@@ -124,7 +142,7 @@ async function sign() {
                     if (response.ok) {
                         await submitTransaction();
                     } else {
-                        showError('EIP1271 error: unable to verify signature; your wallet may not be supported.')
+                        showError('EIP1271 validation error: unable to verify signature; your wallet may not be supported.')
 
                         GlobalPretixEthState.signatureRequested = false;
 
@@ -132,6 +150,9 @@ async function sign() {
                     }
                 } else {
                     const signature = await signTypedData(message)
+
+                    // For some ungodly reason wagmi doesn't error out on some errors - have to check the return value for errors to avoid any issues
+                    checkResult(signature);
 
                     GlobalPretixEthState.messageSignature = signature;
                     GlobalPretixEthState.signedByAccount = GlobalPretixEthState.selectedAccount;
@@ -182,14 +203,20 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const { hash } = await writeContract({
+                const result = await writeContract({
                     abi: erc20ABI,
                     address: daiContractAddress,
                     functionName: 'transfer',
                     args: [GlobalPretixEthState.paymentDetails['recipient_address'], GlobalPretixEthState.paymentDetails['amount']]
                 })
 
-                await submitSignature(hash);
+                const valid = validate_txhash(result.hash);
+
+                if (!valid) throw 'Invalid transaction hash';
+
+                checkResult(result);
+
+                await submitSignature(result.hash);
             } catch (e) {
                 showError(e);
             }
@@ -197,12 +224,16 @@ async function submitTransaction() {
             displayOnlyId("send-transaction");
 
             try {
-                const { hash } = await sendTransaction({
+                const result = await sendTransaction({
                     to: GlobalPretixEthState.paymentDetails['recipient_address'],
                     value: GlobalPretixEthState.paymentDetails['amount']
                 });
 
-                await submitSignature(hash);
+                const valid = validate_txhash(result.hash);
+
+                if (!valid) throw 'Invalid transaction hash';
+
+                await submitSignature(result.hash);
             } catch (e) {
                 showError(e);
             }

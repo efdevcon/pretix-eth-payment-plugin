@@ -1,4 +1,5 @@
-import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync, polygonZkEvm } from "@wagmi/core/chains";
+// import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync, polygonZkEvm } from "@wagmi/core/chains";
+import { arbitrum, arbitrumGoerli, mainnet, goerli, optimism, optimismGoerli, sepolia, zkSync, polygonZkEvm } from "viem/chains";
 
 // Safe is only supported on certain networks there doesn't seem to be any smart way to detect if a network is supported (it doesn't follow https://github.com/ethereum-lists/chains ?), so this has to be manually configured
 // Safe documentation: https://github.com/safe-global/safe-docs/blob/main/learn/safe-core/safe-core-api/available-services.md

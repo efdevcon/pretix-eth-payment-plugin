@@ -26,23 +26,27 @@ def signal_process_response(sender, request, response, **kwargs):
         h = _parse_csp(response['Content-Security-Policy'])
     _merge_csp(h, {
         'style-src': [
+            'https://fonts.googleapis.com',
             "'unsafe-inline'"
         ],
         'img-src': [
-            'https://registry.walletconnect.com',
-            "https://explorer-api.walletconnect.com",
-            "https://*.bridge.walletconnect.org",
+            "blob: data:"
         ],
         'script-src': [
             # unsafe-inline/eval required for webpack bundles (we cannot know names in advance).
             "'unsafe-inline'",
             "'unsafe-eval'"
         ],
+        'font-src': [
+            "https://fonts.gstatic.com"
+        ],
         'frame-src': [
-            'https://verify.walletconnect.com/'
+            'https://verify.walletconnect.org',
+            'https://verify.walletconnect.com'
         ],
         # Chrome correctly errors out without this CSP
         'connect-src': [
+            "https://api.web3modal.com",
             "wss://relay.walletconnect.com",
             "https://zkevm-rpc.com/",
             "https://explorer-api.walletconnect.com",
