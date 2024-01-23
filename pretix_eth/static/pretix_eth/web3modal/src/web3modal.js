@@ -27,7 +27,7 @@ async function init() {
         url: window.location.origin,
         icons: ['https://avatars.githubusercontent.com/u/37784886']
     }
-    const chains = [desiredChain[0].chain, desiredChain[0].chain];
+    const chains = [desiredChain[0].chain];
     const wagmiConfig = defaultWagmiConfig({ chains, projectId: walletConnectProjectId, appName: metadata.name })
 
     GlobalPretixEthState.web3Modal = createWeb3Modal({
