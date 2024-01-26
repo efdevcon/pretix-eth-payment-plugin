@@ -94,7 +94,7 @@ button#uniswap_btn:hover {
   display: block;
 }
 
-w3m-core-button {
+w3m-button {
   display: block;
   margin-bottom: 10px;
 }
