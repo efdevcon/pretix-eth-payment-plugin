@@ -218,7 +218,7 @@ class Command(BaseCommand):
                         # DAI
                         contract = w3.eth.contract(address=token.ADDRESS,
                                                    abi=TOKEN_ABI)
-                        
+
                         # This may warn about mismatched ABI if its a smart contract wallet tx because of intermediary function calls - but it'll still process the Transfer event correctly # noqa: E501
                         transaction_details = (
                             contract.events.Transfer().process_receipt(receipt)[0].args
