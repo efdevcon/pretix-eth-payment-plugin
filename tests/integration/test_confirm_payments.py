@@ -4,7 +4,7 @@ from django.core.management import call_command
 import pytest
 import time
 from django.test import RequestFactory
-from pretix_eth.models import SignedMessage 
+from pretix_eth.models import SignedMessage
 
 WEB3_PROVIDER_URI = os.environ.get("WEB3_PROVIDER_URI")
 # WEB3_PROVIDER_URI = 'https://goerli.infura.io/v3/8733c260b59e445e85ee90bd80d869aa'
@@ -49,8 +49,8 @@ def get_request_order_payment(get_order_and_payment):
 
 
 def make_order_payment(payment_info, provider, get_request_order_payment):
-    order_kwargs = {"total": 0 } 
-    payment_kwargs = {"amount": 0 } 
+    order_kwargs = {"total": 0}
+    payment_kwargs = {"amount": 0}
 
     info_data = {
         "currency_type": payment_info["currency"],
@@ -65,20 +65,22 @@ def make_order_payment(payment_info, provider, get_request_order_payment):
 
     return order, payment
 
+
 TEST_ENOUGH_AMOUNT = [
     {
         "currency": "ETH - Goerli",
-        "amount": 40000000000000, # Required amount in wei
+        "amount": 40000000000000,  # Required amount in wei
         "signature": "0xf0c9df2bfb0c78754342a142cbafe58ff4cca3e0377c60d7596067abcbbd161c3641969f7135b29710408ab0a975d11e3ba0c609da0525a311937a6161db39461c",
         "transaction_hash": '0x0cfd2f6f75bd37bf3286ac957964e1671560963b5abc004fe71fd74cd6cb6e45'
-    }, 
+    },
     {
         "currency": "DAI - Goerli",
-        "amount": 100000000000000000, # 0.1 dai
+        "amount": 100000000000000000,  # 0.1 dai
         "signature": "0x3345154d1069fe35e0396366ef9d6960974d9351b3cd46b1c31420ba6549bea0092395380e9140ec7d158343b08a93b3dd6c41130b10c65a3d420cca0cfc5ccd1c",
         "transaction_hash": '0x196aaf0114721e1e94d661c903b2a7b957d25c936bf559d0eeca23d99914e3c7'
     },
 ]
+
 
 @pytest.mark.django_db(
     transaction=True,
@@ -210,6 +212,7 @@ TEST_WRONG_CURRENCY = [
         "amount": int("1000", base=10)
     },  # Has enough amount, but in DAI
 ]
+
 
 @pytest.mark.django_db(
     transaction=True,
