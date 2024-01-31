@@ -218,7 +218,8 @@ class Command(BaseCommand):
                         # DAI
                         contract = w3.eth.contract(address=token.ADDRESS,
                                                    abi=TOKEN_ABI)
-
+                        
+                        logging.info(token.ADDRESS)
                         # This may warn about mismatched ABI if its a smart contract wallet tx because of intermediary function calls - but it'll still process the Transfer event correctly # noqa: E501
                         transaction_details = (
                             contract.events.Transfer().process_receipt(receipt)[0].args
@@ -258,6 +259,9 @@ class Command(BaseCommand):
                                 f"expected recipient={signed_message.recipient_address.lower()}"
                             )
                         continue
+
+                    logging.info(payment_amount)
+                    logging.info(expected_amount)
 
                     if payment_amount > 0:
                         logger.info(
