@@ -51,14 +51,13 @@ For Devconnect IST an effort was made to improve the plugin in a variety of ways
 
 ### Recently added features
 
-* L2s added!
 * A payment confirmation management command was added that confirms pending
   payments based on the address assigned to them during checkout.  See the
   `confirm_payments` section below for details.
 * "Single receiver" mode (accept all payments using just one wallet)
 * WalletConnect support
 * Automatic ETH rate fetching
-* More networks added
+* More L2s added
 * Updated user-facing UI and error messaging
 * ERC1271 support (note: smart contract payments not yet fully supported - the confirm payment cannot handle sc wallet payments, see warning above for details)
 
@@ -98,9 +97,8 @@ For Devconnect IST an effort was made to improve the plugin in a variety of ways
     }
     ```
     i.e. `KEY` = `<Network ID>_RPC_URL` and `VALUE` = RPC URL. Network IDs can be found [in tokens.py](pretix_eth/network/tokens.py)
-  - "WALLETCONNECT_PROJECT_ID" - WalletConnect requires a project id - you can generate one on https://walletconnect.com/
-4. Under Event, go to Settings -> Upload Wallet Addresses - upload some ethereum addresses 
-
+  - "Payment receiver address" - Ethereum address at which all payments will be sent to
+  - "WalletConnect project ID" - WalletConnect requires a project id - you can generate one on https://walletconnect.com/
 
 You can now play with the event by clicking on the "Go to Shop" button at the top left (next to the event name)
 
