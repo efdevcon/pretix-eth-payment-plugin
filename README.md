@@ -6,6 +6,9 @@
 to use it you must really understand the code !!  PRs to make it production
 ready and more eyes on this code are most welcome!**
 
+**!! Smart contract wallet payments are not supported (except Safe) and users will be told so (and be unable to pay) when they connect with one.
+A rare edge case exists with counterfactual wallets that will prevent the plugin from detecting if the connected wallet is a smart contract - if a user manages to pay this way, their payment will not confirm automatically (note: an organizer can manually confirm payments, so it's not the end of the world).**
+
 ## What is this
 
 This is a plugin for [pretix](https://github.com/pretix/pretix). This plugin
@@ -44,16 +47,20 @@ issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 For DEVcon6 the plugin was extended with some more features like [Layer2 support by Rahul](https://github.com/rahul-kothari). Layer2 will play a significant [role in Ethereum](https://ethereum-magicians.org/t/a-rollup-centric-ethereum-roadmap/4698). Unfortunately DEVcon6 was delayed due to covid - but we where able to use and this way test via the [LisCon](https://liscon.org) ticket sale. As far as we know this was the first event ever offering a Layer2 payment option.
 In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/) / [Checkout](https://github.com/Web3Modal/web3modal-checkout) that we depend on was improved.
 
+For Devconnect IST an effort was made to improve the plugin in a variety of ways: WalletConnect support, single receiver mode (accept payments using just one wallet), more networks, automatic ETH rate fetching, improved UI and messaging, and smart contract wallet support. All of these features made it into this version of the plugin, except for smart contract wallet support - issues processing transactions stemming from sc wallets meant that we ultimately had to turn away sc wallet payments altogether. Solutions are being worked on and may be published in the future.
+
 ### Recently added features
 
-* L2s added! 
-* A panel was added in the web admin interface to upload a list of addresses to
-  be associated with each ticket order.
-* During the checkout process, an address is chosen for each order from the
-  list of remaining addresses created by the address upload process.
+* L2s added!
 * A payment confirmation management command was added that confirms pending
   payments based on the address assigned to them during checkout.  See the
   `confirm_payments` section below for details.
+* "Single receiver" mode (accept all payments using just one wallet)
+* WalletConnect support
+* Automatic ETH rate fetching
+* More networks added
+* Updated user-facing UI and error messaging
+* ERC1271 support (note: smart contract payments not yet fully supported - the confirm payment cannot handle sc wallet payments, see warning above for details)
 
 ## Development setup
 
@@ -68,6 +75,7 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
 1. Enter "Admin mode" by clicking the "Admin mode" text in the upper-right
    corner of the admin interface to create a test organization and event.
 1. Follow instructions in [Event Setup Instructions](#event-setup-instructions)
+1. If you need to update web3modal/walletconnect related code, this happens in [the web3modal folder](pretix_eth/web3modal/README.md) - check the README there.
 
 ## Event Setup Instructions
 1. Under the event, go to Settings -> Plugins -> Payment Providers -> click on Enable under "Pretix Ethereum Payment Provider" 
@@ -78,6 +86,8 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
     {"ETH_RATE": 4000, "DAI_RATE": 1}
     ```
     i.e. `KEY` = `<CRYPTO_SMBOL>_RATE` and `VALUE` = value of 1 unit in your fiat currency e.g. USD, EUR etc. For USD, above example says 1 ETH = 4000$. If EUR was chosen, then this says 1 ETH = 4000EUR.
+
+    Note that the ETH rate will automatically reflect the current market price when your fiat currency is set to USD or EUR - the ETH rate you define here is a fallback in the unlikely scenario that the plugin price feeds are down.
   - Select the networks you want under the "Networks" option - Choose from Ethereum Mainnet, Optimism, Arbitrum and their testnets.
   - "NETWORK_RPC_URLS" - This is a JSON e.g.
     ```
@@ -88,6 +98,7 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
     }
     ```
     i.e. `KEY` = `<Network ID>_RPC_URL` and `VALUE` = RPC URL. Network IDs can be found [in tokens.py](pretix_eth/network/tokens.py)
+  - "WALLETCONNECT_PROJECT_ID" - WalletConnect requires a project id - you can generate one on https://walletconnect.com/
 4. Under Event, go to Settings -> Upload Wallet Addresses - upload some ethereum addresses 
 
 
