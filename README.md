@@ -1,13 +1,10 @@
 # Pretix Ethereum Payment Provider
 
-## **Warning**
+## **Important disclaimers**
 
-**!! This plugin is not ready for 3rd party production use *yet*.  If you want
-to use it you must really understand the code !!  PRs to make it production
-ready and more eyes on this code are most welcome!**
+**!! Smart contract wallet payments are NOT supported (except Safe) and users will be told so (and be unable to pay) when they connect with one. A rare edge case exists with counterfactual wallets that will prevent the plugin from detecting if the connected wallet is a smart contract - if a user manages to pay this way, their payment will not confirm automatically (note: an organizer can still manually confirm payments in this case)**
 
-**!! Smart contract wallet payments are not supported (except Safe) and users will be told so (and be unable to pay) when they connect with one.
-A rare edge case exists with counterfactual wallets that will prevent the plugin from detecting if the connected wallet is a smart contract - if a user manages to pay this way, their payment will not confirm automatically (note: an organizer can manually confirm payments, so it's not the end of the world).**
+**!! This plugin is no longer actively being worked on. PRs to finish smart contract wallet support are welcome (further details below). As of early 2024, The Devcon team is working with third party payment providers to improve payment UX and add smart contract wallet support, and may publish this work under a different plugin some time in the future.**
 
 ## What is this
 
@@ -47,7 +44,9 @@ issue](https://github.com/esPass/pretix-eth-payment-plugin/pull/49)
 For DEVcon6 the plugin was extended with some more features like [Layer2 support by Rahul](https://github.com/rahul-kothari). Layer2 will play a significant [role in Ethereum](https://ethereum-magicians.org/t/a-rollup-centric-ethereum-roadmap/4698). Unfortunately DEVcon6 was delayed due to covid - but we where able to use and this way test via the [LisCon](https://liscon.org) ticket sale. As far as we know this was the first event ever offering a Layer2 payment option.
 In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/) / [Checkout](https://github.com/Web3Modal/web3modal-checkout) that we depend on was improved.
 
-For Devconnect IST an effort was made to improve the plugin in a variety of ways: WalletConnect support, single receiver mode (accept payments using just one wallet), more networks, automatic ETH rate fetching, improved UI and messaging, and smart contract wallet support. All of these features made it into this version of the plugin, except for smart contract wallet support - issues processing transactions stemming from sc wallets meant that we ultimately had to turn away sc wallet payments altogether. Solutions are being worked on and may be published in the future.
+For Devconnect IST an effort was made to improve the plugin in a variety of ways: WalletConnect support, single receiver mode (accept payments using just one wallet), more networks, automatic ETH rate fetching, improved UI and messaging, and smart contract wallet support. All of these features made it into this version of the plugin, except for smart contract wallet support - issues processing transactions stemming from sc wallets meant that we ultimately had to turn away sc wallet payments altogether.
+
+If you are a dev and want to "finish" the plugin by adding smart contract wallet support, the main thing missing is the ability to verify the sender+receiver addresses and the amount sent given a tx hash stemming from a smart contract wallet. Smart contract transaction receipts aren't easy to process because the "to" and "value" field are not useful - to get the actual receiver wallet and the amount sent, more complex processing is needed (presumably by looking at the transaction logs - but it has to be generic, because each sc wallet has different internals). ERC1271 support is already added, so it really is just about building this "verifier".  
 
 ### Recently added features
 
