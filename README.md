@@ -85,7 +85,7 @@ If you are a dev and want to "finish" the plugin by adding smart contract wallet
     ```
     i.e. `KEY` = `<CRYPTO_SMBOL>_RATE` and `VALUE` = value of 1 unit in your fiat currency e.g. USD, EUR etc. For USD, above example says 1 ETH = 4000$. If EUR was chosen, then this says 1 ETH = 4000EUR.
 
-    Note that the ETH rate will automatically reflect the current market price when your fiat currency is set to USD or EUR - the ETH rate you define here is a fallback in the unlikely scenario that the plugin price feeds are down.
+    Note that the Ethereum rate will automatically reflect the current market price (regardless of which ETH_RATE you put in the config) - the ETH_RATE you define here is a fallback in the unlikely scenario that the plugin price feeds are down. The ETH_RATE will ONLY automatically reflect the current market price when Event Currency is set to either USD or EUR. If you set your event currency to ANYTHING ELSE the ETH rate will not automatically reflect its market price - it must then be manually input & updated regularly.
   - Select the networks you want under the "Networks" option - Choose from Ethereum Mainnet, Optimism, Arbitrum and their testnets.
   - "NETWORK_RPC_URLS" - This is a JSON e.g.
     ```
