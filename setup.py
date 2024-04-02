@@ -22,7 +22,7 @@ cmdclass = {
 
 extras_require = {
     'test': [
-        'pytest>=5.1,<7',
+        'pytest>=5.1,<9',
         'pytest-django>=3.5,<4',
     ],
     'lint': [
