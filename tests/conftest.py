@@ -8,12 +8,11 @@ import pretix
 from pretix.base.models import (
     Event,
     Organizer,
-)
-from pretix.base.models import (
     Order,
     OrderPayment,
     User,
     Team,
+    SalesChannel,
 )
 import pytest
 
@@ -100,6 +99,12 @@ def get_organizer_scope(organizer):
 def get_order_and_payment(django_db_reset_sequences, event, get_organizer_scope):
     def _get_order_and_payment(order_kwargs=None, payment_kwargs=None, info_data=None):
         with get_organizer_scope():
+            # Create sales channel
+            sales_channel, _ = SalesChannel.objects.get_or_create(
+                identifier='web',
+                defaults={'name': 'Web Shop', 'method': 'web'}
+            )
+            
             # Create order
             final_order_kwargs = {
                 'event': event,
@@ -108,6 +113,7 @@ def get_order_and_payment(django_db_reset_sequences, event, get_organizer_scope)
                 'datetime': timezone.now(),
                 'total': decimal.Decimal('100.00'),
                 'status': Order.STATUS_PENDING,
+                'sales_channel': sales_channel,
             }
             if order_kwargs is not None:
                 final_order_kwargs.update(order_kwargs)

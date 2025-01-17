@@ -16,10 +16,11 @@ def test_provider_properties(provider):
     assert provider.public_name == "Daimo Pay"
 
 @pytest.mark.django_db
-def test_provider_settings_form_fields(provider):
-    form_fields = provider.settings_form_fields
-    assert "DAIMO_API_KEY" in form_fields
-    assert "DAIMO_WEBHOOK_SECRET" in form_fields
+def test_provider_settings_form_fields(provider, get_organizer_scope):
+    with get_organizer_scope():
+        form_fields = provider.settings_form_fields
+        assert "DAIMO_API_KEY" in form_fields
+        assert "DAIMO_WEBHOOK_SECRET" in form_fields
 
 @pytest.mark.django_db
 def test_provider_is_allowed(event, provider):
@@ -39,22 +40,29 @@ def test_provider_is_allowed(event, provider):
     assert provider.is_allowed(request)
 
 @pytest.mark.django_db
-def test_execute_payment_success(provider, get_order_and_payment):
-    order, payment = get_order_and_payment()
-    
-    mock_response = MagicMock()
-    mock_response.json.return_value = {
-        "id": "test_payment_id",
-        "url": "https://pay.daimo.com/i/test_payment_id"
-    }
-    
-    with patch('requests.post', return_value=mock_response) as mock_post:
-        factory = RequestFactory()
-        request = factory.get("/checkout")
-        setattr(request, 'event', provider.event)
+def test_execute_payment_success(provider, get_order_and_payment, get_organizer_scope):
+    with get_organizer_scope():
+        order, payment = get_order_and_payment()
         
-        provider.settings.set("DAIMO_API_KEY", "test_api_key")
-        provider.execute_payment(request, payment)
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = {
+            "id": "test_payment_id",
+            "url": "https://pay.daimo.com/i/test_payment_id"
+        }
+        mock_response.text = json.dumps(mock_response.json.return_value)
+        
+        with patch('requests.post', return_value=mock_response) as mock_post:
+            factory = RequestFactory()
+            request = factory.get("/checkout")
+            setattr(request, 'event', provider.event)
+            
+            provider.settings.set("DAIMO_API_KEY", "test_api_key")
+            provider.execute_payment(request, payment)
+            
+            payment.refresh_from_db()
+            assert payment.info_data["payment_id"] == "test_payment_id"
+            assert payment.info_data["payment_url"] == "https://pay.daimo.com/i/test_payment_id"
         
         # Verify API call
         mock_post.assert_called_once()
@@ -70,19 +78,21 @@ def test_execute_payment_success(provider, get_order_and_payment):
         assert payment.info_data["amount"] == str(payment.amount)
 
 @pytest.mark.django_db
-def test_execute_payment_api_error(provider, get_order_and_payment):
-    order, payment = get_order_and_payment()
-    
-    with patch('requests.post', side_effect=Exception("API Error")):
-        factory = RequestFactory()
-        request = factory.get("/checkout")
-        setattr(request, 'event', provider.event)
+def test_execute_payment_api_error(provider, get_order_and_payment, get_organizer_scope):
+    with get_organizer_scope():
+        order, payment = get_order_and_payment()
         
-        provider.settings.set("DAIMO_API_KEY", "test_api_key")
-        provider.execute_payment(request, payment)
-        
-        # Verify payment failed
-        payment.refresh_from_db()
+        with patch('requests.post', side_effect=Exception("API Error")):
+            factory = RequestFactory()
+            request = factory.get("/checkout")
+            setattr(request, 'event', provider.event)
+            
+            provider.settings.set("DAIMO_API_KEY", "test_api_key")
+            provider.execute_payment(request, payment)
+            
+            # Verify payment failed
+            payment.refresh_from_db()
+            assert payment.state == OrderPayment.PAYMENT_STATE_FAILED
         assert payment.state == OrderPayment.PAYMENT_STATE_FAILED
 
 @pytest.mark.django_db
@@ -121,19 +131,22 @@ def test_webhook_verify_signature():
     assert not verify_webhook_signature(request, webhook_secret)
 
 @pytest.mark.django_db
-def test_webhook_payment_handling(provider, get_order_and_payment):
-    from pretix_eth.views import daimo_webhook
-    
-    order, payment = get_order_and_payment()
-    payment.info_data = {
-        "payment_id": "test_payment_id",
-        "time": int(time.time())
-    }
-    payment.save()
-    
-    # Set webhook secret
-    webhook_secret = "test_webhook_secret"
-    payment.payment_provider.settings.set("DAIMO_WEBHOOK_SECRET", webhook_secret)
+def test_webhook_payment_handling(provider, get_order_and_payment, get_organizer_scope):
+    with get_organizer_scope():
+        from pretix_eth.views import daimo_webhook
+        
+        order, payment = get_order_and_payment(
+            payment_kwargs={"provider": "daimo_pay"}
+        )
+        payment.info_data = {
+            "payment_id": "test_payment_id",
+            "time": int(time.time())
+        }
+        payment.save()
+        
+        # Set webhook secret
+        webhook_secret = "test_webhook_secret"
+        provider.settings.set("DAIMO_WEBHOOK_SECRET", webhook_secret)
     
     # Test payment_completed
     payload = {

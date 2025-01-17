@@ -88,8 +88,8 @@ def add_web3modal_css_and_javascript(sender, request, **kwargs):
 
 @receiver(register_payment_providers, dispatch_uid="payment_eth")
 def register_payment_provider(sender, **kwargs):
-    from .payment import Ethereum
-    return Ethereum
+    from .payment import DaimoPay
+    return DaimoPay
 
 
 @receiver(register_data_exporters, dispatch_uid='single_event_eth_orders')

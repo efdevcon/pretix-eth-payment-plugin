@@ -1,6 +1,12 @@
-{{ form.media }}
-
 {% load bootstrap3 %}
+{% load static %}
+
+<script type="text/javascript" src="{% static 'pretix_eth/daimo_payment_form.js' %}"></script>
+
 <div class="form-horizontal">
     {% bootstrap_form form layout='horizontal' %}
+</div>
+
+<div class="alert alert-info">
+    {% trans "You will be redirected to Daimo Pay to complete your payment securely." %}
 </div>

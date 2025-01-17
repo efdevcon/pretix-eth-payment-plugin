@@ -1,30 +1,6 @@
-from django.urls import path, re_path
+from django.urls import path
 
 from . import views
 
-event_patterns = [
-    re_path(
-        r'^order/(?P<order>[^/]+)/(?P<secret>[A-Za-z0-9]+)/payment/'
-        r'(?P<pk>[0-9]+)/transaction_details/$',
-        # noqa
-        views.PaymentTransactionDetailsView.as_view(
-            {'get': 'retrieve', 'post': 'submit_signed_transaction'}
-        ),
-        name='event.order.transaction_details'
-    ),
-    re_path(
-        r'^order/(?P<order>[^/]+)/(?P<secret>[A-Za-z0-9]+)/payment/'
-        r'(?P<pk>[0-9]+)/validate_signature/$',
-        # noqa
-        views.PaymentTransactionDetailsView.as_view(
-            {'get': 'validate_signature'}
-        ),
-        name='event.order.validate_signature'
-    ),
-    re_path(
-        r'^order/(?P<order>[^/]+)/(?P<secret>[A-Za-z0-9]+)/status/$',
-        views.OrderStatusView.as_view({'get': 'retrieve'}),
-        name='event.order.payment_status'
-    ),
-    path('erc20_abi', views.ERC20ABIView.as_view(), name='erc2O_abi'),
-]
+event_patterns = []
+urlpatterns = views.webhook_patterns

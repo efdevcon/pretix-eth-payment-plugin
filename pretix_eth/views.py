@@ -1,11 +1,14 @@
 import json
+import hmac
+import hashlib
+import logging
 
-from web3 import Web3
-from eth_account.messages import defunct_hash_message
-from web3.providers.auto import load_provider_from_uri
-
-from django.http import HttpResponseBadRequest
+from django.http import HttpResponse, HttpResponseBadRequest
 from django.shortcuts import get_object_or_404
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.urls import path
+from django_scopes import scope
 
 from pretix.base.models import Order, OrderPayment
 
@@ -14,126 +17,111 @@ from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 from rest_framework import permissions, mixins
 
-from pretix_eth import serializers
-from pretix_eth.models import SignedMessage
-from pretix_eth.utils import get_rpc_url_for_network
-from pretix_eth.network import tokens
+logger = logging.getLogger(__name__)
 
-# Magic value in accordance to EIP1271 specification
-magic_value = '0x1626ba7e'
-# ABI for EIP1271 isValidSignature function
-eip1271abi = [{"inputs": [{"name": "_hash", "type": "bytes32"}, {"name": "_signature", "type": "bytes"}], "name": "isValidSignature", "outputs": [  # noqa: E501
-    {"name": "magicValue", "type": "bytes4"}], "stateMutability": "view", "type": "function"}]
+def verify_webhook_signature(request, secret):
+    """Verify Daimo Pay webhook signature"""
+    signature = request.headers.get('Authorization')
+    if not signature:
+        return False
+        
+    # Remove 'Bearer ' prefix if present
+    if signature.startswith('Bearer '):
+        signature = signature[7:]
+        
+    # Calculate expected signature
+    expected = hmac.new(
+        secret.encode(),
+        request.body,
+        hashlib.sha256
+    ).hexdigest()
+    
+    return hmac.compare_digest(signature, expected)
 
+@csrf_exempt
+@require_POST
+def daimo_webhook(request, *args, **kwargs):
+    """Handle Daimo Pay webhook events"""
+    try:
+        # Parse webhook payload
+        payload = json.loads(request.body)
+        event_type = payload.get('type')
+        payment_id = payload.get('paymentId')
+        
+        if not event_type or not payment_id:
+            return HttpResponseBadRequest("Missing event type or payment ID")
+            
+        # Find payment and its organizer
+        from pretix.base.models import Organizer
+        from django_scopes import scope, get_scope
+        
+        # Get all organizers since we can't scope the initial query
+        organizers = Organizer.objects.all()
+        payment = None
+        
+        # Try each organizer scope until we find the payment
+        for organizer in organizers:
+            with scope(organizer=organizer):
+                try:
+                    # Use proper JSON field lookup
+                    payment = OrderPayment.objects.select_related(
+                        'order__event__organizer'
+                    ).filter(
+                        info__icontains=payment_id
+                    ).get()
+                    break
+                except OrderPayment.DoesNotExist:
+                    continue
+                    
+        if not payment:
+            return HttpResponseBadRequest("Payment not found")
+            
+        # Continue with the correct scope
+        with scope(organizer=payment.order.event.organizer):
+            # Verify webhook signature within the correct scope
+            if not verify_webhook_signature(request, payment.payment_provider.settings.DAIMO_WEBHOOK_SECRET):
+                return HttpResponseBadRequest("Invalid signature")
+                
+            # Handle payment completion
+            if event_type == 'payment_completed':
+                payment.confirm()
+            elif event_type == 'payment_bounced':
+                payment.fail()
+                
+            return HttpResponse(status=200)
+            payment = OrderPayment.objects.select_related(
+                'order__event__organizer'
+            ).get(id=payment_id)
+            
+        # Use correct organizer scope for operations
+        with scope(organizer=payment.order.event.organizer):
+            # Verify webhook signature
+            if not verify_webhook_signature(request, payment.payment_provider.settings.DAIMO_WEBHOOK_SECRET):
+                return HttpResponseBadRequest("Invalid signature")
+                
+            # Handle payment completion
+            if event_type == 'payment_completed':
+                payment.confirm()
+            elif event_type == 'payment_bounced':
+                payment.fail()
+                
+            return HttpResponse(status=200)
+            
+    except (json.JSONDecodeError, KeyError) as e:
+        return HttpResponseBadRequest(f"Invalid webhook payload: {str(e)}")
+    except Exception as e:
+        logger.exception("Error processing webhook")
+        return HttpResponseBadRequest(f"Error processing webhook: {str(e)}")
 
-def is_smart_contract(address, w3):
-    bytecode = w3.eth.get_code(address)
-    return bytecode != b''
+# URL configuration
+webhook_patterns = [
+    path('webhook/', daimo_webhook, name='webhook'),
+]
 
-
-def reconstruct_message_hash(sender=str, receiver=str, order=str, chain_id=int):
-    return defunct_hash_message(text=sender + receiver + order + str(chain_id))
-
-
-def validate_eip1271_signature(sender, signature, hash, w3):
-    contract = w3.eth.contract(address=sender, abi=eip1271abi)
-    response = contract.functions.isValidSignature(hash, signature).call()
-    response_parsed = Web3.to_hex(response)
-
-    if response_parsed != magic_value:
-        raise 'Signature not verified'
-
-    return True
-
-
-class PaymentTransactionDetailsView(GenericViewSet):
-
-    queryset = OrderPayment.objects.none()
-    serializer_class = serializers.TransactionDetailsSerializer
-    permission_classes = [permissions.AllowAny]
-    permission = 'can_view_orders'
-    write_permission = 'can_view_orders'
-
-    def get_queryset(self):
-        order = get_object_or_404(Order, code=self.kwargs['order'], event=self.request.event)
-        return order.payments.all()
-
-    def retrieve(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance)
-
-        try:
-            sender_address = request.query_params['sender_address'].lower()
-        except (KeyError, AttributeError):
-            return HttpResponseBadRequest("Please supply sender_address GET.")
-
-        has_other_unpaid_orders = SignedMessage.objects.filter(
-            invalid=False,
-            sender_address=sender_address,
-            order_payment__state__in=(
-                OrderPayment.PAYMENT_STATE_CREATED,
-                OrderPayment.PAYMENT_STATE_PENDING
-            )
-        ).exists()
-
-        response_data = serializer.data
-        response_data["has_other_unpaid_orders"] = has_other_unpaid_orders
-
-        return Response(response_data)
-
-    def submit_signed_transaction(self, request, *args, **kwargs):
-        print("TODO: submit_signed_transaction: replace")
-        return Response(status=201)
-
-    # Validates a signature against the order details adhering to EIP1271
-    def validate_signature(self, request, *args, **kwargs):
-        order_payment: OrderPayment = self.get_object()
-        serializer = self.get_serializer(order_payment)
-
-        signature = self.request.query_params.get('signature')
-        sender_address = self.request.query_params.get('sender')
-
-        typed_data = serializer.data.get('message')
-        typed_data['message']['sender_address'] = sender_address
-
-        w3 = Web3(
-            load_provider_from_uri(
-                get_rpc_url_for_network(
-                    order_payment.payment_provider,
-                    serializer.data.get('network_identifier')
-                )
-            )
-        )
-
-        message = encode_structured_data(text=json.dumps(typed_data))
-
-        joined = b"\x19" + message.version + message.header + message.body
-
-        message_hash = Web3.keccak(joined).hex()
-
-        # This will raise an exception if validation fails
-        validate_eip1271_signature(sender_address, Web3.to_bytes(
-            hexstr=signature), message_hash, w3)
-
-        return Response(status=200)
-
-
-class OrderStatusView(mixins.RetrieveModelMixin, GenericViewSet):
-
-    queryset = Order.objects.none()
-    serializer_class = serializers.PaymentStatusSerializer
-    permission_classes = [permissions.AllowAny]
-    permission = 'can_view_orders'
-    write_permission = 'can_view_orders'
-    lookup_field = 'secret'
-
-    def get_object(self):
-        return get_object_or_404(Order, code=self.kwargs['order'], event=self.request.event)
+# URL configuration
+webhook_patterns = [
+    path('webhook/', daimo_webhook, name='webhook'),
+]
 
 
-class ERC20ABIView(APIView):
-
-    permission_classes = [permissions.AllowAny]
-
-    def get(self, request, *args, **kwargs):
-        return Response(tokens.TOKEN_ABI)
+# No views needed beyond webhook handler

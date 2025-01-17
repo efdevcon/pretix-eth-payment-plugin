@@ -2,83 +2,38 @@
 {% load static %}
 {% load eventurl %}
 
-<br/><br/>
-<link rel="stylesheet" type="text/css" href="{% static 'pretix_eth/eth_plugin.css' %}" />
-
-{% if payment_is_valid %}
-<a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
-
-<a id="pretix-order-detail-url"
-   data-order-detail-url="{% eventurl event 'plugins:pretix_eth:event.order.payment_status' organizer=payment.order.event.organizer.slug event=payment.order.event.slug order=payment.order.code secret=payment.order.secret %}"></a>
-<a id="pretix-data-chain-info" data-chain-id="{{ chain_id }}"
-   data-network-name="{{ network_name }}"></a>
-
-{% if submitted_transation_hash %}
-<script>
-  // Fetch build manifest on page load (cache: no-store is to ensure the manifest is always up to date - the bundles referenced in the manifest will still be cached as normal)
-  fetch("/static/pretix_eth/web3modal-dist/manifest.json", { cache: "no-store" })
-      .then(resp => resp.json())
-      .then(manifest => {
-          const web3modalModule = document.createElement('script');
-
-          web3modalModule.setAttribute('src', manifest['periodicCheck.js']);
-          web3modalModule.setAttribute('type', 'text/javascript');
-
-          document.body.appendChild(web3modalModule);
-      })
-</script>
-
-<div>
-  <p>A payment for this order has already been submitted in transaction 
-    <strong>
-        {% if safe_app_transaction_url %}
-          <a href="{{ safe_app_transaction_url }}">{{ safe_app_transaction_url }}</a>
+<div class="payment-pending">
+    {% if payment_is_valid %}
+        {% if payment.info_data.payment_url %}
+            <div class="alert alert-info">
+                <p>{% trans "Please complete your payment using the button below:" %}</p>
+                <p class="text-center">
+                    <a href="{{ payment.info_data.payment_url }}" class="btn btn-primary btn-lg" target="_blank">
+                        {% trans "Pay Now with Daimo Pay" %}
+                    </a>
+                </p>
+            </div>
+            <p class="text-muted">
+                {% blocktrans trimmed %}
+                After completing your payment, you will receive an email confirmation.
+                The page will automatically update once your payment is confirmed.
+                {% endblocktrans %}
+            </p>
         {% else %}
-          <span id="pretix-eth-submitted-transaction-hash">
-            {{ submitted_transation_hash }} 
-          </span>
-        {% endif %}.
-    </strong>
-  </p>
+            <div class="alert alert-warning">
+                {% trans "Payment link not available. Please try again or contact support." %}
+            </div>
+        {% endif %}
+    {% else %}
+        <p>
+            <strong>
+                {% blocktrans trimmed %}
+                Your order is not yet complete. You may have tried to change the payment
+                method but cancelled the process midway. Please choose a payment method
+                by clicking the "Re-try payment or choose another payment method" button
+                below.
+                {% endblocktrans %}
+            </strong>
+        </p>
+    {% endif %}
 </div>
-{% endif %}
-
-{% if order_accepting_payments %}
-<div id="pretix-eth-payment-summary">Please pay {{amount_manual}} on
-  {{network_name}} by connecting a wallet below.
-</div>
-{% include "pretix_eth/web3modal.html" with payment=payment event=event walletconnect_project_id=walletconnect_project_id %}
-
-{% endif %}
-<p>
-  {% blocktrans trimmed %}
-  Do not attempt to speed up your transaction! This can prevent our system from automatically confirming payments, causing further delays. 
-  Once you send your payment, our system will automatically check for
-  confirmation. Please allow up to several hours. Once confirmed, you will
-  get an email notification.
-  {% endblocktrans %}
-</p>
-
-<p>
-    {% blocktrans trimmed %}
-    If you want to improve this process, submit a PR to this github repository:
-    {% endblocktrans %}
-    <a href="https://github.com/esPass/pretix-eth-payment-plugin">
-      https://github.com/esPass/pretix-eth-payment-plugin
-    </a>
-  </p>
-
-{% else %}
-
-  <p>
-    <strong>
-      {% blocktrans trimmed %}
-      Your order is not yet complete.  You may have tried to change the payment
-      method but cancelled the process midway.  Please choose a payment method
-      by clicking the "Re-try payment or choose another payment method" button
-      below.
-      {% endblocktrans %}
-    </strong>
-  </p>
-
-{% endif %}
