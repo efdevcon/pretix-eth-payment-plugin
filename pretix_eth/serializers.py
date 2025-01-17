@@ -5,7 +5,6 @@ from pretix.base.models import Order
 
 from pretix_eth.models import SignedMessage
 from pretix_eth.network.tokens import IToken, all_token_and_network_ids_to_tokens
-from pretix_eth.utils import get_message_to_sign
 
 
 class TransactionDetailsSerializer(Serializer):
@@ -41,13 +40,7 @@ class TransactionDetailsSerializer(Serializer):
             "erc20_contract_address": token.ADDRESS,
             "recipient_address": recipient_address,
             "amount": str(instance.info_data.get('amount')),
-            "message": get_message_to_sign(
-                sender_address=self.context.get('request').query_params.get(
-                    'sender_address'),
-                receiver_address=recipient_address,
-                chain_id=token.CHAIN_ID,
-                order_code=instance.order.code
-            ),
+            "message": "TODO: replace",
             "is_signature_submitted": another_signature_submitted,
             "has_other_unpaid_orders": None,
         }

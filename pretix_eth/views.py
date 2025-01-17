@@ -1,7 +1,7 @@
 import json
 
 from web3 import Web3
-from eth_account.messages import encode_structured_data, defunct_hash_message
+from eth_account.messages import defunct_hash_message
 from web3.providers.auto import load_provider_from_uri
 
 from django.http import HttpResponseBadRequest
@@ -82,59 +82,7 @@ class PaymentTransactionDetailsView(GenericViewSet):
         return Response(response_data)
 
     def submit_signed_transaction(self, request, *args, **kwargs):
-        order_payment: OrderPayment = self.get_object()
-        serializer = self.get_serializer(order_payment)
-
-        sender_address = request.data.get('selectedAccount')
-        signed_message = request.data.get('signedMessage')
-
-        typed_data = serializer.data.get('message')
-        typed_data['message']['sender_address'] = sender_address
-
-        w3 = Web3(
-            load_provider_from_uri(
-                get_rpc_url_for_network(
-                    order_payment.payment_provider,
-                    serializer.data.get('network_identifier')
-                )
-            )
-        )
-
-        encoded_data = encode_structured_data(text=json.dumps(typed_data))
-
-        is_smart_contract_wallet = is_smart_contract(sender_address, w3)
-
-        if is_smart_contract_wallet:
-            joined = b"\x19" + encoded_data.version + encoded_data.header + encoded_data.body
-
-            message_hash = Web3.keccak(joined).hex()
-
-            validate_eip1271_signature(sender_address, Web3.to_bytes(
-                hexstr=signed_message), message_hash, w3)
-        else:
-            recovered_address = w3.eth.account.recover_message(
-                encoded_data, signature=signed_message)
-
-            if recovered_address.lower() != sender_address.lower():
-                raise
-
-        transaction_hash = request.data.get('transactionHash').lower()
-        safe_app_transaction_url = None
-
-        if request.data.get('safeAppTransactionUrl'):
-            safe_app_transaction_url = request.data.get('safeAppTransactionUrl')
-
-        message_obj = SignedMessage(
-            signature=signed_message,
-            raw_message=json.dumps(typed_data),
-            sender_address=sender_address,
-            recipient_address=serializer.data.get('recipient_address'),
-            chain_id=serializer.data.get('chain_id'),
-            order_payment=order_payment,
-            transaction_hash=transaction_hash,
-            safe_app_transaction_url=safe_app_transaction_url,
-        )
-        message_obj.save()
+        print("TODO: submit_signed_transaction: replace")
         return Response(status=201)
 
     # Validates a signature against the order details adhering to EIP1271
