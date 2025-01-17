@@ -17,7 +17,7 @@ from pretix.base.models import (
 )
 import pytest
 
-from pretix_eth.payment import Ethereum
+from pretix_eth.payment import DaimoPay
 from rest_framework.test import APIClient
 
 
@@ -76,7 +76,7 @@ def create_admin_client():
 
 @pytest.fixture
 def provider(event):
-    provider = Ethereum(event)
+    provider = DaimoPay(event)
     return provider
 
 
@@ -117,7 +117,7 @@ def get_order_and_payment(django_db_reset_sequences, event, get_organizer_scope)
             final_payment_kwargs = {
                 'amount': '100.00',
                 'state': OrderPayment.PAYMENT_STATE_PENDING,
-                'provider': 'ethereum'
+                'provider': 'daimo_pay'
             }
             if payment_kwargs is not None:
                 final_payment_kwargs.update(payment_kwargs)
