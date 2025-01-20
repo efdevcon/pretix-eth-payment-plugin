@@ -28,14 +28,14 @@ def verify_webhook_signature(request, secret):
     # Remove 'Bearer ' prefix if present
     if signature.startswith('Bearer '):
         signature = signature[7:]
-        
+
     # Calculate expected signature
     expected = hmac.new(
         secret.encode(),
         request.body,
         hashlib.sha256
     ).hexdigest()
-    
+
     return hmac.compare_digest(signature, expected)
 
 @csrf_exempt
@@ -43,22 +43,25 @@ def verify_webhook_signature(request, secret):
 def daimo_webhook(request, *args, **kwargs):
     """Handle Daimo Pay webhook events"""
     try:
+        print(f"WEBHOOK RECEIVED: {request.body}")
+
         # Parse webhook payload
         payload = json.loads(request.body)
         event_type = payload.get('type')
         payment_id = payload.get('paymentId')
-        
+
+
         if not event_type or not payment_id:
             return HttpResponseBadRequest("Missing event type or payment ID")
-            
+
         # Find payment and its organizer
         from pretix.base.models import Organizer
         from django_scopes import scope, get_scope
-        
+
         # Get all organizers since we can't scope the initial query
         organizers = Organizer.objects.all()
         payment = None
-        
+
         # Try each organizer scope until we find the payment
         for organizer in organizers:
             with scope(organizer=organizer):
@@ -72,31 +75,16 @@ def daimo_webhook(request, *args, **kwargs):
                     break
                 except OrderPayment.DoesNotExist:
                     continue
-                    
+
+        print(f"WEBHOOK: found payment ${payment.id}")
+
         if not payment:
             return HttpResponseBadRequest("Payment not found")
-            
+
         # Continue with the correct scope
         with scope(organizer=payment.order.event.organizer):
             # Verify webhook signature within the correct scope
-            if not verify_webhook_signature(request, payment.payment_provider.settings.DAIMO_WEBHOOK_SECRET):
-                return HttpResponseBadRequest("Invalid signature")
-                
-            # Handle payment completion
-            if event_type == 'payment_completed':
-                payment.confirm()
-            elif event_type == 'payment_bounced':
-                payment.fail()
-                
-            return HttpResponse(status=200)
-            payment = OrderPayment.objects.select_related(
-                'order__event__organizer'
-            ).get(id=payment_id)
-            
-        # Use correct organizer scope for operations
-        with scope(organizer=payment.order.event.organizer):
-            # Verify webhook signature
-            if not verify_webhook_signature(request, payment.payment_provider.settings.DAIMO_WEBHOOK_SECRET):
+            if not verify_webhook_signature(request, payment.payment_provider.settings.DAIMO_PAY_WEBHOOK_SECRET):
                 return HttpResponseBadRequest("Invalid signature")
                 
             # Handle payment completion
