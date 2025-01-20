@@ -1,31 +1,10 @@
 {% load i18n %}
-
 {% if payment_info %}
     <dl class="dl-horizontal">
         <dt>{% trans "Amount" %}</dt>
         <dd>{{ payment_info.amount }}</dd>
-        <dt>{% trans "Currency type" %}</dt>
-        <dd>{{ payment_info.currency_type }}</dd>
-        <dt>{% trans "Expected Receiving Wallet Address" %}</dt>
-        <dd>{{ wallet_address }}</dd>
-        <dt>{% trans "Transaction Sender Address" %}</dt>
-        {% if transaction_sender_address_link %}
-        <dd><a href="{{ transaction_sender_address_link }}" target="_blank">{{ transaction_sender_address }}</a></dd>
-        {% else %}
-        <dd>{{ transaction_sender_address }}</dd>
-        {% endif %}
-        <dt>{% trans "Transaction Recipient Address" %}</dt>
-        {% if transaction_recipient_address_link %}
-        <dd><a href="{{ transaction_recipient_address_link }}" target="_blank">{{ transaction_recipient_address }}</a></dd>
-        {% else %}
-        <dd>{{ transaction_recipient_address }}</dd>
-        {% endif %}
-        <dt>{% trans "Transaction Hash" %}</dt>
-        {% if transaction_hash_link %}
-        <dd><a href="{{ transaction_hash_link }}" target="_blank">{{ transaction_hash }}</a></dd>
-        {% else %}
-        <dd>{{ transaction_hash }}</dd>
-        {% endif %}
+        <dt><a href="https://3xpl.com/search?q={{ payment_info.source_tx_hash }}" target="_blank">Source Tx</a></dt>
+        <dd><a href="https://3xpl.com/search?q={{ payment_info.dest_tx_hash }}" target="_blank">Dest Tx</a></dd>
     </dl>
     {% if "message" in payment_info %}
         <dl class="dl-horizontal">

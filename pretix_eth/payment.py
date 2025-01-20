@@ -111,6 +111,9 @@ class DaimoPay(BasePaymentProvider):
             logger.error(f"Error in Daimo Pay API request: {str(e)}")
             raise e
 
+        # TODO: this may not be the correct way to track Pretix session info.
+        self.settings.set('payment_id', payment_id)
+
         template = get_template("pretix_eth/checkout_payment_confirm.html")
         return template.render({ "payment_id": payment_id })
 
@@ -144,41 +147,50 @@ class DaimoPay(BasePaymentProvider):
 
         data = response.json()
         if response.status_code != 200 or not data.get("id") or not data.get("url"):
-            logger.error(f"Daimo Pay API error: {response.text}")
             raise Exception(f"Daimo Pay API error: {response.text}")
 
         return data["id"]
 
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
         # TODO: validate status + amount of payment ID for this order
-        print("execute_payment: TODO, add validation")
-        payment.confirm()
-    
-        #
-        #            
-        #    payment.info_data = {
-        #        "payment_id": data["id"],
-        #        "payment_url": data["url"],
-        #        "amount": str(payment.amount),
-        #        "time": int(time.time()),
-        #    }
-        #    payment.save(update_fields=["info"])
-        #
-        #    
-        #except Exception as e:
-        #    logger.error(f"Error in Daimo Pay API request: {str(e)}")
-        #    payment.fail()
+        payment_id = self.settings.get('payment_id')
+        print(f"execute_payment: {payment_id}")
 
-    # def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
-    #     template = get_template("pretix_eth/pending.html")
-    #     ctx = RequestContext(request, {
-    #         "payment_is_valid": True,
-    #         "order": payment.order,
-    #         "payment": payment,
-    #         'event': self.event,
-    #         "payment_url": payment.info_data.get("payment_url", "#"),
-    #     })
-    #     return template.render(ctx)
+        source_tx_hash, dest_tx_hash = self.get_daimo_pay_tx_hash(payment_id)
+        print(f"execute_payment: {payment_id}: tx hashes {source_tx_hash} {dest_tx_hash}")
+        if source_tx_hash != None:
+            payment.confirm()
+            payment.info_data = {
+                "payment_id": payment_id,
+                "source_tx_hash": source_tx_hash,
+                "dest_tx_hash": dest_tx_hash,
+                "amount": str(payment.amount),
+                "time": int(time.time()),
+            }
+            payment.save(update_fields=["info"])
+        else:
+            payment.fail()
+    
+    def get_daimo_pay_tx_hash(self, payment_id: str):
+        response = requests.get(
+            f"https://pay.daimo.com/api/payment/{payment_id}",
+            headers={
+                "Api-Key": self.settings.DAIMO_PAY_API_KEY,
+            },
+        )
+        data = response.json()
+        if response.status_code != 200:
+            raise Exception(f"Daimo Pay API error: {response.text}")
+
+        # TODO: clean up response typing
+        print(repr(data))
+        order = data['order']
+
+        source_tx_hash = order.get('sourceInitiateTxHash')
+        dest_tx_hash = order.get('destFastFinishTxHash')
+        if dest_tx_hash is None:
+            dest_tx_hash = order['destClaimTxHash']
+        return source_tx_hash, dest_tx_hash
 
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")

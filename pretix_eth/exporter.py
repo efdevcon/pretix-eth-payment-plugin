@@ -11,8 +11,6 @@ from pretix.base.models import (
 from web3 import Web3
 
 from pretix_eth.models import SignedMessage
-from pretix_eth.network.tokens import IToken, \
-    all_token_and_network_ids_to_tokens
 
 import pytz
 
@@ -29,14 +27,6 @@ def payment_to_row(payment):
         completion_date = ''
 
     currency_type = payment.info_data.get("currency_type", "")
-    token: IToken = all_token_and_network_ids_to_tokens.get(currency_type, None)
-
-    if token is None:
-        chain_id = currency_type
-        token_address = f"Missing ERC20 contract data for {currency_type}"
-    else:
-        chain_id = token.CHAIN_ID
-        token_address = token.ADDRESS
 
     fiat_amount = payment.amount
     token_amount = payment.info_data.get("amount", "")
@@ -70,8 +60,6 @@ def payment_to_row(payment):
         sender_address,
         recipient_address,
         transaction_hash,
-        chain_id,
-        token_address,
         token_rate,
     ]
 
