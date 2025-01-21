@@ -6,6 +6,9 @@ __pycache__/
 # C extensions
 *.so
 
+# Dev Pretix config
+pretix.cfg
+
 # Distribution / packaging
 .Python
 env/

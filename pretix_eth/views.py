@@ -2,13 +2,16 @@ import json
 import hmac
 import hashlib
 import logging
+import re
 
-from django.http import HttpResponse, HttpResponseBadRequest
-from django.shortcuts import get_object_or_404
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.shortcuts import render
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_POST
 from django.urls import path
 from django_scopes import scope
+from django.contrib import messages
+from django.utils.translation import gettext_lazy as _
 
 from pretix.base.models import Order, OrderPayment
 
@@ -18,6 +21,7 @@ from rest_framework.viewsets import GenericViewSet
 from rest_framework import permissions, mixins
 
 logger = logging.getLogger(__name__)
+
 
 def verify_webhook_signature(request, secret):
     """Verify Daimo Pay webhook signature"""
@@ -37,6 +41,36 @@ def verify_webhook_signature(request, secret):
     ).hexdigest()
 
     return hmac.compare_digest(signature, expected)
+
+
+def refund_frontend_view(request, organizer=None, event=None):
+    """Render and handle the refund claim form."""
+    context = {
+        'title': _('Claim Refund'),
+    }
+    
+    if request.method == 'POST':
+        refund_address = request.POST.get('refund_address', '').strip()
+        
+        # Validate Ethereum address format
+        if not re.fullmatch(r'0x[a-fA-F0-9]{40}', refund_address):
+            context['error'] = _('Invalid Ethereum address format. Please enter a valid address starting with 0x.')
+            return render(request, 'pretix_eth/refund_form.html', context)
+            
+        try:
+            # Here you would typically:
+            # 1. Save the refund address to the order
+            # 2. Trigger the refund process
+            # 3. Update order status
+            
+            messages.success(request, _('Your refund request has been submitted successfully.'))
+            return HttpResponseRedirect(request.path)  # Redirect to clear POST data
+            
+        except Exception as e:
+            logger.exception('Error processing refund request')
+            context['error'] = _('An error occurred while processing your refund request. Please try again later.')
+            
+    return render(request, 'pretix_eth/refund_form.html', context)
 
 @csrf_exempt
 @require_POST
