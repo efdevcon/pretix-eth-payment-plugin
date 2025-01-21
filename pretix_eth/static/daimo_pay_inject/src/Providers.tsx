@@ -7,8 +7,7 @@ import { WagmiProvider, createConfig } from 'wagmi'
 
 const config = createConfig(
   getDefaultConfig({
-    appName: 'Daimo Pay Demo',
-    ssr: true, // If your project uses server side rendering (SSR)
+    appName: 'Daimo Pay',
   }),
 )
 

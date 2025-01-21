@@ -23,6 +23,7 @@ def checkout_add_csp(sender, request, response, **kwargs):
         ],
         'img-src': [
             "blob: data:",
+            "https://daimo.com",
             "https://*.daimo.com",
             "https://assets.coingecko.com"
         ],
