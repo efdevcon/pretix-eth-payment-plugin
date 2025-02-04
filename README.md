@@ -68,12 +68,12 @@ If you are a dev and want to "finish" the plugin by adding smart contract wallet
    directory.
 1. Setup a local database by running `make devmigrate`.
 1. Fire up a local dev server by running `make devserver`.
+1. To build the Daimo Pay checkout, `cd pretix_eth/static/daimo_pay_inject`, then run `npm i && npm run build`.
 1. Visit http://localhost:8000/control/login in a browser windows and enter
    username `admin@localhost` and password `admin` to log in.
 1. Enter "Admin mode" by clicking the "Admin mode" text in the upper-right
    corner of the admin interface to create a test organization and event.
 1. Follow instructions in [Event Setup Instructions](#event-setup-instructions)
-1. If you need to update web3modal/walletconnect related code, this happens in [the web3modal folder](pretix_eth/web3modal/README.md) - check the README there.
 
 ## Event Setup Instructions
 1. Under the event, go to Settings -> Plugins -> Payment Providers -> click on Enable under "Pretix Ethereum Payment Provider" 
