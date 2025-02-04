@@ -50,9 +50,8 @@ jobs:
           python -m pip install --upgrade pip==23.1.2 wheel==0.40.0 setuptools==68.0.0
           pip install -e .[dev] --use-deprecated=legacy-resolver
 
-      # TODO enable again after the protobuf version conflict between pretix and web3.py is resolved
-      #- name: Pip Check
-      #  run: pip check
+      - name: Pip Check
+        run: pip check
 
       - name: ${{ matrix.toxenv }}
         run: tox

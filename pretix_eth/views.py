@@ -43,35 +43,6 @@ def verify_webhook_signature(request, secret):
     return hmac.compare_digest(signature, expected)
 
 
-def refund_frontend_view(request, organizer=None, event=None):
-    """Render and handle the refund claim form."""
-    context = {
-        'title': _('Claim Refund'),
-    }
-    
-    if request.method == 'POST':
-        refund_address = request.POST.get('refund_address', '').strip()
-        
-        # Validate Ethereum address format
-        if not re.fullmatch(r'0x[a-fA-F0-9]{40}', refund_address):
-            context['error'] = _('Invalid Ethereum address format. Please enter a valid address starting with 0x.')
-            return render(request, 'pretix_eth/refund_form.html', context)
-            
-        try:
-            # Here you would typically:
-            # 1. Save the refund address to the order
-            # 2. Trigger the refund process
-            # 3. Update order status
-            
-            messages.success(request, _('Your refund request has been submitted successfully.'))
-            return HttpResponseRedirect(request.path)  # Redirect to clear POST data
-            
-        except Exception as e:
-            logger.exception('Error processing refund request')
-            context['error'] = _('An error occurred while processing your refund request. Please try again later.')
-            
-    return render(request, 'pretix_eth/refund_form.html', context)
-
 @csrf_exempt
 @require_POST
 def daimo_webhook(request, *args, **kwargs):
@@ -110,7 +81,7 @@ def daimo_webhook(request, *args, **kwargs):
                 except OrderPayment.DoesNotExist:
                     continue
 
-        print(f"WEBHOOK: found payment ${payment.id}")
+        print(f"WEBHOOK: found payment {payment.id}")
 
         if not payment:
             return HttpResponseBadRequest("Payment not found")

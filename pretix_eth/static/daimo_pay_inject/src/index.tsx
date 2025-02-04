@@ -29,6 +29,7 @@ function Injector() {
     const placeOrderButton = document.querySelector(
       'button.btn-primary[type="submit"]'
     ) as HTMLButtonElement;
+    console.log(`Enabling place order button`, placeOrderButton);
     placeOrderButton.disabled = false;
     placeOrderButton.onclick = (e) => {
       e.preventDefault(); // Prevent submit

@@ -1,7 +1,6 @@
 from decimal import Decimal
 import logging
 import time
-import json
 from collections import OrderedDict
 import uuid
 import requests
@@ -9,13 +8,15 @@ import requests
 from django import forms
 from django.urls import reverse
 from django.http import HttpRequest
-from django.template import RequestContext
 from django.template.loader import get_template
 from django.utils.translation import gettext_lazy as _
 
 from pretix.base.models import OrderPayment, OrderRefund
-from pretix.base.payment import BasePaymentProvider, PaymentProviderForm
+from pretix.base.payment import BasePaymentProvider, PaymentProviderForm, PaymentException
 from pretix.base.services.mail import mail_send
+from web3 import Web3
+
+from pretix_eth.create_link import create_peanut_link
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ class DaimoPay(BasePaymentProvider):
     # test_mode_message = "Paying in Test Mode"
     payment_form_class = DaimoPaymentForm
 
+    # Admin settings for the plugin.
     @property
     def settings_form_fields(self):
         form_fields = OrderedDict(
@@ -50,10 +52,17 @@ class DaimoPay(BasePaymentProvider):
                     ),
                 ),
                 (
-                    "DAIMO_PAY_RECIPIENT_ADDRESS", 
+                    "DAIMO_PAY_RECIPIENT_ADDRESS",
                     forms.CharField(
                         label=_("Recipient Address"),
                         help_text=_("Address to receive payments. Paid in DAI on Optimism"),
+                    ),
+                ),
+                (
+                    "DAIMO_PAY_REFUND_EOA_PRIVATE_KEY",
+                    forms.CharField(
+                        label=_("Refund EOA Private Key"),
+                        help_text=_("Private key for the EOA to send automated refunds. Must be funded with both ETH (for gas) and DAI (for refunds) on Optimism."),
                     ),
                 )
             ]
@@ -82,6 +91,9 @@ class DaimoPay(BasePaymentProvider):
         )
         if not recipient_address_configured:
             logger.error("Daimo Pay recipient address not configured")
+        elif not Web3.is_address(self.settings.DAIMO_PAY_RECIPIENT_ADDRESS):
+            logger.error("Daimo Pay recipient address is invalid")
+            recipient_address_configured = False
 
         return all((
             api_key_configured,
@@ -90,9 +102,10 @@ class DaimoPay(BasePaymentProvider):
             super().is_allowed(request, **kwargs),
         ))
 
+    # Payment screen: just a message saying continue to payment.
     # No need to collect payment information.
-    def payment_form_render(self, request, total, order=None):
-        self.settings.set('total', total)
+    def payment_form_render(self, request, total):
+        request.session['total_usd'] = str(total)
         template = get_template('pretix_eth/checkout_payment_form.html')
         return template.render({})
     
@@ -103,22 +116,23 @@ class DaimoPay(BasePaymentProvider):
 
     # Confirmation page: generate a Daimo Pay payment and let the user pay.
     def checkout_confirm_render(self, request):
-        total = Decimal(self.settings.get('total'))
-        payment_id = None
         print (f"checkout_confirm_render: creating Daimo Pay payment")  
+        total = Decimal(request.session['total_usd'])
+        print (f"checkout_confirm_render: order total: {total}")  
+        payment_id = None
         try:
             payment_id = self._create_daimo_pay_payment(total)
         except Exception as e:
             logger.error(f"Error in Daimo Pay API request: {str(e)}")
             raise e
 
-        # TODO: this may not be the correct way to track Pretix session info.
-        self.settings.set('payment_id', payment_id)
+        print(f"checkout_confirm_render: payment_id: {payment_id}")
+        request.session['payment_id'] = payment_id
 
         template = get_template("pretix_eth/checkout_payment_confirm.html")
         return template.render({ "payment_id": payment_id })
 
-    def _create_daimo_pay_payment(self, total: Decimal):
+    def _create_daimo_pay_payment(self, total: Decimal) -> str:
         # TODO: ideally set Idempotency-Key using the order code
         idempotency_key = str(uuid.uuid4())
 
@@ -152,11 +166,13 @@ class DaimoPay(BasePaymentProvider):
 
         return data["id"]
 
+    # Called *after* the user clicks Place Order on the Confirm screen.
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        # TODO: validate status + amount of payment ID for this order
-        payment_id = self.settings.get('payment_id')
+        payment_id = request.session['payment_id']
         print(f"execute_payment: {payment_id}")
 
+        # Ensure that it's paid
+        # TODO: save source chain ID, not just tx_hash.
         source_tx_hash, dest_tx_hash = self._get_daimo_pay_tx_hash(payment_id)
         print(f"execute_payment: {payment_id}: tx hashes {source_tx_hash} {dest_tx_hash}")
         if source_tx_hash != None:
@@ -170,6 +186,7 @@ class DaimoPay(BasePaymentProvider):
             }
             payment.save(update_fields=["info"])
         else:
+            print(f"execute_payment: {payment_id}: FAIL, not finished according to Daimo Pay API")
             payment.fail()
     
     def _get_daimo_pay_tx_hash(self, payment_id: str):
@@ -193,6 +210,7 @@ class DaimoPay(BasePaymentProvider):
             dest_tx_hash = order['destClaimTxHash']
         return source_tx_hash, dest_tx_hash
 
+    # Admin display: show order payment details
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")
         ctx = {
@@ -202,32 +220,42 @@ class DaimoPay(BasePaymentProvider):
 
     abort_pending_allowed = True
 
+    # Admin: allow automated refunds
     def payment_refund_supported(self, payment: OrderPayment):
-        return True
+        return bool(self.settings.DAIMO_PAY_REFUND_EOA_PRIVATE_KEY)
 
+    # Admin: allow partial refunds
     def payment_partial_refund_supported(self, payment: OrderPayment):
-        return True
+        return self.payment_refund_supported(payment)
 
+    # Admin: execute a refund
     def execute_refund(self, refund: OrderRefund):
         # Send an email to the user, allowing them to claim the refund.
         email_addr = refund.order.email
         if email_addr is None:
             raise Exception("No email address found for refund order")
         
-        # TODO: generate a refund secret
-        # Save it to this order
-        # Send an email with a link to a custom view
-        # The view has a form to enter recipient address
-        # Finally, user clicks refund, receives $x DAI back.
-        # This atomically marks the refund as collected.
-        
-        print(f"PAY: sending refund email to {email_addr}")
-        mail_send(
-            to=[email_addr],
-            subject="Refund claim instructions",
-            body="Testing 123",
-            html="Testing 1234",
-            sender="support@daimo.com",
-            order=refund.order,
-        )
-        
+        try:
+            print(f"PAY: creating refund link for {refund.order.code}: ${refund.amount}")
+            link = create_peanut_link(refund.amount, self.settings.DAIMO_PAY_REFUND_EOA_PRIVATE_KEY)
+            print(f"PAY: refunding {refund.order.code} to {email_addr}: {link}")
+
+            amount_str = f"{refund.amount:.2f}"
+            body_text = f"Your order has been refunded.\n\nClaim ${amount_str} here: {link}\n\nThanks."
+            body_html = f"<b>Your order has been refunded.</b><br><br>Claim ${amount_str} here: <a href='{link}'>{link}</a><br><br>Thanks."
+
+            mail_send(
+                to=[email_addr],
+                subject=f"Refund for Order #{refund.order.code}",
+                body=body_text,
+                html=body_html,
+                sender="support@daimo.com",
+                event=refund.order.event_id,
+                order=refund.order.id
+            )
+            print(f"PAY: sent email to {email_addr}: {body_text}")
+
+            refund.done()
+            print(f"PAY: refund {refund.order.code} complete")
+        except Exception as e:
+            raise PaymentException(f"error creating & sending refund link: {str(e)}")
