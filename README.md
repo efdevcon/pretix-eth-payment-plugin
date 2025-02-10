@@ -1,19 +1,51 @@
 # Pretix Ethereum Payment Provider
 
-## **Important disclaimers**
-
-**!! Smart contract wallet payments are NOT supported (except Safe) and users will be told so (and be unable to pay) when they connect with one. A rare edge case exists with counterfactual wallets that will prevent the plugin from detecting if the connected wallet is a smart contract - if a user manages to pay this way, their payment will not confirm automatically (note: an organizer can still manually confirm payments in this case)**
-
-**!! This plugin is no longer actively being worked on. PRs to finish smart contract wallet support are welcome (further details below). As of early 2024, The Devcon team is working with third party payment providers to improve payment UX and add smart contract wallet support, and may publish this work under a different plugin some time in the future.**
+**[Demo](https://www.loom.com/share/8c71876a9d5348f6a07a8d7e687368b6?sid=5b19c2a2-7502-4cf2-9afe-a865fd04e003)**
 
 ## What is this
 
-This is a plugin for [pretix](https://github.com/pretix/pretix). This plugin
-supports both Ethereum and DAI.
+This is a payment plugin for [Pretix](https://github.com/pretix/pretix) to accept crypto payments from any chain and any coin.
+
+Key features:
+- Accept payments in all liquid tokens on major chains, using Daimo Pay.
+- Clean 1:1 pricing for stablecoin payments. If a ticket costs $100, user transfers exactly 100.00 USDC, USDT, or DAI on any efficient chain.
+- Support for all major EVM rollups + Polygon.
+- Automatic bridging and forwarding to a single destination address.
+- Built-in refund support, using Peanut Protocol.
+
+## Event Setup Instructions
+
+1. Under the event, go to Settings > Plugins > Payment Providers, enable provider.
+
+2. Under Settings > Payments, enable payment method.
+
+3. Configure the following required settings:
+   - `DAIMO_PAY_API_KEY` - API key from pay.daimo.com
+   - `DAIMO_PAY_WEBHOOK_SECRET` - Webhook secret for verifying callbacks
+   - `DAIMO_PAY_RECIPIENT_ADDRESS` - Address to receive payments (in DAI on Optimism)
+   - `DAIMO_PAY_REFUND_EOA_PRIVATE_KEY` - Private key for automated refunds (must be funded with ETH and DAI on Optimism)
+
+## Development Setup
+
+You'll need Python 3.10 and Node >20.
+
+1. Clone this repository
+2. Create and activate a virtual environment
+3. Run `pip install -e .[dev]` 
+4. Setup database: `make devmigrate`
+5. Start dev server: `make devserver`
+6. Build Daimo Pay checkout: `cd pretix_eth/static/daimo_pay_inject && npm i && npm run build`
+
+You can also use `npm run dev` on that last step to run a watcher.
+
+Finally, go to `http://localhost:8000`. Use `admin@localhost`, password `admin`. Create an org, an event, and follow the event setup instructions above.
+
+You should now have a working development Pretix instance.
+
 
 ## History
 
-It started with [ligi](https://ligi) suggesting [pretix for Ethereum
+It started with [ligi](https://github.com/ligi) suggesting [pretix for Ethereum
 Magicians](https://ethereum-magicians.org/t/charging-for-tickets-participant-numbers-event-ticketing-for-council-of-paris-2019/2321/2).
 
 Then it was used for Ethereum Magicians in Paris (shout out to
@@ -30,9 +62,8 @@ vanished from the project after cashing in the bounty money and left the plugin
 in a non-working state.
 
 Then the idea came up to use this plugin for DevCon5 and the plugin was forked
-to this repo and [ligi](https://ligi.de), [david
-sanders](https://github.com/davesque), [piper
-meriam](https://github.com/pipermerriam), [rami](https://github.com/raphaelm),
+to this repo and [david sanders](https://github.com/davesque), [piper
+merriam](https://github.com/pipermerriam), [rami](https://github.com/raphaelm),
 [Pedro Gomes](https://github.com/pedrouid), and [Jamie
 Pitts](https://github.com/jpitts) brought it to a state where it is usable for
 DevCon5 (still a lot of work to be done to make this a good plugin). Currently,
@@ -46,90 +77,4 @@ In the process tooling like [Web3Modal](https://github.com/Web3Modal/web3modal/)
 
 For Devconnect IST an effort was made to improve the plugin in a variety of ways: WalletConnect support, single receiver mode (accept payments using just one wallet), more networks, automatic ETH rate fetching, improved UI and messaging, and smart contract wallet support. All of these features made it into this version of the plugin, except for smart contract wallet support - issues processing transactions stemming from sc wallets meant that we ultimately had to turn away sc wallet payments altogether.
 
-If you are a dev and want to "finish" the plugin by adding smart contract wallet support, the main thing missing is the ability to verify the sender+receiver addresses and the amount sent given a tx hash stemming from a smart contract wallet. Smart contract transaction receipts aren't easy to process because the "to" and "value" field are not useful - to get the actual receiver wallet and the amount sent, more complex processing is needed (presumably by looking at the transaction logs - but it has to be generic, because each sc wallet has different internals). ERC1271 support is already added, so it really is just about building this "verifier".  
-
-### Recently added features
-
-* A payment confirmation management command was added that confirms pending
-  payments based on the address assigned to them during checkout.  See the
-  `confirm_payments` section below for details.
-* "Single receiver" mode (accept all payments using just one wallet)
-* WalletConnect support
-* Automatic ETH rate fetching
-* More L2s added
-* Updated user-facing UI and error messaging
-* ERC1271 support (note: smart contract payments not yet fully supported - the confirm payment cannot handle sc wallet payments, see warning above for details)
-
-## Development setup
-
-1. Clone this repository, e.g. to `local/pretix-eth-payment-plugin`.
-1. Create and activate a virtual environment.
-1. Execute `pip install -e .[dev]` within the `pretix-eth-payment-plugin` repo
-   directory.
-1. Setup a local database by running `make devmigrate`.
-1. Fire up a local dev server by running `make devserver`.
-1. To build the Daimo Pay checkout, `cd pretix_eth/static/daimo_pay_inject`, then run `npm i && npm run build`.
-1. Visit http://localhost:8000/control/login in a browser windows and enter
-   username `admin@localhost` and password `admin` to log in.
-1. Enter "Admin mode" by clicking the "Admin mode" text in the upper-right
-   corner of the admin interface to create a test organization and event.
-1. Follow instructions in [Event Setup Instructions](#event-setup-instructions)
-
-## Event Setup Instructions
-1. Under the event, go to Settings -> Plugins -> Payment Providers -> click on Enable under "Pretix Ethereum Payment Provider" 
-2. Next, under Settings, go to Payments -> "ETH or DAI" -> Settings -> click on "enable payment method". 
-3. Next, scroll down and set the values for the following:
-  - "TOKEN_RATE" - This is a JSON e.g. 
-    ```
-    {"ETH_RATE": 4000, "DAI_RATE": 1}
-    ```
-    i.e. `KEY` = `<CRYPTO_SMBOL>_RATE` and `VALUE` = value of 1 unit in your fiat currency e.g. USD, EUR etc. For USD, above example says 1 ETH = 4000$. If EUR was chosen, then this says 1 ETH = 4000EUR.
-
-    Note that the Ethereum rate will automatically reflect the current market price (regardless of which ETH_RATE you put in the config) - the ETH_RATE you define here is a fallback in the unlikely scenario that the plugin price feeds are down. The ETH_RATE will ONLY automatically reflect the current market price when Event Currency is set to either USD or EUR. If you set your event currency to ANYTHING ELSE the ETH rate will not automatically reflect its market price - it must then be manually input & updated regularly.
-  - Select the networks you want under the "Networks" option - Choose from Ethereum Mainnet, Optimism, Arbitrum and their testnets.
-  - "NETWORK_RPC_URLS" - This is a JSON e.g.
-    ```
-    {
-      "L1_RPC_URL": "https://mainnet.infura.io/v3/somekeyhere",
-      "Rinkeby_RPC_URL": "...",
-      "RinkebyArbitrum_RPC_URL": "..."  
-    }
-    ```
-    i.e. `KEY` = `<Network ID>_RPC_URL` and `VALUE` = RPC URL. Network IDs can be found [in tokens.py](pretix_eth/network/tokens.py)
-  - "Payment receiver address" - Ethereum address at which all payments will be sent to
-  - "WalletConnect project ID" - WalletConnect requires a project id - you can generate one on https://walletconnect.com/
-
-You can now play with the event by clicking on the "Go to Shop" button at the top left (next to the event name)
-
-## Automatic payment confirmation with the `confirm_payments` command
-
-This plugin includes a [django management
-command](https://docs.djangoproject.com/en/2.2/howto/custom-management-commands/#module-django.core.management)
-that can be used to automatically confirm orders from the Ethereum address
-associated with each order across all events. By default, this command will perform a dry run
-which only displays payment records that would be modified and why but without
-actually modifying them.  
-
-Here's an example invocation of this command:
-```bash
-python -mpretix confirm_payments \
-    --no-dry-run
-```
-Note that this doesn't require you to pass any event slug, since it runs for all events at once. It inspects the address that was associated with each order (at
-the time the ticket was reserved) to determine if sufficient payments were made
-for the order.  It may check for an ethereum payment or some kind of token
-payment depending on what was chosen during the checkout process. It checks using the RPC URLs that were configured in the admin settings while setting up the event. If no rpc urls were set, then the command gives yet another chance to type in a rpc url (like infura). The `--no-dry-run` flag directs the command to
-update order statuses based on the checks that are performed.  Without this
-flag, the command will only display how records would be modified. 
-
-For more details about the `confirm_payments` command and its options, the
-command may be invoked with `--help`:
-```bash
-python -mpretix confirm_payments --help
-```
-
-## License
-
-Copyright 2019 Victor (https://github.com/vic-en)
-
-Released under the terms of the Apache License 2.0
+Finally, for Devconnect 2025, the plugin was rewritten to use [Daimo Pay](https://pay.daimo.com), providing any-chain checkout and automatic refunds. See [DIP-64](https://forum.devcon.org/t/dip-64-universal-checkout-for-devcon-nect/5346).
