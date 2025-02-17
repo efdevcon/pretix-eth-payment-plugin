@@ -44,7 +44,7 @@ extras_require['dev'] = (
 
 setup(
     name='pretix-eth-payment-plugin',
-    version='4.0.0-dev',
+    version='5.0.0-dev',
     description='Ethereum payment provider plugin for Pretix ticket sales, using Daimo Pay',
     long_description=long_description,
     long_description_content_type='text/markdown',
