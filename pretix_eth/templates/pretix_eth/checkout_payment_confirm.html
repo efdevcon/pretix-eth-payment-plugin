@@ -1,8 +1,27 @@
 {% load i18n %}
 
-<p>
-    {% blocktrans trimmed %}
-    Click the "Place binding order" or "Pay now" button to confirm that you
-    intend to pay the order total.
-    {% endblocktrans %}
-</p>
+<div id="daimo-pay-inject-root"></div>
+
+<!-- fix the Place Order button immediately -->
+<script>
+  window.payment_id = "{{ payment_id|escapejs }}";
+  console.log("payment_id: ", window.payment_id);
+
+  console.log("Looking for the place order button...");
+  const interval = window.setInterval(() => {
+    let btn = document.querySelector('button.btn-primary[type="submit"]');
+    if (btn == null) {
+        console.log("Button not found yet");
+        return;
+    }
+    window.clearInterval(interval);
+    console.log("Replacing the 'Place binding order' button");
+    btn.textContent = "Place order";
+    btn.disabled = true;
+  }, 25);
+</script>
+
+<!-- script below is large, loads a second later -->
+<script src="/static/daimo_pay_inject/dist/index.js" defer></script>
+
+<p>Place order below. Pay with any token on any chain.</p>

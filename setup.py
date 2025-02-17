@@ -22,12 +22,13 @@ cmdclass = {
 
 extras_require = {
     'test': [
-        'pytest>=5.1,<7',
-        'pytest-django>=3.5,<4',
+        'pytest>=5',
+        'pytest-django>=3.5',
+        'celery>=5',
     ],
     'lint': [
-        'flake8>=3.7,<5',
-        'mypy==0.931',
+        'flake8>=3.7',
+        'mypy>=0.931',
     ],
     'dev': [
         'tox>=3.14.5,<4',
@@ -43,24 +44,23 @@ extras_require['dev'] = (
 
 setup(
     name='pretix-eth-payment-plugin',
-    version='2.0.6-dev',
-    description='Ethereum payment provider plugin for pretix software',
+    version='5.0.0-dev',
+    description='Ethereum payment provider plugin for Pretix ticket sales, using Daimo Pay',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/esPass/pretix-eth-payment-plugin',
+    url='https://github.com/daimo-eth/pretix-eth-payment-plugin',
     author='Pretix Ethereum Plugin Developers',
     author_email='pretix-eth-payment-plugin@ethereum.org',
     license='Apache Software License',
     install_requires=[
-        "pretix>=3.8.0",
-        "web3>=5.7.0",
-        "eth-abi>=2.1.1,<3",
-        "eth-typing>=2.2.1,<3",
-        "eth-utils>=1.8.4,<2",
-        "eth-hash[pycryptodome]>=0.3.1,<0.4",
-        # Requests requires urllib3 <1.26.0.  Can delete this later after
-        # requests gets its act together.
-        "urllib3<1.27.0",
+        "pretix>=4.16",
+        "web3>=6",
+        "eth-typing",
+        "eth-abi",
+        "eth-account<=0.8.0",
+        "setuptools>=68.0.0",
+        # django-bootstrap3 22.2 under py3.8, added for pip legacy resolver to avoid conflicts
+        'importlib-metadata<3; python_version<"3.8"',
     ],
     python_requires='>=3.7, <4',
     extras_require=extras_require,

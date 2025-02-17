@@ -1,193 +1,120 @@
-from datetime import timedelta
+import json
+import hmac
+import hashlib
+import logging
+import re
 
+from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseRedirect
+from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
+from django.urls import path
+from django_scopes import scope
 from django.contrib import messages
-from django.contrib.humanize.templatetags.humanize import NaturalTimeFormatter
-from django.core.signing import BadSignature, TimestampSigner
-from django.shortcuts import redirect
-from django.urls import reverse
-from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
-from django.views.generic import FormView
-from pretix.control.views.event import EventSettingsViewMixin
 
-from . import forms, models
+from pretix.base.models import Order, OrderPayment
 
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.viewsets import GenericViewSet
+from rest_framework import permissions, mixins
 
-UPLOAD_ADDRESS_KEY = "pretix_eth_upload_addresses"
-UPLOAD_VALID_DURATION = timedelta(minutes=5)
-
-
-class WalletAddressUploadView(EventSettingsViewMixin, FormView):
-    form_class = forms.WalletAddressUploadForm
-    template_name = 'pretix_eth/wallet_address_upload.html'
-    permission = 'can_change_event_settings'
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        existing_unused_addresses = (
-            models.WalletAddress.objects.get_queryset()
-            .unused()
-            .for_event(self.request.event)
-        )
-        ctx["existing_unused_addresses"] = len(existing_unused_addresses)
-        return ctx
-
-    def form_valid(self, form):
-        file_addresses = form.cleaned_data["wallet_addresses"]
-
-        now = timezone.now()
-        expire_time = now + UPLOAD_VALID_DURATION
-        signer = TimestampSigner()
-        signed_file_addresses = signer.sign(file_addresses)
-
-        self.request.session[UPLOAD_ADDRESS_KEY] = signed_file_addresses
-
-        messages.success(
-            self.request,
-            _(
-                'Successfully parsed {n} wallet addresses.  '
-                'You have until {expire_time} to confirm your address upload.'
-            ).format(
-                n=len(file_addresses.splitlines()),
-                expire_time=NaturalTimeFormatter.string_for(expire_time),
-            ),
-        )
-
-        return super().form_valid(form)
-
-    def form_invalid(self, form):
-        messages.error(self.request, _('We could not save your changes. See below for details.'))
-        return super().form_invalid(form)
-
-    def get_success_url(self, **kwargs):
-        return reverse('plugins:pretix_eth:wallet_address_upload_confirm', kwargs={
-            'organizer': self.request.event.organizer.slug,
-            'event': self.request.event.slug,
-        })
+logger = logging.getLogger(__name__)
 
 
-class AddressUploadSessionError(Exception):
-    def __init__(self, message, response=None):
-        super().__init__(message)
-        self.response = response
+def verify_webhook_signature(request, secret):
+    """Verify Daimo Pay webhook signature"""
+    signature = request.headers.get('Authorization')
+    if not signature:
+        return False
+        
+    # Remove 'Bearer ' prefix if present
+    if signature.startswith('Bearer '):
+        signature = signature[7:]
+
+    # Calculate expected signature
+    expected = hmac.new(
+        secret.encode(),
+        request.body,
+        hashlib.sha256
+    ).hexdigest()
+
+    return hmac.compare_digest(signature, expected)
 
 
-class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
-    form_class = forms.WalletAddressUploadConfirmForm
-    template_name = 'pretix_eth/wallet_address_upload_confirm.html'
-    permission = 'can_change_event_settings'
+@csrf_exempt
+@require_POST
+def daimo_webhook(request, *args, **kwargs):
+    """Handle Daimo Pay webhook events"""
+    try:
+        print(f"WEBHOOK RECEIVED: {request.body}")
 
-    def get(self, request, *args, **kwargs):
-        try:
-            return super().get(request, *args, **kwargs)
-        except AddressUploadSessionError as e:
-            return e.response
+        # Parse webhook payload
+        payload = json.loads(request.body)
+        event_type = payload.get('type')
+        payment_id = payload.get('paymentId')
 
-    def post(self, request, *args, **kwargs):
-        try:
-            return super().post(request, *args, **kwargs)
-        except AddressUploadSessionError as e:
-            return e.response
 
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
+        if not event_type or not payment_id:
+            return HttpResponseBadRequest("Missing event type or payment ID")
 
-        file_addresses = self.get_file_addresses()
-        hex_addresses = file_addresses.splitlines()
-        hex_address_set = set(hex_addresses)
-        existing_addresses = models.WalletAddress.objects.filter(hex_address__in=hex_address_set)
-        existing_address_set = set(existing_addresses.values_list("hex_address", flat=True))
-        new_addresses = hex_address_set - existing_address_set
+        # Find payment and its organizer
+        from pretix.base.models import Organizer
+        from django_scopes import scope, get_scope
 
-        ctx["file_address_count"] = len(hex_addresses)
-        ctx["unique_address_count"] = len(hex_address_set)
-        ctx["existing_address_count"] = existing_addresses.count()
-        ctx["new_address_count"] = len(new_addresses)
+        # Get all organizers since we can't scope the initial query
+        organizers = Organizer.objects.all()
+        payment = None
 
-        return ctx
+        # Try each organizer scope until we find the payment
+        for organizer in organizers:
+            with scope(organizer=organizer):
+                try:
+                    # Use proper JSON field lookup
+                    payment = OrderPayment.objects.select_related(
+                        'order__event__organizer'
+                    ).filter(
+                        info__icontains=payment_id
+                    ).get()
+                    break
+                except OrderPayment.DoesNotExist:
+                    continue
 
-    def form_valid(self, form):
-        file_addresses = self.get_file_addresses()
-        return self.session_key_valid(form, file_addresses)
+        print(f"WEBHOOK: found payment {payment.id}")
 
-    def session_key_valid(self, form, file_addresses):
-        action = form.cleaned_data["action"]
+        if not payment:
+            return HttpResponseBadRequest("Payment not found")
 
-        if action == "cancel":
-            messages.info(self.request, _('Wallet address upload cancelled.'))
-            return self.clear_and_start_over()
+        # Continue with the correct scope
+        with scope(organizer=payment.order.event.organizer):
+            # Verify webhook signature within the correct scope
+            if not verify_webhook_signature(request, payment.payment_provider.settings.DAIMO_PAY_WEBHOOK_SECRET):
+                return HttpResponseBadRequest("Invalid signature")
+                
+            # Handle payment completion
+            if event_type == 'payment_completed':
+                payment.confirm()
+            elif event_type == 'payment_bounced':
+                payment.fail()
+                
+            return HttpResponse(status=200)
+            
+    except (json.JSONDecodeError, KeyError) as e:
+        return HttpResponseBadRequest(f"Invalid webhook payload: {str(e)}")
+    except Exception as e:
+        logger.exception("Error processing webhook")
+        return HttpResponseBadRequest(f"Error processing webhook: {str(e)}")
 
-        file_addresses = self.get_file_addresses()
-        hex_addresses = file_addresses.splitlines()
-        hex_address_set = set(hex_addresses)
-        existing_addresses = models.WalletAddress.objects.filter(hex_address__in=hex_address_set)
-        existing_address_set = set(existing_addresses.values_list("hex_address", flat=True))
-        new_addresses = hex_address_set - existing_address_set
+# URL configuration
+webhook_patterns = [
+    path('webhook/', daimo_webhook, name='webhook'),
+]
 
-        created = models.WalletAddress.objects.bulk_create([
-            models.WalletAddress(
-                hex_address=hex_address,
-                event=self.request.event,
-            )
-            for hex_address in new_addresses
-        ])
+# URL configuration
+webhook_patterns = [
+    path('webhook/', daimo_webhook, name='webhook'),
+]
 
-        self.request.event.log_action(
-            'pretix_eth.wallet_address_upload',
-            user=self.request.user,
-            data={
-                'file_addresses': file_addresses,
-                'file_address_count': len(hex_addresses),
-                'unique_address_count': len(hex_address_set),
-                'existing_address_count': existing_addresses.count(),
-                'new_address_count': len(new_addresses),
-            },
-        )
 
-        messages.success(
-            self.request,
-            _('Created {n} new wallet addresses!').format(n=len(created)),
-        )
-        return self.clear_and_start_over()
-
-    def get_file_addresses(self):
-        try:
-            signed_file_addresses = self.request.session[UPLOAD_ADDRESS_KEY]
-        except KeyError:
-            raise AddressUploadSessionError(
-                "no session key",
-                response=self.no_session_key(),
-            )
-        signer = TimestampSigner()
-        try:
-            file_addresses = signer.unsign(signed_file_addresses, max_age=UPLOAD_VALID_DURATION)
-        except BadSignature:
-            raise AddressUploadSessionError(
-                "session key expired",
-                response=self.session_key_expired(),
-            )
-        return file_addresses
-
-    def clear_session_key(self):
-        del self.request.session[UPLOAD_ADDRESS_KEY]
-
-    def clear_and_start_over(self):
-        self.clear_session_key()
-        return redirect(self.get_success_url())
-
-    def no_session_key(self):
-        return redirect(self.get_success_url())
-
-    def session_key_expired(self):
-        messages.error(self.request, _('Wallet address upload expired! Please try again.'))
-        return self.clear_and_start_over()
-
-    def form_invalid(self, form):
-        messages.error(self.request, _('Unrecognized action. Please try again.'))
-        return self.clear_and_start_over()
-
-    def get_success_url(self, **kwargs):
-        return reverse('plugins:pretix_eth:wallet_address_upload', kwargs={
-            'organizer': self.request.event.organizer.slug,
-            'event': self.request.event.slug,
-        })
+# No views needed beyond webhook handler

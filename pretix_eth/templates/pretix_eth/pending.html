@@ -1,87 +1,39 @@
 {% load i18n %}
 {% load static %}
+{% load eventurl %}
 
-<br/><br/>
-
-{% if payment_is_valid %}
-
-  <a id="pretix-eth-qr-anchor" href="{{ erc_681_url }}" class="collapse"></a>
-
-  <p>{% trans "Choose one of the following payment options:" %}</p>
-  <ol>
-    <li class="payment-options">
-      <img src="{% static "icons/web3modal-logo.png" %}" width=32 height=32 alt="web3modal icon"/>
-      <a target="blank" rel="noreferrer noopener" href="{{ web3modal_url }}">
-        <button class="btn btn-primary" id="web3modal_btn">{% trans "Web3Modal" %}</button>
-      </a>
-      <ul class="payment-info">
-        <li>{% trans "Allows you to pay with WalletConnect or MetaMask." %}</li>
-      </ul>
-    </li>
-    
-    <li class="payment-options">
-      <img src={% static "icons/qr_code.png" %} id="qr_icon" alt="QR Code Icon"/>
-      <button class="btn btn-primary" id="btn-qr">{% trans "Toggle QR Code" %}</button>
-      <ul class="payment-info">
-        <li>{% blocktrans trimmed %}Via <a href="https://eips.ethereum.org/EIPS/eip-681">ERC-681</a> QR-Code{% endblocktrans %}</li>
-      </ul>
-      <div id="pretix-eth-qr-div"></div>
-      <script type="text/javascript" src="{% static "pretix_eth/generate_qrcode.js" %}"></script>
-    </li>
-
-    {% if uniswap_url %}
-      <li class="payment-options">
-        <img src="{% static "icons/uniswap-logo-32.svg" %}" alt="Uniswap logo" />
-        <a target="blank" rel="noreferrer noopener" href="{{ uniswap_url }}">
-          <button class="btn btn-primary" id="uniswap_btn">{% trans "Uniswap" %}</button>
-        </a>
-        <ul class="payment-info">
-          <li>{% trans "Allows you to pay with any uniswap supported token." %}
-            <strong>{% trans "Please do not change the output amount or output currency!" %}</strong>
-          </li>
-        </ul>
-      </li>  
+<div class="payment-pending">
+    {% if payment_is_valid %}
+        {% if payment.info_data.payment_url %}
+            <div class="alert alert-info">
+                <p>{% trans "Please complete your payment using the button below:" %}</p>
+                <p class="text-center">
+                    <a href="{{ payment.info_data.payment_url }}" class="btn btn-primary btn-lg" target="_blank">
+                        {% trans "Pay Now with Daimo Pay" %}
+                    </a>
+                </p>
+            </div>
+            <p class="text-muted">
+                {% blocktrans trimmed %}
+                After completing your payment, you will receive an email confirmation.
+                The page will automatically update once your payment is confirmed.
+                {% endblocktrans %}
+            </p>
+        {% else %}
+            <div class="alert alert-warning">
+                {% trans "Payment link not available. Please try again or contact support." %}
+            </div>
+        {% endif %}
+    {% else %}
+        <p>
+            <strong>
+                {% blocktrans trimmed %}
+                Your order is not yet complete. You may have tried to change the payment
+                method but cancelled the process midway. Please choose a payment method
+                by clicking the "Re-try payment or choose another payment method" button
+                below.
+                {% endblocktrans %}
+            </strong>
+        </p>
     {% endif %}
-
-    <li class="payment-options">
-      <p>{% blocktrans trimmed %}Manually pay {{ amount_manual }} on {{ network_name }} to 
-        <span id="address">{{ wallet_address }}</span>{% endblocktrans %}
-        <img tabindex="0" src="{% static "icons/clipboard-icon.jpg" %}" id="clipboard" alt="copy to clipboard" data-toggle="tooltip" data-placement="right" data-trigger="click" title="Copied to clipboard"/></p>
-
-      <ul class="payment-info">
-          <li><em>{% trans "Note: Each payment address is unique to each order. Only send your payment to the address specified above." %}</em></li>
-      </ul>
-    </li>
-  </ol>
-  <script type="text/javascript" src="{% static "pretix_eth/pending.js" %}"></script>
-  <p>
-    {% blocktrans trimmed %}
-    Once you send your payment, our system will automatically check for
-    confirmation. Please allow up to several hours. Once confirmed, you will
-    get an email notification.
-    {% endblocktrans %}
-  </p>
-
-  <p>
-    {% blocktrans trimmed %}
-    If you want to improve this process, submit a PR to this github repository:
-    {% endblocktrans %}
-    <a href="https://github.com/esPass/pretix-eth-payment-plugin">
-      https://github.com/esPass/pretix-eth-payment-plugin
-    </a>
-  </p>
-
-{% else %}
-
-  <p>
-    <strong>
-      {% blocktrans trimmed %}
-      Your order is not yet complete.  You may have tried to change the payment
-      method but cancelled the process midway.  Please choose a payment method
-      by clicking the "Re-try payment or choose another payment method" button
-      below.
-      {% endblocktrans %}
-    </strong>
-  </p>
-
-{% endif %}
+</div>

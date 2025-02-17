@@ -1,15 +1,8 @@
 {% load i18n %}
-
 {% if payment_info %}
     <dl class="dl-horizontal">
-        <dt>{% trans "Amount" %}</dt>
-        <dd>{{ payment_info.amount }}</dd>
-        <dt>{% trans "Currency type" %}</dt>
-        <dd>{{ payment_info.currency_type }}</dd>
-        <dt>{% trans "Wallet Address" %}</dt>
-        <dd>{{ wallet_address }}</dd>
-        <dt>{% trans "Transaction hash" %}</dt>
-        <dd>{{ payment_info.txn_hash }}</dd>
+        <dt><a href="https://3xpl.com/search?q={{ payment_info.source_tx_hash }}" target="_blank">Source Transaction</a></dt>
+        <dd><a href="https://3xpl.com/search?q={{ payment_info.dest_tx_hash }}" target="_blank">Dest Transaction</a></dd>
     </dl>
     {% if "message" in payment_info %}
         <dl class="dl-horizontal">

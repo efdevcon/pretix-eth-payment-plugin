@@ -1,306 +1,261 @@
+from decimal import Decimal
 import logging
 import time
 from collections import OrderedDict
+import uuid
+import requests
 
 from django import forms
-from django.core.exceptions import ImproperlyConfigured
+from django.urls import reverse
 from django.http import HttpRequest
 from django.template.loader import get_template
-from django.utils.translation import ugettext_lazy as _
+from django.utils.translation import gettext_lazy as _
 
-from pretix.base.models import (
-    OrderPayment,
-    OrderRefund,
-)
-from pretix.base.payment import BasePaymentProvider
+from pretix.base.models import OrderPayment, OrderRefund
+from pretix.base.payment import BasePaymentProvider, PaymentProviderForm, PaymentException
+from pretix.base.services.mail import mail_send
+from web3 import Web3
 
-from eth_utils import from_wei
-
-from .models import WalletAddress
-from .network.tokens import (
-    IToken,
-    registry,
-    all_network_verbose_names_to_ids,
-    all_token_and_network_ids_to_tokens,
-    token_verbose_name_to_token_network_id,
-)
+from pretix_eth.create_link import create_peanut_link
 
 logger = logging.getLogger(__name__)
 
-RESERVED_ORDER_DIGITS = 5
+class DaimoPaymentForm(PaymentProviderForm):
+    """Minimal payment form for Daimo Pay integration"""
+    pass
 
+class DaimoPay(BasePaymentProvider):
+    identifier = "daimo_pay"
+    verbose_name = _("Daimo Pay")
+    public_name = _("Pay from any chain, any coin")
+    # test_mode_message = "Paying in Test Mode"
+    payment_form_class = DaimoPaymentForm
 
-def truncate_wei_value(value: int, digits: int) -> int:
-    multiplier = 10 ** digits
-    return int(round(value / multiplier) * multiplier)
-
-
-class Ethereum(BasePaymentProvider):
-    identifier = "ethereum"
-    verbose_name = _("ETH or DAI")
-    public_name = _("ETH or DAI")
-    test_mode_message = "Paying in Test Mode"
-
+    # Admin settings for the plugin.
     @property
     def settings_form_fields(self):
         form_fields = OrderedDict(
             list(super().settings_form_fields.items())
             + [
                 (
-                    "TOKEN_RATES",
-                    forms.JSONField(
-                        label=_("Token Rate"),
-                        help_text=_(
-                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in the fiat currency you have chosen. E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."  # noqa: E501
-                        ),
-                    ),
-                ),
-                # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works... # noqa: E501
-                (
-                    "_NETWORKS",
-                    forms.MultipleChoiceField(
-                        label=_("Networks"),
-                        choices=[
-                            (
-                                all_network_verbose_names_to_ids[network_verbose_name],
-                                network_verbose_name,
-                            )
-                            for network_verbose_name in all_network_verbose_names_to_ids
-                        ],
-                        help_text=_(
-                            "The networks to be configured for crypto payments"
-                        ),
-                        widget=forms.CheckboxSelectMultiple(
-                            attrs={"class": "scrolling-multiple-choice"}
-                        ),
+                    "DAIMO_PAY_API_KEY",
+                    forms.CharField(
+                        label=_("Daimo Pay API Key"),
+                        help_text=_("API key for Daimo Pay integration"),
                     ),
                 ),
                 (
-                    "NETWORK_RPC_URL",
-                    forms.JSONField(
-                        label=_("RPC URLs for networks"),
-                        help_text=_(
-                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url of the network RPC endpoint you are using"  # noqa: E501
-                        ),
+                    "DAIMO_PAY_WEBHOOK_SECRET",
+                    forms.CharField(
+                        label=_("Daimo Pay Webhook Secret"),
+                        help_text=_("Secret token for verifying webhook requests"),
                     ),
                 ),
-            ]
-        )
-
-        form_fields["_NETWORKS"]._as_type = list
-        return form_fields
-
-    def get_token_rates_from_admin_settings(self):
-        return self.settings.get("TOKEN_RATES", as_type=dict, default={})
-
-    def get_networks_chosen_from_admin_settings(self):
-        return set(self.settings.get("_NETWORKS", as_type=list, default=[]))
-
-    def is_allowed(self, request, **kwargs):
-        one_or_more_currencies_configured = (
-            len(self.get_token_rates_from_admin_settings()) > 0
-        )
-        # TODO: Check that TOKEN_RATES conforms to a schema.
-        if not one_or_more_currencies_configured:
-            logger.error("No currencies configured")
-
-        at_least_one_unused_address = (
-            WalletAddress.objects.all().unused().for_event(request.event).exists()
-        )
-        if not at_least_one_unused_address:
-            logger.error("No unused wallet addresses left")
-
-        at_least_one_network_configured = all(
-            (
-                len(self.get_networks_chosen_from_admin_settings()) > 0,
-                # TODO: Check that NETWORK_RPC_URL mappings contain all networks selected
-                # TODO: Check that NETWORK_RPC_URL conforms to a schema
-                len(self.settings.NETWORK_RPC_URL) > 0,
-            )
-        )
-        if not at_least_one_network_configured:
-            logger.error("No networks configured")
-
-        return all(
-            (
-                one_or_more_currencies_configured,
-                at_least_one_unused_address,
-                at_least_one_network_configured,
-                super().is_allowed(request),
-            )
-        )
-
-    @property
-    def payment_form_fields(self):
-        currency_type_choices = ()
-
-        rates = self.get_token_rates_from_admin_settings()
-        network_ids = self.get_networks_chosen_from_admin_settings()
-
-        for token in registry:
-            if token.is_allowed(rates, network_ids):
-                currency_type_choices += token.TOKEN_VERBOSE_NAME_TRANSLATED
-
-        if len(currency_type_choices) == 0:
-            raise ImproperlyConfigured("No currencies configured")
-
-        form_fields = OrderedDict(
-            list(super().payment_form_fields.items())
-            + [
                 (
-                    "currency_type",
-                    forms.ChoiceField(
-                        label=_("Payment currency"),
-                        help_text=_("Select the currency you will use for payment."),
-                        widget=forms.RadioSelect,
-                        choices=currency_type_choices,
-                        initial="ETH",
+                    "DAIMO_PAY_RECIPIENT_ADDRESS",
+                    forms.CharField(
+                        label=_("Recipient Address"),
+                        help_text=_("Address to receive payments. Paid in DAI on Optimism"),
+                    ),
+                ),
+                (
+                    "DAIMO_PAY_REFUND_EOA_PRIVATE_KEY",
+                    forms.CharField(
+                        label=_("Refund EOA Private Key"),
+                        help_text=_("Private key for the EOA to send automated refunds. Must be funded with both ETH (for gas) and DAI (for refunds) on Optimism."),
                     ),
                 )
             ]
         )
-
         return form_fields
 
-    def checkout_confirm_render(self, request):
-        template = get_template("pretix_eth/checkout_payment_confirm.html")
+    # Validate config
+    def is_allowed(self, request, **kwargs):
+        api_key_configured = bool(
+            self.settings.DAIMO_PAY_API_KEY is not None
+            and len(self.settings.DAIMO_PAY_API_KEY) > 0
+        )
+        if not api_key_configured:
+            logger.error("Daimo Pay API key not configured")
 
-        return template.render()
+        webhook_secret_configured = bool(
+            self.settings.DAIMO_PAY_WEBHOOK_SECRET is not None
+            and len(self.settings.DAIMO_PAY_WEBHOOK_SECRET) > 0
+        )
+        if not webhook_secret_configured:
+            logger.error("Daimo Pay webhook secret not configured")
 
-    def checkout_prepare(self, request, cart):
-        form = self.payment_form(request)
+        recipient_address_configured = bool(
+            self.settings.DAIMO_PAY_RECIPIENT_ADDRESS is not None
+            and len(self.settings.DAIMO_PAY_RECIPIENT_ADDRESS) > 0
+        )
+        if not recipient_address_configured:
+            logger.error("Daimo Pay recipient address not configured")
+        elif not Web3.is_address(self.settings.DAIMO_PAY_RECIPIENT_ADDRESS):
+            logger.error("Daimo Pay recipient address is invalid")
+            recipient_address_configured = False
 
-        if form.is_valid():
-            # currency_type = "<token_symbol> - <network verbose name>" etc.
-            # But request.session would store "<token_symbol> - <network id>"
-            request.session[
-                "payment_currency_type"
-            ] = token_verbose_name_to_token_network_id(
-                form.cleaned_data["currency_type"]
-            )
-            self._update_session_payment_amount(request, cart["total"])
-            return True
+        return all((
+            api_key_configured,
+            webhook_secret_configured,
+            recipient_address_configured,
+            super().is_allowed(request, **kwargs),
+        ))
 
-        return False
-
-    def payment_prepare(self, request: HttpRequest, payment: OrderPayment):
-        form = self.payment_form(request)
-
-        if form.is_valid():
-            # currency_type = "<token_symbol> - <network verbose name>" etc.
-            # But request.session would store "<token_symbol> - <network id>"
-            request.session[
-                "payment_currency_type"
-            ] = token_verbose_name_to_token_network_id(
-                form.cleaned_data["currency_type"]
-            )
-            self._update_session_payment_amount(request, payment.amount)
-            return True
-
-        return False
-
+    # Payment screen: just a message saying continue to payment.
+    # No need to collect payment information.
+    def payment_form_render(self, request, total):
+        request.session['total_usd'] = str(total)
+        template = get_template('pretix_eth/checkout_payment_form.html')
+        return template.render({})
+    
+    # We do not collect payment information. Instead, the user
+    # pays via Daimo Pay directly on the "Review order" screen.
     def payment_is_valid_session(self, request):
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
-        return all(
-            (
-                "payment_currency_type" in request.session,
-                "payment_time" in request.session,
-                "payment_amount" in request.session,
-            )
+        return True
+
+    # Confirmation page: generate a Daimo Pay payment and let the user pay.
+    def checkout_confirm_render(self, request):
+        print (f"checkout_confirm_render: creating Daimo Pay payment")  
+        total = Decimal(request.session['total_usd'])
+        print (f"checkout_confirm_render: order total: {total}")  
+        payment_id = None
+        try:
+            payment_id = self._create_daimo_pay_payment(total)
+        except Exception as e:
+            logger.error(f"Error in Daimo Pay API request: {str(e)}")
+            raise e
+
+        print(f"checkout_confirm_render: payment_id: {payment_id}")
+        request.session['payment_id'] = payment_id
+
+        template = get_template("pretix_eth/checkout_payment_confirm.html")
+        return template.render({ "payment_id": payment_id })
+
+    def _create_daimo_pay_payment(self, total: Decimal) -> str:
+        # TODO: ideally set Idempotency-Key using the order code
+        idempotency_key = str(uuid.uuid4())
+
+        chain_op = 10
+        token_op_dai = "0xDA10009cBd5D07dd0CeCc66161FC93D7c9000da1"
+        amount_dai = str(int(total * 1_000_000_000_000_000_000))
+
+        request_data = {
+            "intent": f"Purchase",
+            "items": [],
+            "recipient": {
+                "address": self.settings.DAIMO_PAY_RECIPIENT_ADDRESS,
+                "amount": amount_dai,
+                "token": token_op_dai,
+                "chain": chain_op,
+            },
+        }
+        response = requests.post(
+            "https://pay.daimo.com/api/generate",
+            headers={
+                "Api-Key": self.settings.DAIMO_PAY_API_KEY,
+                "Content-Type": "application/json",
+                "Idempotency-Key": idempotency_key
+            },
+            json=request_data,
         )
 
-    def _payment_is_valid_info(self, payment: OrderPayment) -> bool:
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
-        return all(
-            (
-                "currency_type" in payment.info_data,
-                "time" in payment.info_data,
-                "amount" in payment.info_data,
-            )
-        )
+        data = response.json()
+        if response.status_code != 200 or not data.get("id") or not data.get("url"):
+            raise Exception(f"Daimo Pay API error: {response.text}")
 
+        return data["id"]
+
+    # Called *after* the user clicks Place Order on the Confirm screen.
     def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        payment.info_data = {
-            "currency_type": request.session["payment_currency_type"],
-            "time": request.session["payment_time"],
-            "amount": request.session["payment_amount"],
-        }
-        payment.save(update_fields=["info"])
+        payment_id = request.session['payment_id']
+        print(f"execute_payment: {payment_id}")
 
-    def _update_session_payment_amount(self, request: HttpRequest, total):
-        token: IToken = all_token_and_network_ids_to_tokens[
-            request.session["payment_currency_type"]
-        ]
-        final_price = token.get_ticket_price_in_token(
-            total, self.get_token_rates_from_admin_settings()
+        # Ensure that it's paid
+        # TODO: save source chain ID, not just tx_hash.
+        source_tx_hash, dest_tx_hash = self._get_daimo_pay_tx_hash(payment_id)
+        print(f"execute_payment: {payment_id}: tx hashes {source_tx_hash} {dest_tx_hash}")
+        if source_tx_hash != None:
+            payment.confirm()
+            payment.info_data = {
+                "payment_id": payment_id,
+                "source_tx_hash": source_tx_hash,
+                "dest_tx_hash": dest_tx_hash,
+                "amount": str(payment.amount),
+                "time": int(time.time()),
+            }
+            payment.save(update_fields=["info"])
+        else:
+            print(f"execute_payment: {payment_id}: FAIL, not finished according to Daimo Pay API")
+            payment.fail()
+    
+    def _get_daimo_pay_tx_hash(self, payment_id: str):
+        response = requests.get(
+            f"https://pay.daimo.com/api/payment/{payment_id}",
+            headers={
+                "Api-Key": self.settings.DAIMO_PAY_API_KEY,
+            },
         )
+        data = response.json()
+        if response.status_code != 200:
+            raise Exception(f"Daimo Pay API error: {response.text}")
 
-        request.session["payment_amount"] = final_price
-        request.session["payment_time"] = int(time.time())
+        # TODO: clean up response typing
+        print(repr(data))
+        order = data['order']
 
-    def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
-        template = get_template("pretix_eth/pending.html")
+        source_tx_hash = order.get('sourceInitiateTxHash')
+        dest_tx_hash = order.get('destFastFinishTxHash')
+        if dest_tx_hash is None:
+            dest_tx_hash = order['destClaimTxHash']
+        return source_tx_hash, dest_tx_hash
 
-        payment_is_valid = self._payment_is_valid_info(payment)
-        ctx = {
-            "payment_is_valid": payment_is_valid,
-            "order": payment.order,
-        }
-
-        if not payment_is_valid:
-            return template.render(ctx)
-
-        wallet_address = WalletAddress.objects.get_for_order_payment(
-            payment
-        ).hex_address
-        currency_type = payment.info_data["currency_type"]
-        payment_amount = payment.info_data["amount"]
-        amount_in_ether_or_token = from_wei(payment_amount, "ether")
-
-        # Get payment instructions based on the network type:
-        token: IToken = all_token_and_network_ids_to_tokens[currency_type]
-        instructions = token.payment_instructions(
-            wallet_address, payment_amount, amount_in_ether_or_token
-        )
-
-        ctx.update(instructions)
-        ctx["network_name"] = token.NETWORK_VERBOSE_NAME
-
-        return template.render(ctx)
-
+    # Admin display: show order payment details
     def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
         template = get_template("pretix_eth/control.html")
-
-        wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
-        hex_wallet_address = wallet_address.hex_address if wallet_address else ""
-
-        ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address}
-
+        ctx = {
+            "payment_info": payment.info_data,
+        }
         return template.render(ctx)
 
     abort_pending_allowed = True
 
+    # Admin: allow automated refunds
     def payment_refund_supported(self, payment: OrderPayment):
-        return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
+        return bool(self.settings.DAIMO_PAY_REFUND_EOA_PRIVATE_KEY)
 
+    # Admin: allow partial refunds
     def payment_partial_refund_supported(self, payment: OrderPayment):
         return self.payment_refund_supported(payment)
 
+    # Admin: execute a refund
     def execute_refund(self, refund: OrderRefund):
-        if refund.payment is None:
-            raise Exception("Invariant: No payment associated with refund")
+        # Send an email to the user, allowing them to claim the refund.
+        email_addr = refund.order.email
+        if email_addr is None:
+            raise Exception("No email address found for refund order")
+        
+        try:
+            print(f"PAY: creating refund link for {refund.order.code}: ${refund.amount}")
+            link = create_peanut_link(refund.amount, self.settings.DAIMO_PAY_REFUND_EOA_PRIVATE_KEY)
+            print(f"PAY: refunding {refund.order.code} to {email_addr}: {link}")
 
-        wallet_queryset = WalletAddress.objects.filter(order_payment=refund.payment)
+            amount_str = f"{refund.amount:.2f}"
+            body_text = f"Your order has been refunded.\n\nClaim ${amount_str} here: {link}\n\nThanks."
+            body_html = f"<b>Your order has been refunded.</b><br><br>Claim ${amount_str} here: <a href='{link}'>{link}</a><br><br>Thanks."
 
-        if wallet_queryset.count() != 1:
-            raise Exception(
-                "Invariant: There is not assigned wallet address to this payment"
+            mail_send(
+                to=[email_addr],
+                subject=f"Refund for Order #{refund.order.code}",
+                body=body_text,
+                html=body_html,
+                sender="support@daimo.com",
+                event=refund.order.event_id,
+                order=refund.order.id
             )
+            print(f"PAY: sent email to {email_addr}: {body_text}")
 
-        refund.info_data = {
-            "currency_type": refund.payment.info_data["currency_type"],
-            "amount": refund.payment.info_data["amount"],
-            "wallet_address": wallet_queryset.first().hex_address,
-        }
-
-        refund.save(update_fields=["info"])
+            refund.done()
+            print(f"PAY: refund {refund.order.code} complete")
+        except Exception as e:
+            raise PaymentException(f"error creating & sending refund link: {str(e)}")
