@@ -7,7 +7,10 @@ from pretix.base.models import (
     OrderPayment,
     OrderRefund,
 )
-from pretix_eth.models import WalletAddress
+
+from web3 import Web3
+
+from pretix_eth.models import SignedMessage
 
 import pytz
 
@@ -23,12 +26,25 @@ def payment_to_row(payment):
     else:
         completion_date = ''
 
-    token = payment.info_data.get("currency_type", "")
+    currency_type = payment.info_data.get("currency_type", "")
+
     fiat_amount = payment.amount
     token_amount = payment.info_data.get("amount", "")
+    token_rate = payment.info_data.get("token_rate", "")
 
-    wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
-    hex_wallet_address = wallet_address.hex_address if wallet_address else ""
+    confirmed_transaction: SignedMessage = payment.signed_messages.filter(
+        is_confirmed=True).first()
+    if confirmed_transaction is None:
+        confirmed_transaction: SignedMessage = payment.signed_messages.last()
+
+    if confirmed_transaction is not None:
+        sender_address = confirmed_transaction.sender_address
+        recipient_address = confirmed_transaction.recipient_address
+        transaction_hash = confirmed_transaction.transaction_hash
+    else:
+        sender_address = None
+        recipient_address = None
+        transaction_hash = None
 
     row = [
         "Payment",
@@ -39,40 +55,14 @@ def payment_to_row(payment):
         completion_date,
         payment.state,
         fiat_amount,
-        token_amount,
-        token,
-        hex_wallet_address,
+        Web3.from_wei(int(token_amount), 'ether'),
+        currency_type,
+        sender_address,
+        recipient_address,
+        transaction_hash,
+        token_rate,
     ]
-    return row
 
-
-def refund_to_row(refund):
-    time_zone = pytz.timezone(refund.order.event.settings.timezone)
-    if refund.execution_date:
-        completion_date = date_to_string(time_zone, refund.execution_date)
-    else:
-        completion_date = ''
-
-    token = refund.info_data.get("currency_type", "")
-    fiat_amount = refund.amount
-    token_amount = refund.info_data.get("amount", "")
-
-    wallet_address = WalletAddress.objects.filter(order_payment=refund.payment).first()
-    hex_wallet_address = wallet_address.hex_address if wallet_address else ""
-
-    row = [
-        "Refund",
-        refund.order.event.slug,
-        refund.order.code,
-        refund.full_id,
-        date_to_string(time_zone, refund.created),
-        completion_date,
-        refund.state,
-        fiat_amount,
-        token_amount,
-        token,
-        hex_wallet_address,
-    ]
     return row
 
 
@@ -82,7 +72,10 @@ class EthereumOrdersExporter(ListExporter):
 
     headers = (
         'Type', 'Event slug', 'Order', 'Payment ID', 'Creation date',
-        'Completion date', 'Status', 'Amount', 'Token', 'Wallet address'
+        'Completion date', 'Status', 'Fiat Amount', 'Token Amount', 'Token',
+        'ETH or DAI sender address', 'ETH or DAI receiver address',
+        'Transaction Hash', 'Chain ID', 'DAI contract address',
+        'Token Rate at time of order',
     )
 
     @property
@@ -117,25 +110,15 @@ class EthereumOrdersExporter(ListExporter):
             provider='ethereum'
         ).order_by('created')
 
-        refunds = OrderRefund.objects.filter(
-            order__event__in=self.events,
-            state__in=form_data.get('refund_states', []),
-            provider='ethereum'
-        ).order_by('created')
-
-        objs = sorted(list(payments) + list(refunds), key=lambda obj: obj.created)
-
         yield self.headers
 
-        yield self.ProgressSetTotal(total=len(objs))
-        for obj in objs:
+        yield self.ProgressSetTotal(total=payments.count())
+        for obj in payments:
             if isinstance(obj, OrderPayment):
                 row = payment_to_row(obj)
-            elif isinstance(obj, OrderRefund):
-                row = refund_to_row(obj)
             else:
                 raise Exception(
-                    'Invariant:Expected OrderPayment or OrderRefund, found {0}'.format((obj))
+                    'Invariant:Expected OrderPayment, found {0}'.format((obj))
                 )
             yield row
 

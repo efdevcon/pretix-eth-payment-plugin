@@ -15,37 +15,46 @@ jobs:
           - python-version: 3.8
             toxenv: py38-core
           - python-version: 3.8
+            toxenv: lint
+          - python-version: 3.8
             toxenv: py38-integration
           - python-version: 3.9
             toxenv: py39-core
           - python-version: 3.9
             toxenv: py39-integration
-          - python-version: 3.8
-            toxenv: lint
-          
+          - python-version: "3.10"
+            toxenv: py310-core
+          - python-version: "3.10"
+            toxenv: py310-integration
+          # - python-version: "3.11"
+          #   toxenv: py311-core
+          # - python-version: "3.11"
+          #   toxenv: py311-integration
+
     steps:
-    - uses: actions/checkout@v2
-    - uses: actions/setup-python@v2
-      with:
-        python-version: ${{ matrix.python-version }}
-    
-    - uses: actions/cache@v2
-      with:
+      - uses: actions/checkout@v2
+      - uses: actions/setup-python@v2
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - uses: actions/cache@v2
+        with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('**/setup.py') }}
           restore-keys: |
             ${{ runner.os }}-pip-
 
-    - name: Install Dependencies
-      if: steps.cache.outputs.cache-hit != 'true'
-      run: |
-        python -m pip install --upgrade pip wheel setuptools
-        pip install -e .[dev]
+      - name: Install Dependencies
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          python -m pip install --upgrade pip==23.1.2 wheel==0.40.0 setuptools==68.0.0
+          pip install -e .[dev] --use-deprecated=legacy-resolver
 
-    - name: Pip Check
-      run: pip check
+      - name: Pip Check
+        run: pip check
 
-    - name: ${{ matrix.toxenv }}
-      run: tox 
-      env: 
-        TOXENV: ${{ matrix.toxenv }}
+      - name: ${{ matrix.toxenv }}
+        run: tox
+        env:
+          WEB3_PROVIDER_URI: ${{ secrets.WEB3_PROVIDER_URI }}
+          TOXENV: ${{ matrix.toxenv }}

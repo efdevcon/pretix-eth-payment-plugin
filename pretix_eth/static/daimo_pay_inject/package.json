@@ -1,0 +1,24 @@
+{
+  "name": "daimo_pay_inject",
+  "version": "1.0.0",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "esbuild src/index.tsx --outdir=dist --metafile=dist/meta.json --bundle --minify --format=esm --splitting --entry-names=pretix-eth-5 --chunk-names=pretix-eth-5-[name]-[hash]",
+    "dev": "esbuild src/index.tsx --outdir=dist --bundle --watch --format=esm --splitting --entry-names=pretix-eth-5 --chunk-names=pretix-eth-5-[name]-[hash]",
+    "test": "tsc"
+  },
+  "author": "",
+  "license": "GPL-3.0-or-later",
+  "description": "",
+  "dependencies": {
+    "@daimo/pay": "^1.19.0",
+    "@tanstack/react-query": "^5.64.2",
+    "esbuild": "^0.24.2",
+    "porto": "^0.2.8",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "typescript": "^5.7.3",
+    "viem": "^2.37.6",
+    "wagmi": "^2.16.9"
+  }
+}
