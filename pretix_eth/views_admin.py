@@ -2,13 +2,16 @@
 import json
 import logging
 from decimal import Decimal
+from typing import Optional
 
 from django.http import JsonResponse, HttpRequest
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django_scopes import scopes_disabled
 
-from pretix_eth.models import X402CompletedOrder, X402PendingOrder
+from pretix_eth.models import (
+    SignedMessage, WCPaymentAttempt, X402CompletedOrder, X402PendingOrder,
+)
 from pretix_eth.x402.auth import require_pretix_token
 from pretix_eth.x402 import ticketstore
 
@@ -45,6 +48,7 @@ def _get_event(org_slug: str, event_slug: str):
 
 def _serialize_completed(o: X402CompletedOrder) -> dict:
     return {
+        'source': 'x402',
         'paymentReference': o.payment_reference,
         'txHash': o.tx_hash,
         'pretixOrderCode': o.pretix_order_code,
@@ -58,6 +62,42 @@ def _serialize_completed(o: X402CompletedOrder) -> dict:
         'refundStatus': o.refund_status,
         'refundTxHash': o.refund_tx_hash,
         'refundMeta': o.refund_meta or {},
+    }
+
+
+def _serialize_signed_message(m: SignedMessage) -> dict:
+    """Legacy daimo-era WalletConnect flow. Each confirmed SignedMessage
+    corresponds to one successful crypto payment whose Pretix order lives in
+    `m.order_payment.order`."""
+    op = m.order_payment
+    order = op.order if op else None
+    total = getattr(op, 'amount', None)
+    return {
+        'source': 'signed_message',
+        'paymentReference': None,
+        'txHash': m.transaction_hash,
+        'pretixOrderCode': order.code if order else None,
+        'payer': m.sender_address,
+        'completedAt': int(m.created_at.timestamp()) if m.created_at else None,
+        'chainId': m.chain_id,
+        'totalUsd': str(total) if total is not None else None,
+        'tokenSymbol': None,
+    }
+
+
+def _serialize_wc_attempt(w: WCPaymentAttempt, total: Optional[Decimal]) -> dict:
+    """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
+    the tx hash was verified on-chain and the Pretix order confirmed."""
+    return {
+        'source': 'wc_attempt',
+        'paymentReference': w.quote_id,
+        'txHash': w.tx_hash,
+        'pretixOrderCode': w.order_code,
+        'payer': w.payer,
+        'completedAt': int(w.created_at.timestamp()) if w.created_at else None,
+        'chainId': w.chain_id,
+        'totalUsd': str(total) if total is not None else None,
+        'tokenSymbol': None,
     }
 
 
@@ -92,16 +132,52 @@ def admin_orders(request: HttpRequest):
     # TODO: enforce event-level authorization — verify token.team has access to event.organizer
 
     from django.db.models import Sum, Count
+    from pretix.base.models import Order
     with scopes_disabled():
         completed_qs = X402CompletedOrder.objects.filter(event=event)
         pending_qs = X402PendingOrder.objects.filter(event=event)
-        completed = [_serialize_completed(o) for o in completed_qs.order_by('-completed_at')[:500]]
+        x402_rows = [_serialize_completed(o) for o in completed_qs.order_by('-completed_at')[:500]]
         pending = [_serialize_pending(o) for o in pending_qs.order_by('-created_at')[:200]]
+
+        # Legacy non-x402 crypto payments (daimo SignedMessage + WalletConnect
+        # direct-send attempts). Merged into `completed` with a `source`
+        # discriminator so the admin UI can render one unified table.
+        signed_msgs = (
+            SignedMessage.objects
+            .filter(order_payment__order__event=event, invalid=False)
+            .exclude(transaction_hash__isnull=True)
+            .select_related('order_payment', 'order_payment__order')
+            .order_by('-created_at')[:500]
+        )
+        legacy_signed = [_serialize_signed_message(m) for m in signed_msgs]
+
+        wc_attempts = (
+            WCPaymentAttempt.objects
+            .filter(state=WCPaymentAttempt.STATE_COMPLETED)
+            .order_by('-created_at')[:500]
+        )
+        wc_codes = {w.order_code for w in wc_attempts}
+        orders_by_code = {
+            o.code: o for o in Order.objects.filter(event=event, code__in=wc_codes)
+        } if wc_codes else {}
+        legacy_wc = [
+            _serialize_wc_attempt(w, orders_by_code[w.order_code].total if w.order_code in orders_by_code else None)
+            for w in wc_attempts if w.order_code in orders_by_code
+        ]
+
+        completed = sorted(
+            x402_rows + legacy_signed + legacy_wc,
+            key=lambda r: r.get('completedAt') or 0,
+            reverse=True,
+        )
+
         agg = completed_qs.aggregate(total=Sum('total_usd'), count=Count('payment_reference'))
         total_usd = agg['total'] or Decimal('0')
         stats = {
             'pending': pending_qs.count(),
-            'completed': agg['count'] or 0,
+            'completed': len(completed),
+            'x402Count': agg['count'] or 0,
+            'legacyCount': len(legacy_signed) + len(legacy_wc),
             'totalUsd': str(total_usd.quantize(Decimal('0.01'))),
         }
 
