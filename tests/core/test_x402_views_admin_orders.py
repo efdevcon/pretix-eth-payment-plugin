@@ -26,6 +26,57 @@ def test_admin_orders_lists_all(api_client, event):
     body = resp.json()
     assert body['success'] is True
     assert len(body['completed']) == 2
+    # camelCase contract (devcon admin UI reads these names directly)
+    row = body['completed'][0]
+    for k in ('paymentReference', 'txHash', 'pretixOrderCode', 'payer',
+              'completedAt', 'chainId', 'totalUsd', 'tokenSymbol'):
+        assert k in row, f'missing key: {k}'
+    # completedAt is unix-seconds, not ISO — admin UI multiplies by 1000
+    assert isinstance(row['completedAt'], int)
+    assert row['completedAt'] > 0
+    # stats rollup
+    assert body['stats']['completed'] == 2
+    assert body['stats']['pending'] == 0
+    assert body['stats']['totalUsd'] == '30.00'
+
+
+@pytest.mark.django_db
+def test_admin_orders_pending_row_shape(api_client, event):
+    """Pending rows must carry camelCase keys + unix-seconds timestamps + a
+    `metadata` bag rich enough for the admin table (ticketIds, addonIds, voucher)."""
+    from django.utils import timezone
+    from datetime import timedelta
+    with scopes_disabled():
+        X402PendingOrder.objects.create(
+            event=event, payment_reference='x402_p_shape', total_usd=Decimal('42.00'),
+            expires_at=timezone.now() + timedelta(hours=1),
+            intended_payer='0x' + 'f' * 40,
+            expected_chain_id=10,
+            order_data={
+                'email': 'pending@x.com',
+                'tickets': [],
+                'addons': [{'item': {'id': 17}, 'quantity': 1}, {'item': {'id': 18}}],
+                'voucher': 'VOUCHER123',
+            },
+            metadata={'ticketIds': [6], 'email': 'pending@x.com'},
+        )
+
+    resp = api_client.get(
+        f'/plugin/x402/admin/orders/?organizer={event.organizer.slug}&event={event.slug}',
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body['pending']) == 1
+    row = body['pending'][0]
+    for k in ('paymentReference', 'createdAt', 'expiresAt', 'intendedPayer',
+              'totalUsd', 'metadata', 'expectedChainId'):
+        assert k in row, f'missing key: {k}'
+    assert isinstance(row['createdAt'], int) and row['createdAt'] > 0
+    assert isinstance(row['expiresAt'], int) and row['expiresAt'] > 0
+    assert row['expectedChainId'] == 10
+    assert row['metadata']['ticketIds'] == [6]
+    assert row['metadata']['addonIds'] == [17, 18]
+    assert row['metadata']['voucher'] == 'VOUCHER123'
 
 
 @pytest.mark.django_db

@@ -45,30 +45,38 @@ def _get_event(org_slug: str, event_slug: str):
 
 def _serialize_completed(o: X402CompletedOrder) -> dict:
     return {
-        'payment_reference': o.payment_reference,
-        'tx_hash': o.tx_hash,
-        'pretix_order_code': o.pretix_order_code,
+        'paymentReference': o.payment_reference,
+        'txHash': o.tx_hash,
+        'pretixOrderCode': o.pretix_order_code,
         'payer': o.payer,
-        'completed_at': o.completed_at.isoformat(),
-        'chain_id': o.chain_id,
-        'total_usd': str(o.total_usd),
-        'token_symbol': o.token_symbol,
-        'crypto_amount': o.crypto_amount,
-        'gas_cost_wei': o.gas_cost_wei,
-        'refund_status': o.refund_status,
-        'refund_tx_hash': o.refund_tx_hash,
-        'refund_meta': o.refund_meta or {},
+        'completedAt': int(o.completed_at.timestamp()),
+        'chainId': o.chain_id,
+        'totalUsd': str(o.total_usd),
+        'tokenSymbol': o.token_symbol,
+        'cryptoAmount': o.crypto_amount,
+        'gasCostWei': o.gas_cost_wei,
+        'refundStatus': o.refund_status,
+        'refundTxHash': o.refund_tx_hash,
+        'refundMeta': o.refund_meta or {},
     }
 
 
 def _serialize_pending(o: X402PendingOrder) -> dict:
+    order_data = o.order_data or {}
+    addons = order_data.get('addons') or []
+    addon_ids = [a.get('item', {}).get('id') for a in addons if isinstance(a, dict)]
     return {
-        'payment_reference': o.payment_reference,
-        'created_at': o.created_at.isoformat(),
-        'expires_at': o.expires_at.isoformat(),
-        'intended_payer': o.intended_payer,
-        'total_usd': str(o.total_usd),
-        'metadata': o.metadata or {},
+        'paymentReference': o.payment_reference,
+        'createdAt': int(o.created_at.timestamp()),
+        'expiresAt': int(o.expires_at.timestamp()),
+        'intendedPayer': o.intended_payer,
+        'totalUsd': str(o.total_usd),
+        'expectedChainId': o.expected_chain_id,
+        'metadata': {
+            **(o.metadata or {}),
+            **({'addonIds': [i for i in addon_ids if i is not None]} if addon_ids else {}),
+            **({'voucher': order_data['voucher']} if order_data.get('voucher') else {}),
+        },
     }
 
 
@@ -83,13 +91,26 @@ def admin_orders(request: HttpRequest):
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
     # TODO: enforce event-level authorization — verify token.team has access to event.organizer
 
+    from django.db.models import Sum, Count
     with scopes_disabled():
-        completed = [_serialize_completed(o) for o in
-                     X402CompletedOrder.objects.filter(event=event).order_by('-completed_at')[:500]]
-        pending = [_serialize_pending(o) for o in
-                   X402PendingOrder.objects.filter(event=event).order_by('-created_at')[:200]]
+        completed_qs = X402CompletedOrder.objects.filter(event=event)
+        pending_qs = X402PendingOrder.objects.filter(event=event)
+        completed = [_serialize_completed(o) for o in completed_qs.order_by('-completed_at')[:500]]
+        pending = [_serialize_pending(o) for o in pending_qs.order_by('-created_at')[:200]]
+        agg = completed_qs.aggregate(total=Sum('total_usd'), count=Count('payment_reference'))
+        total_usd = agg['total'] or Decimal('0')
+        stats = {
+            'pending': pending_qs.count(),
+            'completed': agg['count'] or 0,
+            'totalUsd': str(total_usd.quantize(Decimal('0.01'))),
+        }
 
-    return JsonResponse({'success': True, 'completed': completed, 'pending': pending})
+    return JsonResponse({
+        'success': True,
+        'stats': stats,
+        'completed': completed,
+        'pending': pending,
+    })
 
 
 @csrf_exempt
