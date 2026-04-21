@@ -16,12 +16,19 @@ log = logging.getLogger(__name__)
 def _format_crypto_amount(raw, token_symbol):
     """Convert a stored raw on-chain integer (USDC/USDT0 in 6-decimal base units,
     ETH in wei) into a human-readable decimal string. Returns None on bad input
-    so the Pretix control template can omit the row entirely."""
+    so the Pretix control template can omit the row entirely.
+
+    Legacy quirk: historical rows from `views.py` stored `"<int> (raw)"` — strip
+    the suffix before parsing so those display correctly without a DB backfill."""
     if raw in (None, ''):
         return None
     decimals = 18 if token_symbol == 'ETH' else 6
+    # Tolerate the legacy "<int> (raw)" format written by views.py prior to fix.
+    s = str(raw).strip()
+    if s.endswith('(raw)'):
+        s = s[:-len('(raw)')].strip()
     try:
-        n = int(raw)
+        n = int(s)
     except (TypeError, ValueError):
         return str(raw)  # fall back to raw value for forward-compat
     if n == 0:

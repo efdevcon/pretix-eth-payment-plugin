@@ -409,7 +409,11 @@ def verify(request):
                 info['token_symbol'] = quote['symbol']
                 info['token_address'] = quote.get('token_address')
                 info['payer'] = quote['intended_payer']
-                info['amount'] = f"{quote['amount_raw']} (raw)"
+                # Store as a plain integer string — the payment_control_render
+                # helper formats it to human-readable decimals using the token
+                # symbol. The old `f"{raw} (raw)"` format leaked into the Pretix
+                # admin UI as literal text.
+                info['amount'] = str(quote['amount_raw'])
                 info['block_number'] = vr.block_number
                 payment.info_data = info
                 payment.save()

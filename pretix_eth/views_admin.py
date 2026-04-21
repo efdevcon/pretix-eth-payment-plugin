@@ -65,9 +65,23 @@ def _serialize_completed(o: X402CompletedOrder) -> dict:
     }
 
 
-def _serialize_wc_attempt(w: WCPaymentAttempt, total: Optional[Decimal]) -> dict:
+def _serialize_wc_attempt(
+    w: WCPaymentAttempt, total: Optional[Decimal], payment_info: Optional[dict] = None,
+) -> dict:
     """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
-    the tx hash was verified on-chain and the Pretix order confirmed."""
+    the tx hash was verified on-chain and the Pretix order confirmed.
+
+    `WCPaymentAttempt` itself doesn't carry `token_symbol` or raw amount, but the
+    verify handler in `views.py` mirrors that data onto the matching Pretix
+    `OrderPayment.info_data` at the same time. `payment_info` is that dict;
+    we read token_symbol + amount from it when available so the admin UI can
+    display accurate values instead of guessing."""
+    info = payment_info or {}
+    token_symbol = info.get('token_symbol')
+    # info['amount'] on legacy rows may be "<int> (raw)"; strip the suffix.
+    crypto_amount = info.get('amount')
+    if isinstance(crypto_amount, str) and crypto_amount.strip().endswith('(raw)'):
+        crypto_amount = crypto_amount.strip()[:-len('(raw)')].strip()
     return {
         'source': 'wc_attempt',
         'paymentReference': w.quote_id,
@@ -77,7 +91,8 @@ def _serialize_wc_attempt(w: WCPaymentAttempt, total: Optional[Decimal]) -> dict
         'completedAt': int(w.created_at.timestamp()) if w.created_at else None,
         'chainId': w.chain_id,
         'totalUsd': str(total) if total is not None else None,
-        'tokenSymbol': None,
+        'tokenSymbol': token_symbol,
+        'cryptoAmount': crypto_amount if crypto_amount else None,
     }
 
 
@@ -137,8 +152,27 @@ def admin_orders(request: HttpRequest):
             orders_by_code = {
                 o.code: o for o in Order.objects.filter(event=event, code__in=wc_codes)
             } if wc_codes else {}
+            # The legacy verify handler (views.py) writes token_symbol + amount
+            # into the matching Pretix OrderPayment.info_data by tx_hash. Pull
+            # that side so the admin UI can show accurate token + amount without
+            # relying on heuristics.
+            from pretix.base.models import OrderPayment
+            payments_by_tx: dict = {}
+            if wc_attempts:
+                tx_hashes = {w.tx_hash for w in wc_attempts}
+                for p in OrderPayment.objects.filter(
+                    order__event=event, provider='walletconnect',
+                ).only('id', 'info'):
+                    info = p.info_data or {}
+                    tx = info.get('tx_hash')
+                    if tx in tx_hashes:
+                        payments_by_tx[tx] = info
             legacy_wc = [
-                _serialize_wc_attempt(w, orders_by_code[w.order_code].total if w.order_code in orders_by_code else None)
+                _serialize_wc_attempt(
+                    w,
+                    total=orders_by_code[w.order_code].total if w.order_code in orders_by_code else None,
+                    payment_info=payments_by_tx.get(w.tx_hash),
+                )
                 for w in wc_attempts if w.order_code in orders_by_code
             ]
         except ProgrammingError as e:
