@@ -1,5 +1,5 @@
 # pretix_eth/x402/gas.py
-"""Gas price caps (ported from relayer.ts lines 80-86) and balance asserts."""
+"""Gas price caps (ported from relayer.ts lines 80-86)."""
 
 
 class GasConditionError(Exception):
@@ -16,13 +16,17 @@ GAS_CAPS_GWEI = {
     42161: 0.3,    # Arbitrum
 }
 
-# Minimum relayer ETH balance (across all chains) to cover gas.
-MIN_RELAYER_BALANCE_WEI = 10**14  # 0.0001 ETH
+# TODO: relayer balance monitoring is not enforced at tx time anymore; a drained
+# wallet surfaces only when a customer tries to pay. Add an admin-UI dashboard
+# / alerting path (e.g. periodic probe + warning banner) so operators learn
+# about low balances out-of-band.
 
 
-def assert_gas_conditions(*, w3, chain_id: int, relayer_addr: str) -> None:
-    """Raise GasConditionError if gas is too high or relayer balance too low.
-    Protects against runaway gas costs on the relayer wallet."""
+def assert_gas_conditions(*, w3, chain_id: int) -> None:
+    """Raise GasConditionError if the current network gas price is above our cap.
+    We no longer check relayer balance — if the wallet is empty, the RPC will
+    reject the tx with InsufficientFunds and the view translates that to a
+    non-retryable 502 for the client."""
     cap = GAS_CAPS_GWEI.get(chain_id)
     if cap is None:
         raise GasConditionError(f'No gas cap configured for chain {chain_id}')
@@ -30,9 +34,4 @@ def assert_gas_conditions(*, w3, chain_id: int, relayer_addr: str) -> None:
     if current_gwei > cap:
         raise GasConditionError(
             f'gas price {current_gwei:.4f} gwei exceeds cap {cap} gwei on chain {chain_id}',
-        )
-    bal = w3.eth.get_balance(relayer_addr)
-    if bal < MIN_RELAYER_BALANCE_WEI:
-        raise GasConditionError(
-            f'relayer balance {bal} wei below minimum {MIN_RELAYER_BALANCE_WEI} on chain {chain_id}',
         )

@@ -23,6 +23,12 @@ class RelayerError(Exception):
     pass
 
 
+class RelayerInsufficientFundsError(RelayerError):
+    """The relayer wallet is empty / cannot afford this tx. Operator must
+    top up — retrying immediately will not help."""
+    pass
+
+
 @dataclass
 class RelayerResult:
     tx_hash: str
@@ -63,8 +69,8 @@ def execute_transfer_with_authorization(
     w3 = _get_w3(chain_id, alchemy_key)
     account = _get_relayer_account(relayer_pk)
 
-    # 1. Gas price + relayer balance guard
-    assert_gas_conditions(w3=w3, chain_id=chain_id, relayer_addr=account.address)
+    # 1. Gas price guard (balance check removed — rely on RPC rejection)
+    assert_gas_conditions(w3=w3, chain_id=chain_id)
 
     contract = w3.eth.contract(address=token_address, abi=USDC_ABI)
 
@@ -114,12 +120,24 @@ def execute_transfer_with_authorization(
             bytes.fromhex(parts['s'][2:]),
         )
 
-    tx = call.build_transaction({
-        'from': account.address,
-        'nonce': w3.eth.get_transaction_count(account.address),
-        'chainId': chain_id,
-    })
-    signed = account.sign_transaction(tx)
-    raw = getattr(signed, 'raw_transaction', None) or signed.rawTransaction
-    tx_hash_bytes = w3.eth.send_raw_transaction(raw)
+    try:
+        tx = call.build_transaction({
+            'from': account.address,
+            'nonce': w3.eth.get_transaction_count(account.address),
+            'chainId': chain_id,
+        })
+        signed = account.sign_transaction(tx)
+        raw = getattr(signed, 'raw_transaction', None) or signed.rawTransaction
+        tx_hash_bytes = w3.eth.send_raw_transaction(raw)
+    except Exception as e:
+        # web3.py surfaces "insufficient funds for gas * price + value" either
+        # from the node (send_raw_transaction) or during gas estimation
+        # (build_transaction). Classify so the view can return a non-retryable
+        # status to the client.
+        msg = str(e).lower()
+        if 'insufficient funds' in msg or 'insufficient balance' in msg:
+            raise RelayerInsufficientFundsError(
+                f'relayer cannot afford tx on chain {chain_id}: {e}',
+            )
+        raise RelayerError(f'relayer broadcast failed: {e}')
     return RelayerResult(tx_hash='0x' + tx_hash_bytes.hex(), chain_id=chain_id)

@@ -27,7 +27,10 @@ from pretix_eth.x402.nonce import generate_nonce_bytes32
 from pretix_eth.x402.pretix_client import create_pretix_order, confirm_x402_payment
 from pretix_eth.x402.gas import GasConditionError
 from pretix_eth.x402.relayer import (
-    execute_transfer_with_authorization, RelayerError, RelayerResult,
+    execute_transfer_with_authorization,
+    RelayerError,
+    RelayerInsufficientFundsError,
+    RelayerResult,
 )
 from pretix_eth.x402.typed_data import build_transfer_authorization_typed_data
 
@@ -806,9 +809,21 @@ def execute_transfer(request):
             alchemy_key=alchemy_key,
         )
     except GasConditionError as e:
-        resp = JsonResponse({'success': False, 'error': str(e)}, status=503)
+        # Transient: network fees above our cap. Safe to retry in a short while.
+        resp = JsonResponse({
+            'success': False,
+            'error': str(e),
+            'category': 'gas_price_too_high',
+        }, status=503)
         resp['Retry-After'] = '30'
         return resp
+    except RelayerInsufficientFundsError as e:
+        # Non-retryable: wallet drained, operator must top up.
+        return JsonResponse({
+            'success': False,
+            'error': str(e),
+            'category': 'relayer_insufficient_funds',
+        }, status=502)
     except RelayerError as e:
         return JsonResponse({'success': False, 'error': str(e)}, status=503)
 
