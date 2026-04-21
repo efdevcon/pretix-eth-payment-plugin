@@ -140,18 +140,59 @@ class WalletConnectPayment(BasePaymentProvider):
     def payment_control_render(self, request: HttpRequest, payment) -> str:
         tpl = get_template('pretix_eth/control.html')
         info = payment.info_data or {}
+        # Fall back to the X402CompletedOrder row if the OrderPayment.info_data
+        # is missing fields (e.g. historical rows created before we started
+        # mirroring amount/token_symbol/block_number into info_data).
         chain_id = info.get('chain_id')
+        token_symbol = info.get('token_symbol')
+        amount_raw = info.get('amount')
+        payer = info.get('payer')
+        block_number = info.get('block_number')
+        tx_hash = info.get('tx_hash')
+        if not all([chain_id, token_symbol, amount_raw, payer]):
+            fallback = self._x402_fallback(payment)
+            if fallback:
+                chain_id = chain_id or fallback.get('chain_id')
+                token_symbol = token_symbol or fallback.get('token_symbol')
+                amount_raw = amount_raw or fallback.get('amount')
+                payer = payer or fallback.get('payer')
+                tx_hash = tx_hash or fallback.get('tx_hash')
         explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
         return tpl.render({
-            'tx_hash': info.get('tx_hash'),
+            'tx_hash': tx_hash,
             'chain_id': chain_id,
             'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
-            'token_symbol': info.get('token_symbol'),
-            'payer': info.get('payer'),
-            'amount': _format_crypto_amount(info.get('amount'), info.get('token_symbol')),
-            'block_number': info.get('block_number'),
-            'explorer_url': f'{explorer}{info.get("tx_hash", "")}' if info.get('tx_hash') else None,
+            'token_symbol': token_symbol,
+            'payer': payer,
+            'amount': _format_crypto_amount(amount_raw, token_symbol),
+            'block_number': block_number,
+            'explorer_url': f'{explorer}{tx_hash}' if tx_hash else None,
         })
+
+    @staticmethod
+    def _x402_fallback(payment) -> dict:
+        """Look up the matching X402CompletedOrder row (keyed on the Pretix
+        order code) so historical OrderPayment rows with thin info_data still
+        render usefully. Returns an empty dict when there's no match."""
+        try:
+            from pretix_eth.models import X402CompletedOrder
+            from django_scopes import scopes_disabled
+            with scopes_disabled():
+                row = X402CompletedOrder.objects.filter(
+                    event=payment.order.event, pretix_order_code=payment.order.code,
+                ).first()
+            if not row:
+                return {}
+            return {
+                'chain_id': row.chain_id,
+                'token_symbol': row.token_symbol,
+                'amount': row.crypto_amount,
+                'payer': row.payer,
+                'tx_hash': row.tx_hash,
+            }
+        except Exception as e:
+            log.warning('[x402 render] fallback lookup failed for payment %s: %s', payment.pk, e)
+            return {}
 
     def matching_id(self, payment):
         return (payment.info_data or {}).get('tx_hash')

@@ -208,6 +208,7 @@ def record_pretix_refund(
     (e.g. an orphan X402CompletedOrder from before the Pretix order was
     created, which shouldn't normally happen)."""
     import json as _json
+    from decimal import Decimal
     from pretix.base.models import Order, OrderRefund
     with scopes_disabled():
         try:
@@ -225,25 +226,40 @@ def record_pretix_refund(
                 pretix_order_code,
             )
             return None
+        # Create the refund in CREATED state, then call .done() — that path
+        # logs the action and, critically, flips payment.state to REFUNDED
+        # when the refund amount fully covers the payment. Creating directly
+        # in state=DONE skips that logic.
         refund = OrderRefund.objects.create(
             order=order,
             payment=payment,
             source=OrderRefund.REFUND_SOURCE_ADMIN,
-            state=OrderRefund.REFUND_STATE_DONE,
-            amount=amount,
+            state=OrderRefund.REFUND_STATE_CREATED,
+            amount=Decimal(amount),
             provider='walletconnect',
             info=_json.dumps({
                 'refund_tx_hash': refund_tx_hash,
                 'chain_id': chain_id,
             }),
-            execution_date=timezone.now(),
         )
-        # Let Pretix re-evaluate whether the order is now fully refunded and
-        # update its status accordingly (logs entries + notifications).
-        try:
-            order.create_transactions()
-        except Exception as e:
-            log.warning('[x402 refund] create_transactions failed for order %s: %s', order.code, e)
+        refund.done()
+
+        # Cancel the order when this refund covers the full payment — so the
+        # Pretix order status flips away from PAID and the UI reflects reality.
+        # Partial refunds are left alone (order stays PAID, payment stays in
+        # its new REFUNDED state).
+        if payment.refunded_amount >= payment.amount:
+            try:
+                from pretix.base.services.orders import _cancel_order
+                _cancel_order(
+                    order, user=None, send_mail=False,
+                    cancellation_fee=Decimal('0'), cancel_invoice=True,
+                )
+            except Exception as e:
+                log.warning(
+                    '[x402 refund] cancel_order failed for %s (refund still recorded): %s',
+                    order.code, e,
+                )
         return refund
 
 
