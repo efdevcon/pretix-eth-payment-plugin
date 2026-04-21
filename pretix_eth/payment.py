@@ -13,6 +13,27 @@ from pretix_eth.chains import SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA
 log = logging.getLogger(__name__)
 
 
+def _format_crypto_amount(raw, token_symbol):
+    """Convert a stored raw on-chain integer (USDC/USDT0 in 6-decimal base units,
+    ETH in wei) into a human-readable decimal string. Returns None on bad input
+    so the Pretix control template can omit the row entirely."""
+    if raw in (None, ''):
+        return None
+    decimals = 18 if token_symbol == 'ETH' else 6
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return str(raw)  # fall back to raw value for forward-compat
+    if n == 0:
+        return '0'
+    base = 10 ** decimals
+    whole, frac = divmod(n, base)
+    if frac == 0:
+        return str(whole)
+    frac_str = f'{frac:0{decimals}d}'.rstrip('0')
+    return f'{whole}.{frac_str}'
+
+
 class WalletConnectPayment(BasePaymentProvider):
     identifier = 'walletconnect'
     verbose_name = _('Pay with crypto (WalletConnect)')
@@ -127,7 +148,7 @@ class WalletConnectPayment(BasePaymentProvider):
             'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
             'token_symbol': info.get('token_symbol'),
             'payer': info.get('payer'),
-            'amount': info.get('amount'),
+            'amount': _format_crypto_amount(info.get('amount'), info.get('token_symbol')),
             'block_number': info.get('block_number'),
             'explorer_url': f'{explorer}{info.get("tx_hash", "")}' if info.get('tx_hash') else None,
         })
