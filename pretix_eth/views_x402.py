@@ -934,6 +934,23 @@ def verify(request):
     if not vr.verified:
         return JsonResponse({'success': False, 'error': vr.error}, status=400)
 
+    # Record crypto amount paid (for admin reporting) + relayer-sponsored gas.
+    # Only ERC-20 flows go through our relayer; native ETH payers cover their
+    # own gas, so gas_cost_wei stays null there.
+    crypto_amount = (
+        str(expected_wei_str) if body['symbol'] == 'ETH' else str(expected_amount)
+    )
+    gas_cost_wei = None
+    if body['symbol'] in ('USDC', 'USDT0'):
+        try:
+            receipt = w3.eth.get_transaction_receipt(tx_hash)
+            gas_used = int(receipt.get('gasUsed', 0) or 0)
+            effective_price = int(receipt.get('effectiveGasPrice', 0) or 0)
+            if gas_used and effective_price:
+                gas_cost_wei = str(gas_used * effective_price)
+        except Exception as e:
+            log.warning('Could not fetch receipt for gas accounting (tx=%s): %s', tx_hash, e)
+
     # Atomic claim + reserve
     with scopes_disabled():
         claimed = ticketstore.claim_pending_order(event=event, payment_reference=body['payment_reference'])
@@ -946,6 +963,7 @@ def verify(request):
                 payment_reference=body['payment_reference'],
                 payer=body['payer'], chain_id=chain_id,
                 total_usd=claimed.total_usd, token_symbol=body['symbol'],
+                crypto_amount=crypto_amount, gas_cost_wei=gas_cost_wei,
             )
         except ticketstore.TxHashAlreadyUsedError:
             ticketstore.store_pending_order(

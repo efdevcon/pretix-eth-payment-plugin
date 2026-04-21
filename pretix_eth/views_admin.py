@@ -49,6 +49,9 @@ def _get_event(org_slug: str, event_slug: str):
 def _serialize_completed(o: X402CompletedOrder) -> dict:
     return {
         'source': 'x402',
+        # x402 orders always originate from the custom frontend — the `/plugin/x402/*`
+        # endpoints are not invoked by Pretix's native checkout flow.
+        'origin': 'custom_frontend',
         'paymentReference': o.payment_reference,
         'txHash': o.tx_hash,
         'pretixOrderCode': o.pretix_order_code,
@@ -74,6 +77,9 @@ def _serialize_signed_message(m: SignedMessage) -> dict:
     total = getattr(op, 'amount', None)
     return {
         'source': 'signed_message',
+        # SignedMessage is tied to a Pretix OrderPayment — those only exist
+        # for orders created through Pretix's native checkout UI.
+        'origin': 'pretix_checkout',
         'paymentReference': None,
         'txHash': m.transaction_hash,
         'pretixOrderCode': order.code if order else None,
@@ -90,6 +96,11 @@ def _serialize_wc_attempt(w: WCPaymentAttempt, total: Optional[Decimal]) -> dict
     the tx hash was verified on-chain and the Pretix order confirmed."""
     return {
         'source': 'wc_attempt',
+        # Written by the `/plugin/wc/*` endpoints — historically invoked by the
+        # custom devcon frontend. (If a future revision wires payment.py to
+        # hit these same endpoints from Pretix-native checkout, this label will
+        # need to be data-driven rather than hard-coded.)
+        'origin': 'custom_frontend',
         'paymentReference': w.quote_id,
         'txHash': w.tx_hash,
         'pretixOrderCode': w.order_code,
@@ -132,6 +143,7 @@ def admin_orders(request: HttpRequest):
     # TODO: enforce event-level authorization — verify token.team has access to event.organizer
 
     from django.db.models import Sum, Count
+    from django.db.utils import ProgrammingError
     from pretix.base.models import Order
     with scopes_disabled():
         completed_qs = X402CompletedOrder.objects.filter(event=event)
@@ -142,28 +154,48 @@ def admin_orders(request: HttpRequest):
         # Legacy non-x402 crypto payments (daimo SignedMessage + WalletConnect
         # direct-send attempts). Merged into `completed` with a `source`
         # discriminator so the admin UI can render one unified table.
-        signed_msgs = (
-            SignedMessage.objects
-            .filter(order_payment__order__event=event, invalid=False)
-            .exclude(transaction_hash__isnull=True)
-            .select_related('order_payment', 'order_payment__order')
-            .order_by('-created_at')[:500]
-        )
-        legacy_signed = [_serialize_signed_message(m) for m in signed_msgs]
+        #
+        # Restrict the SELECT to only the columns the serializer actually reads.
+        # The production DB may have an older schema than the installed model
+        # declares (e.g. it might be missing `safe_app_transaction_url` from
+        # migration 0008); `.only()` keeps Django from referencing those cols.
+        legacy_signed: list = []
+        try:
+            signed_msgs = (
+                SignedMessage.objects
+                .filter(order_payment__order__event=event, invalid=False)
+                .exclude(transaction_hash__isnull=True)
+                .only(
+                    'id', 'transaction_hash', 'sender_address', 'chain_id',
+                    'created_at', 'invalid', 'order_payment_id',
+                )
+                .select_related('order_payment', 'order_payment__order')
+                .order_by('-created_at')[:500]
+            )
+            legacy_signed = [_serialize_signed_message(m) for m in signed_msgs]
+        except ProgrammingError as e:
+            # Schema drift between model and DB — log and continue without
+            # legacy rows rather than 500ing the whole admin page.
+            log.warning('SignedMessage schema drift, skipping legacy rows: %s', e)
 
-        wc_attempts = (
-            WCPaymentAttempt.objects
-            .filter(state=WCPaymentAttempt.STATE_COMPLETED)
-            .order_by('-created_at')[:500]
-        )
-        wc_codes = {w.order_code for w in wc_attempts}
-        orders_by_code = {
-            o.code: o for o in Order.objects.filter(event=event, code__in=wc_codes)
-        } if wc_codes else {}
-        legacy_wc = [
-            _serialize_wc_attempt(w, orders_by_code[w.order_code].total if w.order_code in orders_by_code else None)
-            for w in wc_attempts if w.order_code in orders_by_code
-        ]
+        legacy_wc: list = []
+        try:
+            wc_attempts = list(
+                WCPaymentAttempt.objects
+                .filter(state=WCPaymentAttempt.STATE_COMPLETED)
+                .only('id', 'tx_hash', 'quote_id', 'order_code', 'payer', 'chain_id', 'state', 'created_at')
+                .order_by('-created_at')[:500]
+            )
+            wc_codes = {w.order_code for w in wc_attempts}
+            orders_by_code = {
+                o.code: o for o in Order.objects.filter(event=event, code__in=wc_codes)
+            } if wc_codes else {}
+            legacy_wc = [
+                _serialize_wc_attempt(w, orders_by_code[w.order_code].total if w.order_code in orders_by_code else None)
+                for w in wc_attempts if w.order_code in orders_by_code
+            ]
+        except ProgrammingError as e:
+            log.warning('WCPaymentAttempt schema drift, skipping legacy rows: %s', e)
 
         completed = sorted(
             x402_rows + legacy_signed + legacy_wc,

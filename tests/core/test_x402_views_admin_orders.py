@@ -28,10 +28,12 @@ def test_admin_orders_lists_all(api_client, event):
     assert len(body['completed']) == 2
     # camelCase contract (devcon admin UI reads these names directly)
     row = body['completed'][0]
-    for k in ('source', 'paymentReference', 'txHash', 'pretixOrderCode', 'payer',
-              'completedAt', 'chainId', 'totalUsd', 'tokenSymbol'):
+    for k in ('source', 'origin', 'paymentReference', 'txHash', 'pretixOrderCode', 'payer',
+              'completedAt', 'chainId', 'totalUsd', 'tokenSymbol',
+              'cryptoAmount', 'gasCostWei'):
         assert k in row, f'missing key: {k}'
     assert row['source'] == 'x402'
+    assert row['origin'] == 'custom_frontend'
     # completedAt is unix-seconds, not ISO — admin UI multiplies by 1000
     assert isinstance(row['completedAt'], int)
     assert row['completedAt'] > 0
@@ -110,9 +112,12 @@ def test_admin_orders_includes_legacy_crypto(api_client, event, get_order_and_pa
     )
     assert resp.status_code == 200
     body = resp.json()
-    # Legacy rows are merged into `completed`, distinguished by `source`.
+    # Legacy rows are merged into `completed`, distinguished by `source` + `origin`.
     sources = sorted(r['source'] for r in body['completed'])
     assert sources == ['signed_message', 'wc_attempt']
+    by_source = {r['source']: r for r in body['completed']}
+    assert by_source['signed_message']['origin'] == 'pretix_checkout'
+    assert by_source['wc_attempt']['origin'] == 'custom_frontend'
     assert body['stats']['legacyCount'] == 2
     assert body['stats']['x402Count'] == 0
     assert body['stats']['completed'] == 2
