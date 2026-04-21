@@ -1,26 +1,38 @@
 {% load i18n %}
 <dl class="dl-horizontal">
-  <dt>{% trans "Chain" %}</dt>
-  <dd>{{ chain_name }} ({{ chain_id }})</dd>
+  {% if chain_name or chain_id %}
+    <dt>{% trans "Chain" %}</dt>
+    <dd>{{ chain_name|default:"" }}{% if chain_id %} ({{ chain_id }}){% endif %}</dd>
+  {% endif %}
 
-  <dt>{% trans "Token" %}</dt>
-  <dd>{{ token_symbol }}</dd>
+  {% if token_symbol %}
+    <dt>{% trans "Token" %}</dt>
+    <dd>{{ token_symbol }}</dd>
+  {% endif %}
 
-  <dt>{% trans "Amount" %}</dt>
-  <dd>{{ amount }}</dd>
+  {% if amount %}
+    <dt>{% trans "Amount" %}</dt>
+    <dd>{{ amount }}</dd>
+  {% endif %}
 
-  <dt>{% trans "Payer" %}</dt>
-  <dd><code>{{ payer }}</code></dd>
+  {% if payer %}
+    <dt>{% trans "Payer" %}</dt>
+    <dd><code>{{ payer }}</code></dd>
+  {% endif %}
 
-  <dt>{% trans "Transaction" %}</dt>
-  <dd>
-    {% if explorer_url %}
-      <a href="{{ explorer_url }}" target="_blank" rel="noopener">{{ tx_hash }}</a>
-    {% else %}
-      <code>{{ tx_hash }}</code>
-    {% endif %}
-  </dd>
+  {% if tx_hash %}
+    <dt>{% trans "Transaction" %}</dt>
+    <dd>
+      {% if explorer_url %}
+        <a href="{{ explorer_url }}" target="_blank" rel="noopener">{{ tx_hash }}</a>
+      {% else %}
+        <code>{{ tx_hash }}</code>
+      {% endif %}
+    </dd>
+  {% endif %}
 
-  <dt>{% trans "Block" %}</dt>
-  <dd>{{ block_number }}</dd>
+  {% if block_number %}
+    <dt>{% trans "Block" %}</dt>
+    <dd>{{ block_number }}</dd>
+  {% endif %}
 </dl>

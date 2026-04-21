@@ -10,7 +10,7 @@ from django.views.decorators.http import require_http_methods
 from django_scopes import scopes_disabled
 
 from pretix_eth.models import (
-    SignedMessage, WCPaymentAttempt, X402CompletedOrder, X402PendingOrder,
+    WCPaymentAttempt, X402CompletedOrder, X402PendingOrder,
 )
 from pretix_eth.x402.auth import require_pretix_token
 from pretix_eth.x402 import ticketstore
@@ -49,9 +49,6 @@ def _get_event(org_slug: str, event_slug: str):
 def _serialize_completed(o: X402CompletedOrder) -> dict:
     return {
         'source': 'x402',
-        # x402 orders always originate from the custom frontend — the `/plugin/x402/*`
-        # endpoints are not invoked by Pretix's native checkout flow.
-        'origin': 'custom_frontend',
         'paymentReference': o.payment_reference,
         'txHash': o.tx_hash,
         'pretixOrderCode': o.pretix_order_code,
@@ -68,39 +65,11 @@ def _serialize_completed(o: X402CompletedOrder) -> dict:
     }
 
 
-def _serialize_signed_message(m: SignedMessage) -> dict:
-    """Legacy daimo-era WalletConnect flow. Each confirmed SignedMessage
-    corresponds to one successful crypto payment whose Pretix order lives in
-    `m.order_payment.order`."""
-    op = m.order_payment
-    order = op.order if op else None
-    total = getattr(op, 'amount', None)
-    return {
-        'source': 'signed_message',
-        # SignedMessage is tied to a Pretix OrderPayment — those only exist
-        # for orders created through Pretix's native checkout UI.
-        'origin': 'pretix_checkout',
-        'paymentReference': None,
-        'txHash': m.transaction_hash,
-        'pretixOrderCode': order.code if order else None,
-        'payer': m.sender_address,
-        'completedAt': int(m.created_at.timestamp()) if m.created_at else None,
-        'chainId': m.chain_id,
-        'totalUsd': str(total) if total is not None else None,
-        'tokenSymbol': None,
-    }
-
-
 def _serialize_wc_attempt(w: WCPaymentAttempt, total: Optional[Decimal]) -> dict:
     """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
     the tx hash was verified on-chain and the Pretix order confirmed."""
     return {
         'source': 'wc_attempt',
-        # Written by the `/plugin/wc/*` endpoints — historically invoked by the
-        # custom devcon frontend. (If a future revision wires payment.py to
-        # hit these same endpoints from Pretix-native checkout, this label will
-        # need to be data-driven rather than hard-coded.)
-        'origin': 'custom_frontend',
         'paymentReference': w.quote_id,
         'txHash': w.tx_hash,
         'pretixOrderCode': w.order_code,
@@ -151,33 +120,11 @@ def admin_orders(request: HttpRequest):
         x402_rows = [_serialize_completed(o) for o in completed_qs.order_by('-completed_at')[:500]]
         pending = [_serialize_pending(o) for o in pending_qs.order_by('-created_at')[:200]]
 
-        # Legacy non-x402 crypto payments (daimo SignedMessage + WalletConnect
-        # direct-send attempts). Merged into `completed` with a `source`
-        # discriminator so the admin UI can render one unified table.
-        #
-        # Restrict the SELECT to only the columns the serializer actually reads.
-        # The production DB may have an older schema than the installed model
-        # declares (e.g. it might be missing `safe_app_transaction_url` from
-        # migration 0008); `.only()` keeps Django from referencing those cols.
-        legacy_signed: list = []
-        try:
-            signed_msgs = (
-                SignedMessage.objects
-                .filter(order_payment__order__event=event, invalid=False)
-                .exclude(transaction_hash__isnull=True)
-                .only(
-                    'id', 'transaction_hash', 'sender_address', 'chain_id',
-                    'created_at', 'invalid', 'order_payment_id',
-                )
-                .select_related('order_payment', 'order_payment__order')
-                .order_by('-created_at')[:500]
-            )
-            legacy_signed = [_serialize_signed_message(m) for m in signed_msgs]
-        except ProgrammingError as e:
-            # Schema drift between model and DB — log and continue without
-            # legacy rows rather than 500ing the whole admin page.
-            log.warning('SignedMessage schema drift, skipping legacy rows: %s', e)
-
+        # Legacy pre-x402 WalletConnect direct-send rows are merged into
+        # `completed` with `source='wc_attempt'` so the unified admin table
+        # can show them. Daimo-era SignedMessage rows are intentionally
+        # excluded — they predate all the current flows and aren't useful
+        # operational data for today's admins.
         legacy_wc: list = []
         try:
             wc_attempts = list(
@@ -198,7 +145,7 @@ def admin_orders(request: HttpRequest):
             log.warning('WCPaymentAttempt schema drift, skipping legacy rows: %s', e)
 
         completed = sorted(
-            x402_rows + legacy_signed + legacy_wc,
+            x402_rows + legacy_wc,
             key=lambda r: r.get('completedAt') or 0,
             reverse=True,
         )
@@ -209,7 +156,7 @@ def admin_orders(request: HttpRequest):
             'pending': pending_qs.count(),
             'completed': len(completed),
             'x402Count': agg['count'] or 0,
-            'legacyCount': len(legacy_signed) + len(legacy_wc),
+            'legacyCount': len(legacy_wc),
             'totalUsd': str(total_usd.quantize(Decimal('0.01'))),
         }
 

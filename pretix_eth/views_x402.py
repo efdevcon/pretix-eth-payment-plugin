@@ -997,6 +997,8 @@ def verify(request):
         confirm_x402_payment(
             order=pretix_order, tx_hash=tx_hash, payer=body['payer'],
             chain_id=chain_id, token_symbol=body['symbol'],
+            block_number=vr.block_number,
+            amount=crypto_amount,
         )
         ticketstore.finalize_completed_order(
             event=event, payment_reference=body['payment_reference'],

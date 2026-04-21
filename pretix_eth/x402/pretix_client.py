@@ -12,6 +12,7 @@ Supports the same fields as the devcon implementation:
 """
 import logging
 from decimal import Decimal
+from typing import Optional
 from django.utils import timezone
 from django_scopes import scopes_disabled
 
@@ -195,8 +196,14 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
     return order
 
 
-def confirm_x402_payment(*, order, tx_hash: str, payer: str, chain_id: int, token_symbol: str):
+def confirm_x402_payment(
+    *, order, tx_hash: str, payer: str, chain_id: int, token_symbol: str,
+    block_number: Optional[int] = None,
+    amount: Optional[str] = None,
+):
     """Mark the wc payment as confirmed and embed tx metadata in info_data.
+    `block_number` and `amount` are optional — the Pretix control panel template
+    hides rows with no value, so passing None just means those rows don't render.
     Returns the OrderPayment instance or None if no matching payment was found."""
     with scopes_disabled():
         payment = order.payments.filter(provider='walletconnect', state='created').first()
@@ -213,6 +220,10 @@ def confirm_x402_payment(*, order, tx_hash: str, payer: str, chain_id: int, toke
             'chain_id': chain_id,
             'token_symbol': token_symbol,
         })
+        if block_number is not None:
+            info['block_number'] = block_number
+        if amount is not None:
+            info['amount'] = amount
         payment.info_data = info
         payment.save()
         payment.confirm()
