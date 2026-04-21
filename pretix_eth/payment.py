@@ -157,6 +157,21 @@ class WalletConnectPayment(BasePaymentProvider):
                 amount_raw = amount_raw or fallback.get('amount')
                 payer = payer or fallback.get('payer')
                 tx_hash = tx_hash or fallback.get('tx_hash')
+
+        # Format the amount. Three cases:
+        #   1. We have a raw integer and a token symbol → divide by decimals.
+        #   2. No raw value but it's a stablecoin → fall back to payment.amount
+        #      (the Pretix OrderPayment amount, stored in event currency), since
+        #      USDC/USDT0 are 1:1 with USD. This covers legacy rows that never
+        #      had crypto_amount populated.
+        #   3. No raw value and not a stable (or unknown token) → omit the row.
+        amount_display = _format_crypto_amount(amount_raw, token_symbol)
+        if amount_display is None and token_symbol in ('USDC', 'USDT0'):
+            try:
+                amount_display = str(payment.amount)
+            except Exception:
+                pass
+
         explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
         return tpl.render({
             'tx_hash': tx_hash,
@@ -164,7 +179,7 @@ class WalletConnectPayment(BasePaymentProvider):
             'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
             'token_symbol': token_symbol,
             'payer': payer,
-            'amount': _format_crypto_amount(amount_raw, token_symbol),
+            'amount': amount_display,
             'block_number': block_number,
             'explorer_url': f'{explorer}{tx_hash}' if tx_hash else None,
         })
@@ -196,6 +211,26 @@ class WalletConnectPayment(BasePaymentProvider):
 
     def matching_id(self, payment):
         return (payment.info_data or {}).get('tx_hash')
+
+    def refund_control_render(self, request: HttpRequest, refund) -> str:
+        """Render the refund details section on the Pretix order page. The
+        refund's `info` JSON carries the on-chain tx hash + chain id we wrote
+        in `record_pretix_refund`; surface them with an explorer link."""
+        import json
+        try:
+            info = json.loads(refund.info or '{}') if isinstance(refund.info, str) else (refund.info_data or {})
+        except (ValueError, TypeError):
+            info = {}
+        tx_hash = info.get('refund_tx_hash')
+        chain_id = info.get('chain_id')
+        explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
+        tpl = get_template('pretix_eth/refund.html')
+        return tpl.render({
+            'tx_hash': tx_hash,
+            'chain_id': chain_id,
+            'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
+            'explorer_url': f'{explorer}{tx_hash}' if tx_hash and explorer else None,
+        })
 
     def payment_refund_supported(self, payment):
         return False
