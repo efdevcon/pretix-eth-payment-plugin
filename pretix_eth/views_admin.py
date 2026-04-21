@@ -232,8 +232,30 @@ def admin_refund(request: HttpRequest):
             ok = ticketstore.finalize_refund(
                 event=event, payment_reference=payment_reference, refund_tx_hash=tx_hash,
             )
-        if not ok:
-            return JsonResponse({'success': False, 'error': 'no pending refund to confirm'}, status=409)
+            if not ok:
+                return JsonResponse({'success': False, 'error': 'no pending refund to confirm'}, status=409)
+            # Mirror the refund into Pretix so it shows up in the native admin.
+            # Best-effort — failures are logged but don't undo the CAS above,
+            # since the on-chain refund already happened and our bookkeeping
+            # is correct; the Pretix side can always be reconciled later.
+            completed = X402CompletedOrder.objects.filter(
+                event=event, payment_reference=payment_reference,
+            ).first()
+            if completed and completed.pretix_order_code:
+                from pretix_eth.x402.pretix_client import record_pretix_refund
+                try:
+                    record_pretix_refund(
+                        event=event,
+                        pretix_order_code=completed.pretix_order_code,
+                        amount=completed.total_usd,
+                        refund_tx_hash=tx_hash,
+                        chain_id=completed.chain_id,
+                    )
+                except Exception as e:
+                    log.warning(
+                        '[x402 refund] failed to record Pretix OrderRefund for %s: %s',
+                        payment_reference, e,
+                    )
         return JsonResponse({'success': True})
 
     if action == 'fail':

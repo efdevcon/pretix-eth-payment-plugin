@@ -196,6 +196,57 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
     return order
 
 
+def record_pretix_refund(
+    *, event, pretix_order_code: str, amount, refund_tx_hash: str, chain_id: int,
+):
+    """Create a matching Pretix OrderRefund so the refund is visible in
+    Pretix's native order-detail UI (not just our custom admin page).
+
+    We build the OrderRefund directly in state=DONE with source=external and
+    attach the on-chain refund tx hash + chain in info_data. Returns the
+    refund instance or None if the Pretix order / payment can't be located
+    (e.g. an orphan X402CompletedOrder from before the Pretix order was
+    created, which shouldn't normally happen)."""
+    import json as _json
+    from pretix.base.models import Order, OrderRefund
+    with scopes_disabled():
+        try:
+            order = Order.objects.get(event=event, code=pretix_order_code)
+        except Order.DoesNotExist:
+            log.warning(
+                '[x402 refund] no Pretix order %s to record refund against',
+                pretix_order_code,
+            )
+            return None
+        payment = order.payments.filter(provider='walletconnect', state='confirmed').first()
+        if payment is None:
+            log.warning(
+                '[x402 refund] no confirmed walletconnect payment on order %s',
+                pretix_order_code,
+            )
+            return None
+        refund = OrderRefund.objects.create(
+            order=order,
+            payment=payment,
+            source=OrderRefund.REFUND_SOURCE_ADMIN,
+            state=OrderRefund.REFUND_STATE_DONE,
+            amount=amount,
+            provider='walletconnect',
+            info=_json.dumps({
+                'refund_tx_hash': refund_tx_hash,
+                'chain_id': chain_id,
+            }),
+            execution_date=timezone.now(),
+        )
+        # Let Pretix re-evaluate whether the order is now fully refunded and
+        # update its status accordingly (logs entries + notifications).
+        try:
+            order.create_transactions()
+        except Exception as e:
+            log.warning('[x402 refund] create_transactions failed for order %s: %s', order.code, e)
+        return refund
+
+
 def confirm_x402_payment(
     *, order, tx_hash: str, payer: str, chain_id: int, token_symbol: str,
     block_number: Optional[int] = None,
