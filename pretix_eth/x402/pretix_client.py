@@ -13,6 +13,7 @@ Supports the same fields as the devcon implementation:
 import logging
 from decimal import Decimal
 from typing import Optional
+from django.db import transaction
 from django.utils import timezone
 from django_scopes import scopes_disabled
 
@@ -105,7 +106,10 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
     }
     """
     from pretix.base.models import Order, OrderPosition, Item, ItemVariation
-    with scopes_disabled():
+    # Pretix requires Order/OrderPosition/OrderFee writes to happen inside an
+    # atomic block — otherwise its transaction-ledger bookkeeping warns
+    # ("... however you are not doing it inside a database transaction!").
+    with scopes_disabled(), transaction.atomic():
         sc = event.organizer.sales_channels.get(identifier='web')
         order = Order.objects.create(
             event=event,
@@ -193,6 +197,14 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
             amount=order.total,
             state='created',
         )
+
+        # Pretix's inventory/accounting bookkeeping is kept in a `Transaction`
+        # table that tracks every position/fee change. Creating positions and
+        # fees via direct ORM calls (as we do above) leaves the order "dirty"
+        # from Pretix's perspective; without this call Pretix logs a WARNING
+        # with a full stack trace on every order. `is_new=True` tells it this
+        # is the initial transaction set for the order.
+        order.create_transactions(is_new=True)
     return order
 
 
