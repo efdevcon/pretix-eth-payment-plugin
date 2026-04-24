@@ -255,7 +255,18 @@ export function CheckoutStep({
 
       {/* Step 1: Token selection chips */}
       {(() => {
-        const uniqueSymbols = [...new Set(options.map(o => o.symbol))]
+        // Canonical display order for the asset chips — independent of the
+        // order the backend returns options in. Symbols not in this list
+        // fall to the end, keeping the picker stable if new tokens are added.
+        const ASSET_ORDER = ['ETH', 'USDC', 'USDT0']
+        const uniqueSymbols = [...new Set(options.map(o => o.symbol))].sort((a, b) => {
+          const ia = ASSET_ORDER.indexOf(a)
+          const ib = ASSET_ORDER.indexOf(b)
+          if (ia === -1 && ib === -1) return a.localeCompare(b)
+          if (ia === -1) return 1
+          if (ib === -1) return -1
+          return ia - ib
+        })
         const networksForToken = tokenFilter
           ? options.filter(o => o.symbol === tokenFilter)
           : []
@@ -348,7 +359,7 @@ export function CheckoutStep({
         // current session gets pre-filled so the operator can triage quickly;
         // the transaction hash is left blank for the buyer to paste in.
         // Always emit every field so the operator has a consistent template
-        // to work with \u2014 any value we don't have becomes a placeholder the
+        // to work with — any value we don't have becomes a placeholder the
         // buyer can fill in from their wallet history.
         const networkValue = quote ? (chainMetadata[String(quote.chain_id)]?.name || String(quote.chain_id)) : ''
         const tokenValue = quote ? quote.symbol : ''
@@ -379,11 +390,11 @@ export function CheckoutStep({
           <div className="wc-support-block" style={{ marginTop: 16, padding: 12, background: '#f7f5ff', borderRadius: 8 }}>
             <div style={{ fontWeight: 600, marginBottom: 4 }}>Already sent the transaction?</div>
             <div style={{ fontSize: 14, lineHeight: 1.4 }}>
-              <strong>Don't re-send</strong>{' \u2014 '}you'd be charged twice.
+              <strong>Don't re-send</strong> — you'd be charged twice.
               {' '}
               {mailtoHref ? (
                 <>
-                  <a href={mailtoHref}>Email the event organizer</a> \u2014 we've pre-filled everything we know; just add your transaction hash and send.
+                  <a href={mailtoHref}>Email the event organizer</a> — we've pre-filled everything we know; just add your transaction hash and send.
                 </>
               ) : (
                 <>Contact the event organizer with your order code <code>{config.orderCode}</code>, the transaction hash, and the wallet address you paid from.</>

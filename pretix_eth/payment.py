@@ -44,7 +44,7 @@ def _format_crypto_amount(raw, token_symbol):
 class WalletConnectPayment(BasePaymentProvider):
     identifier = 'walletconnect'
     verbose_name = _('Pay with crypto (WalletConnect)')
-    public_name = _('Crypto (USDC, USDT0, ETH)')
+    public_name = _('Crypto (ETH, USDC, USDT0)')
     abort_pending_allowed = True
 
     @property

@@ -305,5 +305,20 @@ def confirm_x402_payment(
             info['amount'] = amount
         payment.info_data = info
         payment.save()
-        payment.confirm()
+
+        # Render the payment recap for the order-paid email. Pretix's paid
+        # email template uses the {payment_info} placeholder, which — unlike
+        # the placed email — does NOT call `order_pending_mail_render`; it
+        # reads directly from the `mail_text` kwarg passed into `.confirm()`.
+        # Compute the recap here from the info we just populated and pass it
+        # through so the buyer gets amount/network/tx in their paid email.
+        try:
+            from pretix_eth.payment import WalletConnectPayment
+            provider = WalletConnectPayment(order.event)
+            mail_text = provider.order_pending_mail_render(order, payment)
+        except Exception as e:
+            log.warning('[x402 confirm] failed to render mail_text for %s: %s', order.code, e)
+            mail_text = ''
+
+        payment.confirm(mail_text=mail_text)
         return payment

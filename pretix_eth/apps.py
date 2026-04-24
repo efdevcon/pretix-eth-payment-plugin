@@ -12,7 +12,7 @@ class EthApp(AppConfig):
         name = _('Crypto payment (WalletConnect)')
         author = 'Ethereum Foundation'
         category = 'PAYMENT'
-        description = _('Accept crypto payments (USDC, USDT0, ETH) via WalletConnect directly in Pretix checkout.')
+        description = _('Accept crypto payments (ETH, USDC, USDT0) via WalletConnect directly in Pretix checkout.')
         visible = True
         version = __version__
 
