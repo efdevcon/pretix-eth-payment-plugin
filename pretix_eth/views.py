@@ -499,7 +499,18 @@ def verify(request):
                 info['block_number'] = vr.block_number
                 payment.info_data = info
                 payment.save()
-                payment.confirm()
+
+                # Render the payment recap for the order-paid email. The paid
+                # email path uses `{payment_info}` = whatever we pass as
+                # `mail_text=` to payment.confirm() — it does NOT call
+                # `order_pending_mail_render` on its own. Without this, the
+                # confirmation email's {payment_info} placeholder renders empty.
+                try:
+                    mail_text = WalletConnectPayment(order.event).order_pending_mail_render(order, payment)
+                except Exception as e:
+                    log.warning('[wc verify] failed to render mail_text for %s: %s', order.code, e)
+                    mail_text = ''
+                payment.confirm(mail_text=mail_text)
         except IntegrityError:
             return _verify_bad('tx already used (race)', status=409, tx_hash=tx_hash)
 
