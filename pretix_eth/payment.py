@@ -229,6 +229,51 @@ class WalletConnectPayment(BasePaymentProvider):
     def matching_id(self, payment):
         return (payment.info_data or {}).get('tx_hash')
 
+    def order_pending_mail_render(self, order, payment) -> str:
+        """Insert a crypto-payment recap into Pretix's order confirmation mail
+        (the `{payment_info}` placeholder in the email template). Matches the
+        reference pretix-x402-payment plugin's shape, formatted via our helpers
+        so amounts display in human-readable decimals."""
+        info = payment.info_data or {}
+        chain_id = info.get('chain_id')
+        token_symbol = info.get('token_symbol')
+        amount_raw = info.get('amount')
+        payer = info.get('payer')
+        tx_hash = info.get('tx_hash')
+        # Fall back to the X402CompletedOrder row for any field missing on
+        # OrderPayment.info_data (same defensive read used by the control panel
+        # renderer — covers historical rows and wc_inject rows that didn't
+        # mirror every field).
+        if not all([chain_id, token_symbol, amount_raw, payer, tx_hash]):
+            fallback = self._x402_fallback(payment)
+            if fallback:
+                chain_id = chain_id or fallback.get('chain_id')
+                token_symbol = token_symbol or fallback.get('token_symbol')
+                amount_raw = amount_raw or fallback.get('amount')
+                payer = payer or fallback.get('payer')
+                tx_hash = tx_hash or fallback.get('tx_hash')
+        if not any([chain_id, token_symbol, amount_raw, tx_hash]):
+            return ''
+        # Stablecoins are 1:1 USD — fall back to payment.amount if we never
+        # recorded crypto_amount (historical rows), same logic as the control
+        # panel renderer.
+        amount_display = _format_crypto_amount(amount_raw, token_symbol)
+        if amount_display is None and token_symbol in ('USDC', 'USDT0'):
+            try:
+                amount_display = str(payment.amount)
+            except Exception:
+                pass
+        explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
+        tpl = get_template('pretix_eth/email_info.html')
+        return tpl.render({
+            'amount': amount_display,
+            'token_symbol': token_symbol,
+            'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
+            'payer': payer,
+            'tx_hash': tx_hash,
+            'tx_url': f'{explorer}{tx_hash}' if tx_hash and explorer else None,
+        })
+
     def refund_control_render(self, request: HttpRequest, refund) -> str:
         """Render the refund details section on the Pretix order page. The
         refund's `info` JSON carries the on-chain tx hash + chain id we wrote
