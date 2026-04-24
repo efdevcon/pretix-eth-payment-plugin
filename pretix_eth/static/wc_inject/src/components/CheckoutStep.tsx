@@ -9,6 +9,7 @@ import {
 } from 'wagmi'
 import { waitForTransactionReceipt } from 'wagmi/actions'
 import { erc20Abi } from 'viem'
+import { NETWORK_LOGOS, TOKEN_LOGOS } from '../assetIcons'
 import type { WCConfig } from '../config'
 import type { PaymentOption } from '../hooks/usePaymentOptions'
 import type { Quote } from '../WCPaymentApp'
@@ -277,7 +278,10 @@ export function CheckoutStep({
                       if (first) setPicked(first)
                     }}
                   >
-                    {sym}
+                    {TOKEN_LOGOS[sym] && (
+                      <img src={TOKEN_LOGOS[sym]} alt="" className="wc-asset-icon" aria-hidden="true" />
+                    )}
+                    <span>{sym}</span>
                   </button>
                 ))}
               </div>
@@ -290,6 +294,7 @@ export function CheckoutStep({
                 <div className="wc-network-list">
                   {networksForToken.map(opt => {
                     const isSelected = picked?.chain_id === opt.chain_id && picked?.symbol === opt.symbol
+                    const logo = NETWORK_LOGOS[opt.chain_id]
                     return (
                       <button
                         key={`${opt.chain_id}-${opt.symbol}`}
@@ -298,7 +303,12 @@ export function CheckoutStep({
                         disabled={busy}
                         onClick={() => setPicked(opt)}
                       >
-                        <span className="wc-network-row-name">{opt.chain_name}</span>
+                        <span className="wc-network-row-left">
+                          {logo && (
+                            <img src={logo} alt="" className="wc-network-icon" aria-hidden="true" />
+                          )}
+                          <span className="wc-network-row-name">{opt.chain_name}</span>
+                        </span>
                         {isSelected && <span className="wc-network-row-check">&#10003;</span>}
                       </button>
                     )
@@ -318,7 +328,7 @@ export function CheckoutStep({
 
       <button
         type="button"
-        className="wc-button"
+        className="btn btn-primary btn-lg btn-block wc-pay-btn"
         disabled={!picked || busy}
         onClick={handlePay}
       >
@@ -333,18 +343,55 @@ export function CheckoutStep({
           couldn't actually recover and risked double-payment. Stuck buyers
           now route through support; admins can manually verify from the
           admin page using the confirmed tx hash. */}
-      {status === 'error' && (
-        <div className="wc-support-block" style={{ marginTop: 16, padding: 12, background: '#f7f5ff', borderRadius: 8 }}>
-          <div style={{ fontWeight: 600, marginBottom: 4 }}>Already sent the transaction?</div>
-          <div style={{ fontSize: 14, lineHeight: 1.4 }}>
-            <strong>Don't re-send</strong> \u2014 you'd be charged twice. Contact the event organizer
-            {config.supportEmail ? (
-              <> at <a href={`mailto:${config.supportEmail}?subject=Payment%20issue%20for%20order%20${encodeURIComponent(config.orderCode)}`}>{config.supportEmail}</a></>
-            ) : null}
-            {' '}with your order code <code>{config.orderCode}</code>, the transaction hash, and the wallet address you paid from. They'll verify your payment manually.
+      {status === 'error' && (() => {
+        // Build a best-effort support-email body. Everything we know from the
+        // current session gets pre-filled so the operator can triage quickly;
+        // the transaction hash is left blank for the buyer to paste in.
+        // Always emit every field so the operator has a consistent template
+        // to work with \u2014 any value we don't have becomes a placeholder the
+        // buyer can fill in from their wallet history.
+        const networkValue = quote ? (chainMetadata[String(quote.chain_id)]?.name || String(quote.chain_id)) : ''
+        const tokenValue = quote ? quote.symbol : ''
+        const amountValue = quote ? formatAmount(quote) : ''
+        const recipientValue = quote ? quote.receive_address : ''
+        const fill = (v: string) => v || '(please fill in)'
+        const lines: string[] = [
+          "Hi,",
+          "",
+          "I tried to pay for a Pretix order with crypto and the page didn't complete.",
+          "",
+          `Order code: ${config.orderCode}`,
+          `Wallet address: ${fill(address || '')}`,
+          `Network: ${fill(networkValue)}`,
+          `Token: ${fill(tokenValue)}`,
+          `Amount sent: ${fill(amountValue)}`,
+          `Recipient: ${fill(recipientValue)}`,
+          `Transaction hash: (paste the 0x\u2026 hash from your wallet here)`,
+          "",
+          "Thanks!",
+        ]
+        const mailtoHref = config.supportEmail
+          ? `mailto:${config.supportEmail}?subject=${encodeURIComponent(
+              `Payment issue for order ${config.orderCode}`,
+            )}&body=${encodeURIComponent(lines.join('\n'))}`
+          : null
+        return (
+          <div className="wc-support-block" style={{ marginTop: 16, padding: 12, background: '#f7f5ff', borderRadius: 8 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>Already sent the transaction?</div>
+            <div style={{ fontSize: 14, lineHeight: 1.4 }}>
+              <strong>Don't re-send</strong>{' \u2014 '}you'd be charged twice.
+              {' '}
+              {mailtoHref ? (
+                <>
+                  <a href={mailtoHref}>Email the event organizer</a> \u2014 we've pre-filled everything we know; just add your transaction hash and send.
+                </>
+              ) : (
+                <>Contact the event organizer with your order code <code>{config.orderCode}</code>, the transaction hash, and the wallet address you paid from.</>
+              )}
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })()}
     </div>
   )
 }

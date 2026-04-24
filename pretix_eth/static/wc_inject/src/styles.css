@@ -36,20 +36,12 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   font-size: 14px;
 }
 
-.wc-button {
-  background: #0066cc;
-  color: white;
-  padding: 12px 24px;
-  border-radius: 6px;
-  border: none;
-  cursor: pointer;
-  font-size: 16px;
-  width: 100%;
-  margin-top: 12px;
+/* Spacing + layout for the Pay button — the visual style (colors, hover,
+   disabled) comes from Pretix's own .btn-primary so we blend with the rest
+   of the checkout form. */
+.wc-pay-btn {
+  margin-top: 16px;
 }
-
-.wc-button:disabled { background: #999; cursor: not-allowed; }
-.wc-button:hover:not(:disabled) { background: #0052a3; }
 
 .wc-error {
   color: #c62828;
@@ -105,12 +97,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   border-color: #0066cc;
 }
 
-.wc-button-secondary {
-  background: #555;
-  margin-top: 0;
-}
-
-.wc-button-secondary:hover:not(:disabled) { background: #333; }
+/* (wc-button-secondary removed along with the manual-verify UI that used it) */
 
 /* Two-step picker: token chips + network rows */
 .wc-asset-selection {
@@ -187,6 +174,20 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 
 .wc-network-row:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.wc-network-row-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wc-network-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
 .wc-network-row-name {
   font-weight: 500;
 }
@@ -195,4 +196,12 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   color: #0066cc;
   font-size: 18px;
   font-weight: bold;
+}
+
+.wc-asset-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  object-fit: contain;
+  flex-shrink: 0;
 }
