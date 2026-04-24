@@ -279,13 +279,35 @@ def create_quote(request):
                 }, status=400)
             provider = WalletConnectPayment(order.event)
             settings_key = provider.settings.get('alchemy_api_key', default=None)
-            w3_for_sig = _get_web3(chain_id, settings_key)
             from pretix_eth.verification import verify_eth_payer_signature
-            if not verify_eth_payer_signature(
-                w3=w3_for_sig, payer=claimed_payer, message=message, signature=signature_hex,
-            ):
+            # personal_sign signatures don't embed a chain_id, so for the
+            # ownership check we can use any chain where the smart wallet
+            # is deployed. Coinbase/Base Smart Wallet uses CREATE2 with a
+            # shared factory + same init data across chains → same address,
+            # same owners everywhere. If validation fails on the payment
+            # chain (often because the wallet is counterfactual there),
+            # retry on Base — CSW's native chain, where it's almost always
+            # deployed once the user has ever touched their CSW account.
+            fallback_chain_ids = [chain_id]
+            if chain_id != 8453:
+                fallback_chain_ids.append(8453)
+            sig_ok = False
+            for cid in fallback_chain_ids:
+                try:
+                    w3_for_sig = _get_web3(cid, settings_key)
+                    if verify_eth_payer_signature(
+                        w3=w3_for_sig, payer=claimed_payer, message=message, signature=signature_hex,
+                    ):
+                        sig_ok = True
+                        break
+                except Exception as e:
+                    log.warning('eth_payer_signature chain %s verify errored: %s', cid, e)
+            if not sig_ok:
                 return JsonResponse({
-                    'error': 'signature does not validate against payer_address',
+                    'error': (
+                        'signature does not validate against payer_address '
+                        '(checked chain(s): ' + ','.join(str(c) for c in fallback_chain_ids) + ')'
+                    ),
                 }, status=400)
             payer = to_checksum_address(claimed_payer)
 

@@ -207,38 +207,110 @@ def build_eth_payer_message(payment_reference: str, payer: str, chain_id: int) -
     )
 
 
+ERC1271_MAGIC = bytes.fromhex('1626ba7e')
+ERC6492_MAGIC_SUFFIX = bytes.fromhex(
+    '6492649264926492649264926492649264926492649264926492649264926492',
+)
+
+
 def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) -> bool:
-    """Verify an EIP-191 personal_sign signature. Works for both EOA (ECDSA recovery)
-    and smart wallets (ERC-1271 isValidSignature) via eth_account recovery + RPC fallback."""
+    """Verify an EIP-191 personal_sign signature against `payer`.
+
+    Handles three signature modes:
+      1. EOA (65 bytes): local ECDSA recovery, compare to payer.
+      2. ERC-1271 (variable length, smart wallet already deployed): eth_call
+         `isValidSignature(hash, signature)` on the payer contract.
+      3. ERC-6492 (signature suffixed with magic bytes, counterfactual wallet):
+         unwrap to `(factory, factoryCalldata, innerSig)` and for now just
+         verify `innerSig` via ERC-1271. If the wallet isn't deployed yet on
+         this chain the eth_call returns empty bytes; we fall through to
+         failure (proper 6492 handling via UniversalSigValidator is TODO).
+
+    Logs a warning on every failure path so production can diagnose without
+    having to reproduce locally."""
     from eth_account import Account
     from eth_account.messages import encode_defunct
+    from eth_abi import encode as abi_encode
+    from eth_abi import decode as abi_decode
+    from web3 import Web3
+
+    # 1) EOA ECDSA recovery — fast, no RPC.
     try:
-        # Try EOA recovery first (fast, no RPC needed)
         msg = encode_defunct(text=message)
         recovered = Account.recover_message(msg, signature=signature)
         if _addr_eq(recovered, payer):
             return True
-    except Exception:
-        pass
-    # Fallback: ERC-1271 smart wallet verification via eth_call.
-    # isValidSignature(bytes32 hash, bytes memory signature) returns 0x1626ba7e
+    except Exception as e:
+        log.debug('eth_payer_signature: ECDSA recovery skipped (%s)', e)
+
+    # Normalize sig bytes
     try:
-        from web3 import Web3
-        from eth_abi import encode as abi_encode
-        # Compute EIP-191 hash the same way wallets do for personal_sign
+        sig_bytes = bytes.fromhex(signature[2:] if signature.startswith('0x') else signature)
+    except Exception as e:
+        log.warning('eth_payer_signature: invalid hex signature: %s', e)
+        return False
+
+    # Unwrap ERC-6492 (counterfactual wallets) if present. If the suffix
+    # matches, the payload is ABI-encoded (factory, factoryCalldata, innerSig).
+    # We pull out innerSig and try ERC-1271 with that; if the wallet isn't
+    # deployed on this chain, the eth_call will fail cleanly.
+    if sig_bytes.endswith(ERC6492_MAGIC_SUFFIX):
+        try:
+            payload = sig_bytes[: -len(ERC6492_MAGIC_SUFFIX)]
+            # abi_decode ignores trailing data; payload is exactly (address, bytes, bytes)
+            _factory, _factory_calldata, inner_sig = abi_decode(
+                ['address', 'bytes', 'bytes'], payload,
+            )
+            log.info('eth_payer_signature: unwrapped ERC-6492 (inner sig %d bytes)', len(inner_sig))
+            sig_bytes = inner_sig
+        except Exception as e:
+            log.warning('eth_payer_signature: failed to unwrap ERC-6492 payload: %s', e)
+            return False
+
+    # 2/3) ERC-1271 eth_call. We compute the EIP-191 hash the same way wallet
+    # signers do for personal_sign; smart wallet contracts reconstruct the
+    # same hash internally (for Coinbase Smart Wallet, via its WebAuthn
+    # challenge matching).
+    try:
         msg_bytes = message.encode('utf-8')
         prefix = f'\x19Ethereum Signed Message:\n{len(msg_bytes)}'.encode('utf-8')
         msg_hash = Web3.keccak(prefix + msg_bytes)
-        # ABI-encode: isValidSignature(bytes32, bytes)
-        sig_bytes = bytes.fromhex(signature[2:] if signature.startswith('0x') else signature)
         selector = bytes.fromhex('1626ba7e')
         encoded_args = abi_encode(['bytes32', 'bytes'], [msg_hash, sig_bytes])
         calldata = '0x' + (selector + encoded_args).hex()
-        result = w3.eth.call({
-            'to': Web3.to_checksum_address(payer),
-            'data': calldata,
-        })
-        magic = result[:4] if isinstance(result, (bytes, bytearray)) else bytes.fromhex(result.hex()[:8])
-        return magic == bytes.fromhex('1626ba7e')
-    except Exception:
+    except Exception as e:
+        log.warning('eth_payer_signature: calldata build failed: %s', e)
         return False
+
+    payer_cs = Web3.to_checksum_address(payer)
+
+    # Sanity: if the wallet has no code on this chain, ERC-1271 can't work.
+    # Emit a useful error rather than a confusing eth_call revert.
+    try:
+        code = w3.eth.get_code(payer_cs)
+    except Exception as e:
+        log.warning('eth_payer_signature: get_code failed: %s', e)
+        return False
+    if not code or code == b'' or code == b'\x00':
+        log.warning(
+            'eth_payer_signature: payer %s has no contract code on this chain (counterfactual smart wallet not yet deployed)',
+            payer,
+        )
+        return False
+
+    try:
+        result = w3.eth.call({'to': payer_cs, 'data': calldata})
+    except Exception as e:
+        log.warning('eth_payer_signature: isValidSignature eth_call reverted on %s: %s', payer, e)
+        return False
+
+    magic = result[:4] if isinstance(result, (bytes, bytearray)) else bytes.fromhex(result.hex()[:8])
+    if magic == ERC1271_MAGIC:
+        return True
+    log.warning(
+        'eth_payer_signature: ERC-1271 returned non-magic bytes (got %s, expected %s) for payer=%s',
+        magic.hex() if isinstance(magic, (bytes, bytearray)) else magic,
+        ERC1271_MAGIC.hex(),
+        payer,
+    )
+    return False
