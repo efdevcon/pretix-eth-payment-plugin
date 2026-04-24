@@ -15,7 +15,7 @@ from django.views.decorators.http import require_http_methods
 from django_scopes import scopes_disabled
 from web3 import Web3
 
-from pretix_eth.chains import SUPPORTED_CHAINS, get_token_contract
+from pretix_eth.chains import SUPPORTED_CHAINS, get_token_contract, is_supported
 from pretix_eth.payment import WalletConnectPayment
 from pretix_eth.pricing import usd_to_token_raw
 from pretix_eth.rpc import get_rpc_url
@@ -121,7 +121,9 @@ def _supported_assets_for_event(provider) -> list:
 
     assets = []
     for cid in enabled_chains:
-        if 'ETH' in enabled_symbols:
+        # Native ETH — only on chains whose native currency is ETH.
+        # Polygon (native POL) is excluded by `is_supported`.
+        if 'ETH' in enabled_symbols and is_supported(cid, 'ETH'):
             assets.append({
                 'chainId': cid,
                 'symbol': 'ETH',
@@ -558,6 +560,11 @@ def purchase(request):
                 if str(provider.settings.get(f'chain_{cid}', default='True')).lower() in ('true', '1', 'yes')
             ]
             for cid in enabled_chains:
+                # Only precompute ETH wei for chains where native currency is ETH.
+                # Polygon's native is POL — precomputing an ETH amount there would
+                # later get matched against a native-POL transfer, under-pricing the order.
+                if not is_supported(cid, 'ETH'):
+                    continue
                 wei = usd_to_token_raw(total, 'ETH', chain_id=cid, eth_price=eth_price_result.price)
                 expected_eth_wei_by_chain[str(cid)] = str(wei)
     except Exception:

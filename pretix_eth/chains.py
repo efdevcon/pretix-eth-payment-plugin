@@ -26,6 +26,13 @@ CHAIN_METADATA = {
 
 ALL_SYMBOLS = ('USDC', 'USDT0', 'ETH')
 
+# Chains where the *native* currency is ETH. Polygon's native is POL, not ETH,
+# so we deliberately do not offer any ETH-denominated payment there — the
+# wrapped-ETH alternative (WETH as an ERC-20) is intentionally excluded too
+# to keep the supported token set small and avoid double-maintenance of an
+# asset that doesn't work in the x402 gasless path.
+_NATIVE_ETH_CHAINS = {1, 10, 8453, 42161}
+
 
 def get_token_contract(chain_id: int, symbol: str) -> Optional[dict]:
     if symbol == 'ETH':
@@ -37,7 +44,8 @@ def is_supported(chain_id: int, symbol: str) -> bool:
     if chain_id not in SUPPORTED_CHAINS:
         return False
     if symbol == 'ETH':
-        return True  # native available on all chains
+        # Native ETH — not available on Polygon (native there is POL).
+        return chain_id in _NATIVE_ETH_CHAINS
     return (chain_id, symbol) in TOKEN_CONTRACTS
 
 

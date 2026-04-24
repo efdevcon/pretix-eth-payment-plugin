@@ -32,9 +32,22 @@ def test_usdt0_only_on_optimism_and_arbitrum():
     assert is_supported(8453, 'USDT0') is False
 
 
-def test_eth_supported_on_all_chains():
-    for cid in SUPPORTED_CHAINS:
+def test_eth_supported_only_on_native_eth_chains():
+    # Native ETH — available on chains whose native currency is ETH.
+    # Polygon's native is POL, not ETH; we deliberately do not offer ETH
+    # (or a wrapped-ETH alternative) there to keep the supported token set
+    # consistent between the wc_inject and x402 flows.
+    for cid in (1, 10, 8453, 42161):
         assert is_supported(cid, 'ETH') is True
+    assert is_supported(137, 'ETH') is False
+
+
+def test_polygon_only_offers_usdc():
+    # Polygon's supported tokens are USDC only.
+    assert is_supported(137, 'USDC') is True
+    assert is_supported(137, 'ETH') is False
+    assert is_supported(137, 'USDT0') is False
+    assert is_supported(137, 'WETH') is False
 
 
 def test_chain_metadata_has_explorer_for_base():
