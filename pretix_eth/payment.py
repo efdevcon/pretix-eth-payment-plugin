@@ -118,6 +118,7 @@ class WalletConnectPayment(BasePaymentProvider):
     def checkout_confirm_render(self, request: HttpRequest, order=None, info_data=None) -> str:
         if order:
             # Payment retry/continue — order exists, show full crypto checkout UI
+            from pretix_eth import __version__ as _plugin_version
             tpl = get_template('pretix_eth/checkout_payment_confirm.html')
             ctx = {
                 'wc_project_id': self.settings.get('wc_project_id'),
@@ -125,6 +126,14 @@ class WalletConnectPayment(BasePaymentProvider):
                 'order_code': order.code,
                 'order_secret': order.secret,
                 'support_email': self.settings.get('support_email', default='') or '',
+                # Cache-buster for the bundle + stylesheet. Pretix serves /static/
+                # with a long max-age header; without a version query string,
+                # mobile browsers (and service workers) serve stale copies of
+                # bundle.js/styles.css for days after a plugin update. Bumping
+                # __version__ in pretix_eth/__init__.py busts the cache across
+                # every client. For dev iteration between version bumps, admins
+                # can also force a hard refresh / clear cache.
+                'plugin_version': _plugin_version,
             }
             return tpl.render(ctx, request=request)
         else:

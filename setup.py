@@ -1,4 +1,5 @@
 import os
+import re
 from distutils.command.build import build  # type: ignore
 
 from setuptools import setup, find_packages
@@ -6,6 +7,20 @@ from setuptools import setup, find_packages
 
 with open(os.path.join(os.path.dirname(__file__), 'README.md'), encoding='utf-8') as f:
     long_description = f.read()
+
+
+# Single source of truth for the version — read from pretix_eth/__init__.py
+# so version bumps happen in one file and flow to: pip's installed metadata,
+# the Pretix plugin registry (apps.py PretixPluginMeta.version), and the
+# browser-side cache-buster (?v=... on bundle.js / styles.css).
+def _read_version() -> str:
+    init_path = os.path.join(os.path.dirname(__file__), 'pretix_eth', '__init__.py')
+    with open(init_path, encoding='utf-8') as f:
+        for line in f:
+            m = re.match(r'^__version__\s*=\s*["\']([^"\']+)["\']', line)
+            if m:
+                return m.group(1)
+    raise RuntimeError('Could not find __version__ in pretix_eth/__init__.py')
 
 
 def _maybe_collectstatic():
@@ -18,6 +33,13 @@ def _maybe_collectstatic():
 
 
 def _maybe_build_frontend():
+    """Build dist/bundle.js if it doesn't already exist.
+
+    Deliberately short-circuits when the bundle is present so that `pip install`
+    doesn't run pnpm on every reinstall (CI / prod boxes may not even have pnpm).
+    If you edit src/* and want `pip install -e --force-reinstall` to rebuild
+    automatically, delete `pretix_eth/static/wc_inject/dist/` first, OR run
+    `make frontend-build` / `pnpm run build` directly. See Makefile targets."""
     import shutil
     import subprocess
     wc_dir = os.path.join(os.path.dirname(__file__), 'pretix_eth', 'static', 'wc_inject')
@@ -90,7 +112,7 @@ extras_require['dev'] = (
 
 setup(
     name='pretix-eth-payment-plugin',
-    version='7.0.0-dev',
+    version=_read_version(),
     description='Ethereum payment provider plugin for Pretix ticket sales with WalletConnect',
     long_description=long_description,
     long_description_content_type='text/markdown',
