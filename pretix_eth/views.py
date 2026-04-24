@@ -245,14 +245,49 @@ def create_quote(request):
         if time.time() > expires_at:
             return JsonResponse({'error': 'challenge expired'}, status=400)
 
-        # Recover signer from signature
-        try:
-            msg = encode_defunct(text=message)
-            recovered = Account.recover_message(msg, signature=body['signature'])
-        except Exception as e:
-            return JsonResponse({'error': f'signature recovery failed: {e}'}, status=400)
+        # Two acceptable signature modes:
+        #
+        # 1) EOA (65 bytes): standard ECDSA. We recover the signer locally and
+        #    use it as the payer. No on-chain lookup needed.
+        #
+        # 2) Smart wallet (ERC-1271 / ERC-6492, variable length — Coinbase/Base
+        #    Smart Wallet returns ~640 bytes): the signature is a contract-level
+        #    proof, NOT an ECDSA signature, so `Account.recover_message` throws
+        #    with "Unexpected recoverable signature length". The client MUST
+        #    provide `payer_address` alongside the signature so we can verify
+        #    it via ERC-1271's isValidSignature eth_call (same code path as the
+        #    x402 flow's eth_payer_signature).
+        claimed_payer = body.get('payer_address')
+        signature_hex = body['signature']
+        sig_len_bytes = len(signature_hex[2:]) // 2 if signature_hex.startswith('0x') else len(signature_hex) // 2
 
-        payer = to_checksum_address(recovered)
+        if sig_len_bytes == 65 and not claimed_payer:
+            # EOA path (backward-compatible with clients that don't send payer_address)
+            try:
+                msg = encode_defunct(text=message)
+                recovered = Account.recover_message(msg, signature=signature_hex)
+            except Exception as e:
+                return JsonResponse({'error': f'signature recovery failed: {e}'}, status=400)
+            payer = to_checksum_address(recovered)
+        else:
+            if not claimed_payer:
+                return JsonResponse({
+                    'error': (
+                        'payer_address is required for smart-wallet signatures '
+                        f'(got {sig_len_bytes}-byte signature, not a 65-byte ECDSA)'
+                    ),
+                }, status=400)
+            provider = WalletConnectPayment(order.event)
+            settings_key = provider.settings.get('alchemy_api_key', default=None)
+            w3_for_sig = _get_web3(chain_id, settings_key)
+            from pretix_eth.verification import verify_eth_payer_signature
+            if not verify_eth_payer_signature(
+                w3=w3_for_sig, payer=claimed_payer, message=message, signature=signature_hex,
+            ):
+                return JsonResponse({
+                    'error': 'signature does not validate against payer_address',
+                }, status=400)
+            payer = to_checksum_address(claimed_payer)
 
         # ETH price (only if symbol == 'ETH')
         eth_price = None

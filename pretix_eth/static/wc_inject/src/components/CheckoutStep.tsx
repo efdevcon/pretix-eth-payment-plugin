@@ -151,7 +151,12 @@ export function CheckoutStep({
       setStatus('signing-challenge')
       const signature = await signMessageAsync({ message })
 
-      // Step 3: Create quote
+      // Step 3: Create quote.
+      // `payer_address` is required for smart-wallet signatures (ERC-1271/6492 —
+      // Coinbase/Base Smart Wallet, Safe, etc.) because those return contract-
+      // level proofs that can't be ECDSA-recovered. For EOA signatures the
+      // backend still recovers locally; sending the address both ways is fine
+      // (backend cross-checks EOA recovery against it).
       setStatus('quoting')
       const qr = await fetch(`${config.urlPrefix}/create-quote/`, {
         method: 'POST',
@@ -162,6 +167,7 @@ export function CheckoutStep({
           organizer, event,
           chain_id: picked.chain_id, symbol: picked.symbol,
           nonce, signature,
+          payer_address: address,
         }),
       })
       if (!qr.ok) {
