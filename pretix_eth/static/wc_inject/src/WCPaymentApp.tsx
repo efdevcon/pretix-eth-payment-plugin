@@ -33,6 +33,16 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
     if (!account.isConnected && stage !== 'connect') setStage('connect')
   }, [account.isConnected, stage])
 
+  // Apply `wc-full-checkout` at the top level (not per-stage). styles.css uses
+  // this class to hide Pretix's native submit button whenever our UI owns the
+  // page — we need that coverage while the wallet is disconnected too, otherwise
+  // Pretix's own "Pay now" flashes in the gap between our ConnectStep render
+  // and the user reconnecting their wallet.
+  useEffect(() => {
+    document.body.classList.add('wc-full-checkout')
+    return () => { document.body.classList.remove('wc-full-checkout') }
+  }, [])
+
   if (stage === 'connect') return <ConnectStep />
 
   if (stage === 'checkout') {

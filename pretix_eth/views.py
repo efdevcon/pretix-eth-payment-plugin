@@ -283,14 +283,18 @@ def create_quote(request):
             # personal_sign signatures don't embed a chain_id, so for the
             # ownership check we can use any chain where the smart wallet
             # is deployed. Coinbase/Base Smart Wallet uses CREATE2 with a
-            # shared factory + same init data across chains → same address,
-            # same owners everywhere. If validation fails on the payment
-            # chain (often because the wallet is counterfactual there),
-            # retry on Base — CSW's native chain, where it's almost always
-            # deployed once the user has ever touched their CSW account.
+            # shared factory so the same address exists everywhere, but the
+            # contract may not be deployed on a given chain (counterfactual)
+            # and — importantly — owner lists can drift between chains if
+            # the user added/removed an owner on one chain but not the other.
+            # Try: the payment chain first, then Ethereum mainnet, then Base.
+            # Ethereum is tried before Base because in practice users often
+            # register their passkeys first via cb.xyz which touches mainnet
+            # before any L2. A single-success anywhere proves ownership.
             fallback_chain_ids = [chain_id]
-            if chain_id != 8453:
-                fallback_chain_ids.append(8453)
+            for preferred in (1, 8453):
+                if preferred not in fallback_chain_ids:
+                    fallback_chain_ids.append(preferred)
             sig_ok = False
             for cid in fallback_chain_ids:
                 try:
