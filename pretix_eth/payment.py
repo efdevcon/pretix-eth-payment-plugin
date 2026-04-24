@@ -95,6 +95,15 @@ class WalletConnectPayment(BasePaymentProvider):
             label=_('Minimum confirmations'),
             initial=1, min_value=0, max_value=50,
         )
+        base['support_email'] = forms.EmailField(
+            label=_('Support email for payment issues'),
+            help_text=_(
+                'Shown to buyers if their payment gets stuck. Leave blank to hide the '
+                'support contact block. Admin-side manual verification is available in the '
+                'admin page regardless of this setting.'
+            ),
+            required=False,
+        )
         return base
 
     def is_allowed(self, request=None, total=None):
@@ -115,6 +124,7 @@ class WalletConnectPayment(BasePaymentProvider):
                 'url_prefix': '/plugin/wc',
                 'order_code': order.code,
                 'order_secret': order.secret,
+                'support_email': self.settings.get('support_email', default='') or '',
             }
             return tpl.render(ctx, request=request)
         else:

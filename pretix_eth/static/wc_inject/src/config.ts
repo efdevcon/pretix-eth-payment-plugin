@@ -11,6 +11,9 @@ export interface WCConfig {
   orderSecret: string
   urlPrefix: string
   csrfToken: string
+  /** Optional support email set in the plugin admin. Shown in a fallback
+   *  contact block if the buyer's payment gets stuck; empty string hides it. */
+  supportEmail?: string
 }
 
 export function readConfig(): WCConfig {

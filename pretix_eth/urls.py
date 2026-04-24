@@ -26,4 +26,5 @@ urlpatterns = [
     path('plugin/x402/admin/orders/',  views_admin.admin_orders,  name='x402_admin_orders'),
     path('plugin/x402/admin/stats/',   views_admin.admin_stats,   name='x402_admin_stats'),
     path('plugin/x402/admin/refund/',  views_admin.admin_refund,  name='x402_admin_refund'),
+    path('plugin/x402/admin/verify/',  views_admin.admin_verify,  name='x402_admin_verify'),
 ]

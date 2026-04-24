@@ -78,8 +78,6 @@ export function CheckoutStep({
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
-  const [showManual, setShowManual] = useState(false)
-  const [manualHash, setManualHash] = useState('')
 
   const { address, chainId: walletChainId } = useAccount()
   const { signMessageAsync } = useSignMessage()
@@ -220,29 +218,6 @@ export function CheckoutStep({
       const err = e as { shortMessage?: string; message?: string }
       setError(err.shortMessage || err.message || String(e))
       setStatus('error')
-      setShowManual(true)
-    }
-  }
-
-  async function handleManualVerify() {
-    const hash = manualHash.trim()
-    if (!/^0x[a-fA-F0-9]{64}$/.test(hash)) {
-      setError('Invalid transaction hash (must be 0x + 64 hex characters)')
-      return
-    }
-    if (!quote) {
-      setError('No quote created yet. Click "Pay now" first to create a quote, then paste your tx hash.')
-      return
-    }
-    setError(null)
-    setStatus('verifying')
-    try {
-      await pollVerify(quote, hash)
-      onConfirmed(hash, quote)
-    } catch (e: unknown) {
-      const err = e as { shortMessage?: string; message?: string }
-      setError(err.shortMessage || err.message || String(e))
-      setStatus('error')
     }
   }
 
@@ -352,35 +327,24 @@ export function CheckoutStep({
 
       {error && <div className="wc-error">{error}</div>}
 
-      <div style={{ marginTop: 16 }}>
-        <button
-          type="button"
-          className="wc-link-button"
-          onClick={() => setShowManual(!showManual)}
-        >
-          {showManual ? 'Hide manual verification' : 'Already sent? Verify with transaction hash'}
-        </button>
-
-        {showManual && (
-          <div className="wc-manual-verify" style={{ marginTop: 8 }}>
-            <input
-              type="text"
-              className="wc-input"
-              placeholder="0x... (paste transaction hash)"
-              value={manualHash}
-              onChange={(e) => setManualHash(e.target.value)}
-            />
-            <button
-              type="button"
-              className="wc-button wc-button-secondary"
-              onClick={handleManualVerify}
-              disabled={status === 'verifying' || !manualHash.trim()}
-            >
-              {status === 'verifying' ? 'Verifying\u2026' : 'Verify transaction'}
-            </button>
+      {/* Support fallback. Self-serve manual verification was removed because
+          it required an in-memory quote that expires with the browser session,
+          so in the realistic failure modes (tab crash, network timeout) it
+          couldn't actually recover and risked double-payment. Stuck buyers
+          now route through support; admins can manually verify from the
+          admin page using the confirmed tx hash. */}
+      {status === 'error' && (
+        <div className="wc-support-block" style={{ marginTop: 16, padding: 12, background: '#f7f5ff', borderRadius: 8 }}>
+          <div style={{ fontWeight: 600, marginBottom: 4 }}>Already sent the transaction?</div>
+          <div style={{ fontSize: 14, lineHeight: 1.4 }}>
+            <strong>Don't re-send</strong> \u2014 you'd be charged twice. Contact the event organizer
+            {config.supportEmail ? (
+              <> at <a href={`mailto:${config.supportEmail}?subject=Payment%20issue%20for%20order%20${encodeURIComponent(config.orderCode)}`}>{config.supportEmail}</a></>
+            ) : null}
+            {' '}with your order code <code>{config.orderCode}</code>, the transaction hash, and the wallet address you paid from. They'll verify your payment manually.
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   )
 }

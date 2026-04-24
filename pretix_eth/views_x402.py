@@ -6,6 +6,7 @@ import re
 import secrets
 from datetime import timedelta
 from decimal import Decimal
+from typing import Optional
 
 from django.http import JsonResponse, HttpRequest
 from django.utils import timezone
@@ -838,6 +839,162 @@ def execute_transfer(request):
 # Task 25: verify
 # ---------------------------------------------------------------------------
 
+def _x402_verify_and_finalize(
+    *, event, pending, payment_reference: str, tx_hash: str, chain_id: int,
+    symbol: str, payer: str, eth_payer_signature: Optional[str],
+):
+    """Shared verification + finalization pipeline used by both the public
+    verify endpoint and the admin manual-verify endpoint.
+
+    Security controls enforced here (must NOT be skipped by any caller):
+      - tx_hash uniqueness (not already linked to another completed order)
+      - payer address matches the pending order's intended_payer
+      - ETH payments require an ethPayerSignature matching the payer address
+      - On-chain verification of amount + recipient + confirmations
+      - Atomic claim-then-reserve to prevent parallel duplicate-claim races
+
+    Returns a `JsonResponse` — success or error — that the caller can return
+    directly to its client.
+    """
+    from pretix_eth.verification import build_eth_payer_message, verify_eth_payer_signature
+
+    with scopes_disabled():
+        if ticketstore.get_completed_by_tx_hash(tx_hash):
+            return JsonResponse({'success': False, 'error': 'tx already used for a completed order'}, status=400)
+
+    if not _addr_eq(pending.intended_payer, payer):
+        return JsonResponse({'success': False, 'error': 'payer does not match intendedPayer'}, status=403)
+
+    provider = _get_provider(event)
+    alchemy_key = provider.settings.get('alchemy_api_key', default=None) or None
+    min_conf = int(provider.settings.get('min_confirmations', default=1))
+    recipient = provider.settings.get('payment_recipient')
+
+    w3 = _w3_for_chain(chain_id, alchemy_key)
+
+    if symbol == 'ETH':
+        # ETH path requires a payer signature (prevents cross-order tx reuse).
+        # USDC/USDT0 are already bound via EIP-3009 authorization and don't need it.
+        if not eth_payer_signature:
+            return JsonResponse({
+                'success': False,
+                'error': 'ethPayerSignature is required for native ETH payments',
+            }, status=400)
+        eth_msg = build_eth_payer_message(payment_reference, payer, chain_id)
+        if not verify_eth_payer_signature(w3=w3, payer=payer, message=eth_msg, signature=eth_payer_signature):
+            return JsonResponse({
+                'success': False,
+                'error': 'ethPayerSignature does not match the payer address',
+            }, status=403)
+
+        expected_wei_str = (pending.expected_eth_amount_wei_by_chain or {}).get(str(chain_id))
+        if not expected_wei_str:
+            return JsonResponse({'success': False, 'error': 'no ETH wei recorded for this chain'}, status=400)
+        vr = verify_native_eth(
+            w3=w3, tx_hash=tx_hash,
+            expected_from=payer, expected_to=recipient,
+            expected_amount_wei=int(expected_wei_str), min_confirmations=min_conf,
+        )
+    else:
+        contract = get_token_contract(chain_id, symbol)
+        if contract is None:
+            return JsonResponse({'success': False, 'error': 'unsupported chain/token combo'}, status=400)
+        expected_amount = usd_to_token_raw(
+            pending.total_usd, symbol, chain_id=chain_id, eth_price=None,
+        )
+        vr = verify_erc20_transfer(
+            w3=w3, chain_id=chain_id, tx_hash=tx_hash,
+            expected_from=payer, expected_to=recipient,
+            expected_token=contract['address'], expected_amount=expected_amount,
+            min_confirmations=min_conf,
+        )
+
+    if not vr.verified:
+        return JsonResponse({'success': False, 'error': vr.error}, status=400)
+
+    # Record crypto amount paid (for admin reporting) + relayer-sponsored gas.
+    # Only ERC-20 flows go through our relayer; native ETH payers cover their
+    # own gas, so gas_cost_wei stays null there.
+    crypto_amount = (
+        str(expected_wei_str) if symbol == 'ETH' else str(expected_amount)
+    )
+    gas_cost_wei = None
+    if symbol in ('USDC', 'USDT0'):
+        try:
+            receipt = w3.eth.get_transaction_receipt(tx_hash)
+            gas_used = int(receipt.get('gasUsed', 0) or 0)
+            effective_price = int(receipt.get('effectiveGasPrice', 0) or 0)
+            if gas_used and effective_price:
+                gas_cost_wei = str(gas_used * effective_price)
+        except Exception as e:
+            log.warning('Could not fetch receipt for gas accounting (tx=%s): %s', tx_hash, e)
+
+    with scopes_disabled():
+        claimed = ticketstore.claim_pending_order(event=event, payment_reference=payment_reference)
+        if claimed is None:
+            return JsonResponse({'success': False, 'error': 'already claimed'}, status=409)
+
+        try:
+            ticketstore.reserve_completed_order(
+                event=event, tx_hash=tx_hash,
+                payment_reference=payment_reference,
+                payer=payer, chain_id=chain_id,
+                total_usd=claimed.total_usd, token_symbol=symbol,
+                crypto_amount=crypto_amount, gas_cost_wei=gas_cost_wei,
+            )
+        except ticketstore.TxHashAlreadyUsedError:
+            ticketstore.store_pending_order(
+                event=claimed.event, payment_reference=claimed.payment_reference,
+                order_data=claimed.order_data, total_usd=claimed.total_usd,
+                expires_at=claimed.expires_at, intended_payer=claimed.intended_payer,
+                expected_eth_amount_wei_by_chain=claimed.expected_eth_amount_wei_by_chain,
+                expected_chain_id=claimed.expected_chain_id,
+                metadata=claimed.metadata,
+            )
+            return JsonResponse({'success': False, 'error': 'tx already used (race)'}, status=409)
+
+        try:
+            pretix_order = create_pretix_order(
+                event=event, order_data=claimed.order_data,
+                total_usd=str(claimed.total_usd),
+            )
+        except Exception as e:
+            ticketstore.remove_completed_reservation(event=event, payment_reference=payment_reference)
+            ticketstore.store_pending_order(
+                event=claimed.event, payment_reference=claimed.payment_reference,
+                order_data=claimed.order_data, total_usd=claimed.total_usd,
+                expires_at=claimed.expires_at, intended_payer=claimed.intended_payer,
+                expected_eth_amount_wei_by_chain=claimed.expected_eth_amount_wei_by_chain,
+                expected_chain_id=claimed.expected_chain_id,
+                metadata=claimed.metadata,
+            )
+            return JsonResponse({'success': False, 'error': f'pretix order creation failed: {e}'}, status=500)
+
+        confirm_x402_payment(
+            order=pretix_order, tx_hash=tx_hash, payer=payer,
+            chain_id=chain_id, token_symbol=symbol,
+            block_number=vr.block_number,
+            amount=crypto_amount,
+        )
+        ticketstore.finalize_completed_order(
+            event=event, payment_reference=payment_reference,
+            pretix_order_code=pretix_order.code,
+        )
+
+    return JsonResponse({
+        'success': True,
+        'order': {
+            'code': pretix_order.code,
+            'secret': pretix_order.secret,
+        },
+        'payment': {
+            'txHash': tx_hash,
+            'payer': payer,
+            'blockNumber': vr.block_number or 0,
+        },
+    })
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_token
@@ -863,7 +1020,8 @@ def verify(request):
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
 
-    # Rate limit
+    # Rate limit (per payment_reference + client IP). Applies only to the
+    # buyer-facing endpoint; admin manual-verify is auth-gated and skips it.
     client_ip = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip() \
         or request.META.get('REMOTE_ADDR', 'unknown')
     with scopes_disabled():
@@ -872,148 +1030,14 @@ def verify(request):
         ):
             return JsonResponse({'success': False, 'error': 'rate limit exceeded'}, status=429)
 
-        # One-time tx_hash
-        if ticketstore.get_completed_by_tx_hash(tx_hash):
-            return JsonResponse({'success': False, 'error': 'tx already used for a completed order'}, status=400)
-
-        # Pending order
         pending = ticketstore.get_pending_order(event=event, payment_reference=body['payment_reference'])
         if pending is None:
             return JsonResponse({'success': False, 'error': 'payment_reference not found or expired'}, status=404)
 
-        if not _addr_eq(pending.intended_payer, body['payer']):
-            return JsonResponse({'success': False, 'error': 'payer does not match intendedPayer'}, status=403)
-
-    provider = _get_provider(event)
-    alchemy_key = provider.settings.get('alchemy_api_key', default=None) or None
-    min_conf = int(provider.settings.get('min_confirmations', default=1))
-    recipient = provider.settings.get('payment_recipient')
-
-    w3 = _w3_for_chain(chain_id, alchemy_key)
-
-    # Dispatch by symbol
-    if body['symbol'] == 'ETH':
-        # ETH path requires a payer signature (prevents cross-order tx reuse).
-        # USDC/USDT0 are already bound via EIP-3009 and don't need this.
-        eth_sig = body.get('ethPayerSignature')
-        if not eth_sig:
-            return JsonResponse({
-                'success': False,
-                'error': 'ethPayerSignature is required for native ETH payments',
-            }, status=400)
-        from pretix_eth.verification import build_eth_payer_message, verify_eth_payer_signature
-        eth_msg = build_eth_payer_message(body['payment_reference'], body['payer'], chain_id)
-        if not verify_eth_payer_signature(w3=w3, payer=body['payer'], message=eth_msg, signature=eth_sig):
-            return JsonResponse({
-                'success': False,
-                'error': 'ethPayerSignature does not match the payer address',
-            }, status=403)
-
-        expected_wei_str = (pending.expected_eth_amount_wei_by_chain or {}).get(str(chain_id))
-        if not expected_wei_str:
-            return JsonResponse({'success': False, 'error': 'no ETH wei recorded for this chain'}, status=400)
-        vr = verify_native_eth(
-            w3=w3, tx_hash=tx_hash,
-            expected_from=body['payer'], expected_to=recipient,
-            expected_amount_wei=int(expected_wei_str), min_confirmations=min_conf,
-        )
-    else:
-        contract = get_token_contract(chain_id, body['symbol'])
-        if contract is None:
-            return JsonResponse({'success': False, 'error': 'unsupported chain/token combo'}, status=400)
-        expected_amount = usd_to_token_raw(
-            pending.total_usd, body['symbol'], chain_id=chain_id, eth_price=None,
-        )
-        vr = verify_erc20_transfer(
-            w3=w3, chain_id=chain_id, tx_hash=tx_hash,
-            expected_from=body['payer'], expected_to=recipient,
-            expected_token=contract['address'], expected_amount=expected_amount,
-            min_confirmations=min_conf,
-        )
-
-    if not vr.verified:
-        return JsonResponse({'success': False, 'error': vr.error}, status=400)
-
-    # Record crypto amount paid (for admin reporting) + relayer-sponsored gas.
-    # Only ERC-20 flows go through our relayer; native ETH payers cover their
-    # own gas, so gas_cost_wei stays null there.
-    crypto_amount = (
-        str(expected_wei_str) if body['symbol'] == 'ETH' else str(expected_amount)
+    return _x402_verify_and_finalize(
+        event=event, pending=pending,
+        payment_reference=body['payment_reference'],
+        tx_hash=tx_hash, chain_id=chain_id, symbol=body['symbol'],
+        payer=body['payer'],
+        eth_payer_signature=body.get('ethPayerSignature'),
     )
-    gas_cost_wei = None
-    if body['symbol'] in ('USDC', 'USDT0'):
-        try:
-            receipt = w3.eth.get_transaction_receipt(tx_hash)
-            gas_used = int(receipt.get('gasUsed', 0) or 0)
-            effective_price = int(receipt.get('effectiveGasPrice', 0) or 0)
-            if gas_used and effective_price:
-                gas_cost_wei = str(gas_used * effective_price)
-        except Exception as e:
-            log.warning('Could not fetch receipt for gas accounting (tx=%s): %s', tx_hash, e)
-
-    # Atomic claim + reserve
-    with scopes_disabled():
-        claimed = ticketstore.claim_pending_order(event=event, payment_reference=body['payment_reference'])
-        if claimed is None:
-            return JsonResponse({'success': False, 'error': 'already claimed'}, status=409)
-
-        try:
-            ticketstore.reserve_completed_order(
-                event=event, tx_hash=tx_hash,
-                payment_reference=body['payment_reference'],
-                payer=body['payer'], chain_id=chain_id,
-                total_usd=claimed.total_usd, token_symbol=body['symbol'],
-                crypto_amount=crypto_amount, gas_cost_wei=gas_cost_wei,
-            )
-        except ticketstore.TxHashAlreadyUsedError:
-            ticketstore.store_pending_order(
-                event=claimed.event, payment_reference=claimed.payment_reference,
-                order_data=claimed.order_data, total_usd=claimed.total_usd,
-                expires_at=claimed.expires_at, intended_payer=claimed.intended_payer,
-                expected_eth_amount_wei_by_chain=claimed.expected_eth_amount_wei_by_chain,
-                expected_chain_id=claimed.expected_chain_id,
-                metadata=claimed.metadata,
-            )
-            return JsonResponse({'success': False, 'error': 'tx already used (race)'}, status=409)
-
-        # Create Pretix order + confirm payment (Task 26)
-        try:
-            pretix_order = create_pretix_order(
-                event=event, order_data=claimed.order_data,
-                total_usd=str(claimed.total_usd),
-            )
-        except Exception as e:
-            ticketstore.remove_completed_reservation(event=event, payment_reference=body['payment_reference'])
-            ticketstore.store_pending_order(
-                event=claimed.event, payment_reference=claimed.payment_reference,
-                order_data=claimed.order_data, total_usd=claimed.total_usd,
-                expires_at=claimed.expires_at, intended_payer=claimed.intended_payer,
-                expected_eth_amount_wei_by_chain=claimed.expected_eth_amount_wei_by_chain,
-                expected_chain_id=claimed.expected_chain_id,
-                metadata=claimed.metadata,
-            )
-            return JsonResponse({'success': False, 'error': f'pretix order creation failed: {e}'}, status=500)
-
-        confirm_x402_payment(
-            order=pretix_order, tx_hash=tx_hash, payer=body['payer'],
-            chain_id=chain_id, token_symbol=body['symbol'],
-            block_number=vr.block_number,
-            amount=crypto_amount,
-        )
-        ticketstore.finalize_completed_order(
-            event=event, payment_reference=body['payment_reference'],
-            pretix_order_code=pretix_order.code,
-        )
-
-    return JsonResponse({
-        'success': True,
-        'order': {
-            'code': pretix_order.code,
-            'secret': pretix_order.secret,
-        },
-        'payment': {
-            'txHash': body['tx_hash'],
-            'payer': body['payer'],
-            'blockNumber': vr.block_number or 0,
-        },
-    })

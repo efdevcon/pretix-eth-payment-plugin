@@ -1,6 +1,7 @@
 """x402 admin endpoints — orders list, stats, refund actions."""
 import json
 import logging
+import re
 from decimal import Decimal
 from typing import Optional
 
@@ -22,6 +23,9 @@ _CAMEL_TO_SNAKE_ADMIN = {
     'paymentReference': 'payment_reference',
     'adminAddress': 'admin_address',
     'refundTxHash': 'refund_tx_hash',
+    'txHash': 'tx_hash',
+    'chainId': 'chain_id',
+    'ethPayerSignature': 'eth_payer_signature',
 }
 
 
@@ -301,3 +305,59 @@ def admin_refund(request: HttpRequest):
         return JsonResponse({'success': True})
 
     return JsonResponse({'success': False, 'error': f'unknown action: {action}'}, status=400)
+
+
+# ---------------------------------------------------------------------------
+# Admin manual verification — operator-initiated recovery for payments
+# where the buyer's auto-verify didn't complete (browser crash, RPC blip
+# during the verify window, etc.). Re-runs the full verification pipeline
+# against an existing X402PendingOrder. The pipeline enforces the same
+# security controls as the user-facing endpoint (tx hash uniqueness, payer
+# match, ETH signature, on-chain amount/recipient); only the IP-based rate
+# limit is skipped (admin endpoint is auth-gated by Pretix API token).
+# ---------------------------------------------------------------------------
+
+_TX_HASH_RE = re.compile(r'^0x[a-fA-F0-9]{64}$')
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+@require_pretix_token
+def admin_verify(request: HttpRequest):
+    body = _read_body(request)
+    event = _get_event(body.get('organizer', ''), body.get('event', ''))
+    if not event:
+        return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
+    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
+
+    required = ('payment_reference', 'tx_hash', 'payer', 'chain_id', 'symbol')
+    missing = [k for k in required if not body.get(k)]
+    if missing:
+        return JsonResponse({'success': False, 'error': f'missing fields: {missing}'}, status=400)
+
+    tx_hash = body['tx_hash']
+    if not _TX_HASH_RE.match(tx_hash):
+        return JsonResponse({'success': False, 'error': 'invalid tx_hash format'}, status=400)
+    try:
+        chain_id = int(body['chain_id'])
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
+
+    with scopes_disabled():
+        pending = ticketstore.get_pending_order(
+            event=event, payment_reference=body['payment_reference'],
+        )
+    if pending is None:
+        return JsonResponse({
+            'success': False,
+            'error': 'payment_reference not found or expired (cannot verify against a missing pending order)',
+        }, status=404)
+
+    from pretix_eth.views_x402 import _x402_verify_and_finalize
+    return _x402_verify_and_finalize(
+        event=event, pending=pending,
+        payment_reference=body['payment_reference'],
+        tx_hash=tx_hash, chain_id=chain_id, symbol=body['symbol'],
+        payer=body['payer'],
+        eth_payer_signature=body.get('eth_payer_signature'),
+    )
