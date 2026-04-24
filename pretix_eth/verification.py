@@ -89,29 +89,51 @@ def verify_erc20_transfer(*, w3, chain_id: int, tx_hash: str,
 
 
 def _find_internal_eth_transfer(w3, tx_hash: str, from_lower: str,
-                                to_lower: str, min_value: int) -> bool:
+                                to_lower: str, min_value: int) -> str:
     """Walk debug_traceTransaction call tree looking for an internal ETH
     transfer from `from_lower` to `to_lower` with value >= `min_value`.
     Supports ERC-4337 bundler flows (e.g. Coinbase Smart Wallet + paymaster)
-    where the outer tx.from is a bundler EOA. Requires Alchemy or enterprise RPC."""
+    where the outer tx.from is a bundler EOA. Requires Alchemy or enterprise RPC.
+
+    Returns one of: 'match' | 'no_match' | 'trace_unavailable' — so callers can
+    distinguish "RPC doesn't support tracing" from "RPC traced and found nothing",
+    which matters for error classification (the first is transient-ish; the
+    second is a real verification failure)."""
     try:
         trace = w3.provider.make_request('debug_traceTransaction', [tx_hash, {'tracer': 'callTracer'}])
-        result = trace.get('result', trace)
+    except Exception as e:
+        log.warning('debug_traceTransaction request failed for %s: %s', tx_hash, e)
+        return 'trace_unavailable'
+    if not isinstance(trace, dict):
+        return 'trace_unavailable'
+    if trace.get('error'):
+        log.warning('debug_traceTransaction returned error for %s: %s', tx_hash, trace.get('error'))
+        return 'trace_unavailable'
+    result = trace.get('result')
+    if not isinstance(result, dict):
+        return 'trace_unavailable'
+    try:
         stack = [result]
         while stack:
             node = stack.pop()
             if not isinstance(node, dict):
                 continue
             val_hex = node.get('value', '0x0')
-            node_value = int(val_hex, 16) if isinstance(val_hex, str) else int(val_hex)
+            try:
+                node_value = int(val_hex, 16) if isinstance(val_hex, str) else int(val_hex)
+            except (TypeError, ValueError):
+                node_value = 0
             if (node_value >= min_value
                     and _normalize_hex(node.get('from', '')).lower() == from_lower
                     and _normalize_hex(node.get('to', '')).lower() == to_lower):
-                return True
-            stack.extend(node.get('calls', []))
-        return False
-    except Exception:
-        return False
+                return 'match'
+            calls = node.get('calls')
+            if isinstance(calls, list):
+                stack.extend(calls)
+        return 'no_match'
+    except Exception as e:
+        log.warning('debug_traceTransaction walk failed for %s: %s', tx_hash, e)
+        return 'trace_unavailable'
 
 
 def verify_native_eth(*, w3, tx_hash: str, expected_from: str,
@@ -151,8 +173,22 @@ def verify_native_eth(*, w3, tx_hash: str, expected_from: str,
     # Smart wallet / ERC-4337 fallback: trace internal calls
     from_lower = _normalize_hex(expected_from).lower()
     to_lower = _normalize_hex(expected_to).lower()
-    if _find_internal_eth_transfer(w3, tx_hash, from_lower, to_lower, expected_amount_wei):
+    trace_outcome = _find_internal_eth_transfer(
+        w3, tx_hash, from_lower, to_lower, expected_amount_wei,
+    )
+    if trace_outcome == 'match':
         return VerificationResult(True, block_number=block)
+    if trace_outcome == 'trace_unavailable':
+        # RPC didn't give us a usable trace — could be a transient indexer
+        # lag or the RPC provider doesn't support debug_*. Returning an
+        # "rpc error" message makes the frontend auto-retry. If it's really
+        # unsupported, the retries will all produce the same result and
+        # eventually surface to the user.
+        return VerificationResult(
+            False,
+            error=f'RPC error: debug_traceTransaction unavailable for {tx_hash}; '
+                  f'tx.from={tx.get("from")} does not match expected_from={expected_from}',
+        )
 
     return VerificationResult(
         False,

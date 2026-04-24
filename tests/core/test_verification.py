@@ -193,6 +193,8 @@ def test_native_eth_wrong_recipient(fake_w3):
     fake_w3.eth.get_transaction.return_value = {
         'from': '0x' + '1' * 40, 'to': '0x' + '9' * 40, 'value': 10**18,
     }
+    # Empty call tree — walker finds nothing (no_match), not trace_unavailable.
+    fake_w3.provider.make_request.return_value = {'result': {'calls': []}}
     r = verify_native_eth(
         w3=fake_w3, tx_hash='0x' + 'a' * 64,
         expected_from='0x' + '1' * 40, expected_to='0x' + '2' * 40,
@@ -210,6 +212,7 @@ def test_native_eth_wrong_sender(fake_w3):
     fake_w3.eth.get_transaction.return_value = {
         'from': '0x' + '9' * 40, 'to': '0x' + '2' * 40, 'value': 10**18,
     }
+    fake_w3.provider.make_request.return_value = {'result': {'calls': []}}
     r = verify_native_eth(
         w3=fake_w3, tx_hash='0x' + 'a' * 64,
         expected_from='0x' + '1' * 40, expected_to='0x' + '2' * 40,
@@ -217,6 +220,26 @@ def test_native_eth_wrong_sender(fake_w3):
     )
     assert r.verified is False
     assert 'mismatch' in r.error.lower()
+
+
+def test_native_eth_trace_unavailable_is_retryable(fake_w3):
+    """When debug_traceTransaction isn't supported or fails transiently, we
+    return an 'RPC error' message so the frontend's retry loop kicks in —
+    critical for mainnet flows where non-tracing public RPCs would otherwise
+    produce a non-retryable 'mismatch' every time."""
+    from pretix_eth.verification import verify_native_eth
+    fake_w3.eth.get_transaction_receipt.return_value = {'status': 1, 'blockNumber': 100}
+    fake_w3.eth.get_transaction.return_value = {
+        'from': '0x' + '9' * 40, 'to': '0x' + '2' * 40, 'value': 10**18,
+    }
+    fake_w3.provider.make_request.side_effect = Exception('method not supported')
+    r = verify_native_eth(
+        w3=fake_w3, tx_hash='0x' + 'a' * 64,
+        expected_from='0x' + '1' * 40, expected_to='0x' + '2' * 40,
+        expected_amount_wei=10**18, min_confirmations=1,
+    )
+    assert r.verified is False
+    assert 'rpc error' in r.error.lower()
 
 
 def test_native_eth_underpayment(fake_w3):
