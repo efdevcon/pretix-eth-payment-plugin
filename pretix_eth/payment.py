@@ -263,16 +263,30 @@ class WalletConnectPayment(BasePaymentProvider):
                 amount_display = str(payment.amount)
             except Exception:
                 pass
+        # Build the recap directly — the `{payment_info}` placeholder in the
+        # order-paid email is processed through `markdown_compile_email`, which
+        # collapses single newlines. Using `\n\n` (paragraph break) between
+        # fields is what makes them render as separate lines in both the HTML
+        # and plain-text email versions.
         explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
-        tpl = get_template('pretix_eth/email_info.html')
-        return tpl.render({
-            'amount': amount_display,
-            'token_symbol': token_symbol,
-            'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
-            'payer': payer,
-            'tx_hash': tx_hash,
-            'tx_url': f'{explorer}{tx_hash}' if tx_hash and explorer else None,
-        })
+        chain_name = CHAIN_METADATA.get(chain_id, {}).get('name')
+        tx_url = f'{explorer}{tx_hash}' if tx_hash and explorer else None
+
+        lines: list = []
+        if amount_display:
+            lines.append(
+                f'Amount: {amount_display} {token_symbol}' if token_symbol
+                else f'Amount: {amount_display}'
+            )
+        if chain_name:
+            lines.append(f'Network: {chain_name}')
+        if payer:
+            lines.append(f'Payer: {payer}')
+        if tx_url:
+            lines.append(f'Transaction: {tx_url}')
+        elif tx_hash:
+            lines.append(f'Transaction: {tx_hash}')
+        return '\n\n'.join(lines)
 
     def refund_control_render(self, request: HttpRequest, refund) -> str:
         """Render the refund details section on the Pretix order page. The

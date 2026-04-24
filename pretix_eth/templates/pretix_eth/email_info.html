@@ -1,4 +1,0 @@
-{% load i18n %}{% if amount %}{% trans "Amount" %}: {{ amount }}{% if token_symbol %} {{ token_symbol }}{% endif %}
-{% endif %}{% if chain_name %}{% trans "Network" %}: {{ chain_name }}
-{% endif %}{% if payer %}{% trans "Payer" %}: {{ payer }}
-{% endif %}{% if tx_url %}{% trans "Transaction" %}: {{ tx_url }}{% elif tx_hash %}{% trans "Transaction" %}: {{ tx_hash }}{% endif %}
