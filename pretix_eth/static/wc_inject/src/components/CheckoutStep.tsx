@@ -5,15 +5,26 @@ import {
   useSwitchChain,
   useWriteContract,
   useSendTransaction,
+  useConfig,
 } from 'wagmi'
+import { waitForTransactionReceipt } from 'wagmi/actions'
 import { erc20Abi } from 'viem'
 import type { WCConfig } from '../config'
 import type { PaymentOption } from '../hooks/usePaymentOptions'
 import type { Quote } from '../WCPaymentApp'
 import { WalletHeader } from './WalletHeader'
 
-const MAX_VERIFY_ATTEMPTS = 5
-const RETRYABLE_ERROR_SUBSTRINGS = ['tx not mined yet', 'insufficient confirmations']
+const MAX_VERIFY_ATTEMPTS = 8
+// Backend verify errors that are transient (RPC indexer lag after tx is mined,
+// trace endpoint briefly unavailable, etc.) and should auto-retry instead of
+// bailing. `not found` covers the common `get_transaction_receipt` case where
+// the user's wallet RPC has seen the tx but the backend RPC hasn't yet indexed it.
+const RETRYABLE_ERROR_SUBSTRINGS = [
+  'tx not mined yet',
+  'insufficient confirmations',
+  'not found',
+  'rpc error',
+]
 
 const ETH_REASON_TEXT: Record<string, string> = {
   oracle_unavailable_or_diverged:
@@ -75,6 +86,11 @@ export function CheckoutStep({
   const { switchChainAsync } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
   const { sendTransactionAsync } = useSendTransaction()
+  // Use the wagmi `config` imperatively via `waitForTransactionReceipt` so we
+  // can target the quote's chainId explicitly. Necessary because the user's
+  // wallet may have been on a different chain when this component mounted;
+  // a chain-scoped hook captured at render time would query the wrong RPC.
+  const wagmiConfig = useConfig()
 
   const { organizer, event } = parseOrgAndEvent()
 
@@ -182,7 +198,21 @@ export function CheckoutStep({
         })
       }
 
-      // Step 6: Verify
+      // Step 6: wait for the tx to actually be mined before telling the
+      // backend to verify. `sendTransactionAsync` resolves on broadcast, not
+      // on inclusion — calling verify before the block is produced used to
+      // surface as `RPC error: transaction with hash ... not found`.
+      try {
+        await waitForTransactionReceipt(wagmiConfig, {
+          hash: txHash as `0x${string}`,
+          chainId: q.chain_id,
+        })
+      } catch {
+        // Fall through to pollVerify, whose retry loop will pick up any
+        // lingering indexer lag.
+      }
+
+      // Step 7: Verify
       setStatus('verifying')
       await pollVerify(q, txHash)
       onConfirmed(txHash, q)
