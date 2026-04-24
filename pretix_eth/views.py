@@ -352,6 +352,15 @@ def create_quote(request):
     return JsonResponse(quote)
 
 
+def _verify_bad(reason: str, status: int = 400, **extra):
+    """Return a 4xx JsonResponse AND log the reason so production 'Bad Request:
+    /plugin/wc/verify/' lines in the Django middleware log become diagnosable
+    without having to reproduce. The response body shape is unchanged so the
+    frontend retry logic keeps working."""
+    log.warning('wc_verify rejected: %s (extra=%s)', reason, extra or '-')
+    return JsonResponse({'error': reason}, status=status)
+
+
 @csrf_exempt
 @require_http_methods(['POST'])
 def verify(request):
@@ -368,25 +377,25 @@ def verify(request):
     required = ('quote_id', 'tx_hash', 'chain_id', 'organizer', 'event')
     missing = [k for k in required if not body.get(k)]
     if missing:
-        return JsonResponse({'error': f'missing fields: {missing}'}, status=400)
+        return _verify_bad(f'missing fields: {missing}')
 
     client_ip = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip() \
         or request.META.get('REMOTE_ADDR', 'unknown')
     if not _check_rate_limit(body['quote_id'], client_ip):
-        return JsonResponse({'error': 'rate limit exceeded'}, status=429)
+        return _verify_bad('rate limit exceeded', status=429, quote_id=body.get('quote_id'), ip=client_ip)
 
     tx_hash = body['tx_hash']
     if not _TX_HASH_RE.match(tx_hash):
-        return JsonResponse({'error': 'invalid tx_hash format'}, status=400)
+        return _verify_bad('invalid tx_hash format', tx_hash=tx_hash)
 
     try:
         chain_id = int(body['chain_id'])
     except (TypeError, ValueError):
-        return JsonResponse({'error': 'invalid chain_id'}, status=400)
+        return _verify_bad('invalid chain_id', chain_id=body.get('chain_id'))
 
     # Fail fast on one-time tx_hash check
     if WCPaymentAttempt.objects.filter(tx_hash=tx_hash, state='completed').exists():
-        return JsonResponse({'error': 'tx already used for a completed order'}, status=400)
+        return _verify_bad('tx already used for a completed order', tx_hash=tx_hash)
 
     with scopes_disabled():
         # Find the order by matching quote_id in any pending walletconnect payment
@@ -398,7 +407,8 @@ def verify(request):
                 payments__state='created',
             )
         except Order.DoesNotExist:
-            return JsonResponse({'error': 'order not found'}, status=404)
+            return _verify_bad('order not found', status=404,
+                               event=body.get('event'), organizer=body.get('organizer'))
         except Order.MultipleObjectsReturned:
             # Multiple pending orders on event — disambiguate by quote_id below
             order = None
@@ -425,15 +435,17 @@ def verify(request):
                 break
 
         if payment is None:
-            return JsonResponse({'error': 'quote not found'}, status=404)
+            return _verify_bad('quote not found', status=404, quote_id=body.get('quote_id'))
 
         quote = payment.info_data['quote']
 
         if chain_id != quote['chain_id']:
-            return JsonResponse({'error': 'chain_id mismatch'}, status=400)
+            return _verify_bad('chain_id mismatch',
+                               submitted=chain_id, quote=quote.get('chain_id'))
 
         if time.time() > quote['expires_at']:
-            return JsonResponse({'error': 'quote expired'}, status=400)
+            return _verify_bad('quote expired',
+                               expires_at=quote['expires_at'], now=int(time.time()))
 
         provider = WalletConnectPayment(order.event)
         settings_key = provider.settings.get('alchemy_api_key', default=None)
@@ -461,6 +473,7 @@ def verify(request):
             )
 
         if not vr.verified:
+            log.warning('wc_verify rejected: on-chain verify failed: %s (tx=%s)', vr.error, tx_hash)
             return JsonResponse({'verified': False, 'error': vr.error}, status=400)
 
         # Atomic claim: unique constraint on tx_hash prevents race
@@ -488,7 +501,7 @@ def verify(request):
                 payment.save()
                 payment.confirm()
         except IntegrityError:
-            return JsonResponse({'error': 'tx already used (race)'}, status=409)
+            return _verify_bad('tx already used (race)', status=409, tx_hash=tx_hash)
 
     return JsonResponse({
         'verified': True,
