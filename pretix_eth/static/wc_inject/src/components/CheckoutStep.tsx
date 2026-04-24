@@ -337,14 +337,22 @@ export function CheckoutStep({
         </p>
       )}
 
-      <button
-        type="button"
-        className="btn btn-primary btn-lg btn-block wc-pay-btn"
-        disabled={!picked || busy}
-        onClick={handlePay}
-      >
-        {buttonLabel}
-      </button>
+      {/* Hide the Pay button entirely while the wallet is disconnected. The
+          parent `WCPaymentApp` should already flip the stage back to 'connect'
+          on disconnect, but this is a defensive render guard for the brief
+          window between the disconnect event firing and the stage transition,
+          and for any edge case where `address` is undefined without the
+          component unmounting. */}
+      {address && (
+        <button
+          type="button"
+          className="btn btn-primary btn-lg btn-block wc-pay-btn"
+          disabled={!picked || busy}
+          onClick={handlePay}
+        >
+          {buttonLabel}
+        </button>
+      )}
 
       {error && <div className="wc-error">{error}</div>}
 
