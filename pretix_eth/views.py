@@ -280,21 +280,29 @@ def create_quote(request):
             provider = WalletConnectPayment(order.event)
             settings_key = provider.settings.get('alchemy_api_key', default=None)
             from pretix_eth.verification import verify_eth_payer_signature
-            # personal_sign signatures don't embed a chain_id, so for the
-            # ownership check we can use any chain where the smart wallet
-            # is deployed. Coinbase/Base Smart Wallet uses CREATE2 with a
-            # shared factory so the same address exists everywhere, but the
-            # contract may not be deployed on a given chain (counterfactual)
-            # and — importantly — owner lists can drift between chains if
-            # the user added/removed an owner on one chain but not the other.
-            # Try: the payment chain first, then Ethereum mainnet, then Base.
-            # Ethereum is tried before Base because in practice users often
-            # register their passkeys first via cb.xyz which touches mainnet
-            # before any L2. A single-success anywhere proves ownership.
-            fallback_chain_ids = [chain_id]
-            for preferred in (1, 8453):
-                if preferred not in fallback_chain_ids:
-                    fallback_chain_ids.append(preferred)
+            # Coinbase/Base Smart Wallet (and other ERC-1271 wallets that use
+            # EIP-712 domain separators) bind signatures to the chain the
+            # wallet was on at signing time — the `replaySafeHash` wrapper
+            # pulls chainId from `block.chainid`, so a signature made on
+            # chain X validates ONLY when isValidSignature is called on
+            # chain X. We try, in order:
+            #   1. `signing_chain_id` (wallet's chain at sign time) — best guess
+            #   2. the payment chain (common case when user didn't switch chains)
+            #   3. every other supported chain (covers users whose wallet is
+            #      on a chain other than the payment chain)
+            # A single success anywhere proves signature validity.
+            signing_chain_id = body.get('signing_chain_id')
+            fallback_chain_ids: list = []
+            if signing_chain_id is not None:
+                try:
+                    fallback_chain_ids.append(int(signing_chain_id))
+                except (TypeError, ValueError):
+                    pass
+            if chain_id not in fallback_chain_ids:
+                fallback_chain_ids.append(chain_id)
+            for supported in SUPPORTED_CHAINS:
+                if supported not in fallback_chain_ids:
+                    fallback_chain_ids.append(supported)
             sig_ok = False
             for cid in fallback_chain_ids:
                 try:

@@ -152,8 +152,14 @@ export function CheckoutStep({
       // `payer_address` is required for smart-wallet signatures (ERC-1271/6492 —
       // Coinbase/Base Smart Wallet, Safe, etc.) because those return contract-
       // level proofs that can't be ECDSA-recovered. For EOA signatures the
-      // backend still recovers locally; sending the address both ways is fine
-      // (backend cross-checks EOA recovery against it).
+      // backend still recovers locally; sending the address both ways is fine.
+      //
+      // `signing_chain_id` is the chain the user's wallet was on at the moment
+      // of signing — needed for CSW/Safe-style wallets because their ERC-1271
+      // path wraps the hash with an EIP-712 domain separator that includes
+      // the wallet's current chain_id. A CSW signature made on chain X only
+      // validates when isValidSignature is called on chain X (other chains
+      // rebuild a different domain separator and return 0xffffffff).
       setStatus('quoting')
       const qr = await fetch(`${config.urlPrefix}/create-quote/`, {
         method: 'POST',
@@ -165,6 +171,7 @@ export function CheckoutStep({
           chain_id: picked.chain_id, symbol: picked.symbol,
           nonce, signature,
           payer_address: address,
+          signing_chain_id: walletChainId,
         }),
       })
       if (!qr.ok) {
