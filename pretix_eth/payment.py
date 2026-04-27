@@ -238,6 +238,38 @@ class WalletConnectPayment(BasePaymentProvider):
     def matching_id(self, payment):
         return (payment.info_data or {}).get('tx_hash')
 
+    def api_payment_details(self, payment) -> dict:
+        """Populate the `details` field of payments in Pretix's REST API.
+        Without this override, the base class returns `{}` and clients of the
+        Pretix REST API (e.g. devcon's order-confirmation page) can't see any
+        of the on-chain payment data we stored on `info_data`.
+        Falls back to the X402CompletedOrder row for missing fields, same as
+        the control-panel renderer."""
+        info = payment.info_data or {}
+        chain_id = info.get('chain_id')
+        token_symbol = info.get('token_symbol')
+        amount = info.get('amount')
+        payer = info.get('payer')
+        tx_hash = info.get('tx_hash')
+        if not all([chain_id, token_symbol, amount, payer, tx_hash]):
+            fallback = self._x402_fallback(payment)
+            if fallback:
+                chain_id = chain_id or fallback.get('chain_id')
+                token_symbol = token_symbol or fallback.get('token_symbol')
+                amount = amount or fallback.get('amount')
+                payer = payer or fallback.get('payer')
+                tx_hash = tx_hash or fallback.get('tx_hash')
+        return {
+            'tx_hash': tx_hash,
+            'chain_id': chain_id,
+            'token_symbol': token_symbol,
+            'token_address': info.get('token_address'),
+            'amount': amount,
+            'payer': payer,
+            'payment_reference': info.get('payment_reference'),
+            'block_number': info.get('block_number'),
+        }
+
     def order_pending_mail_render(self, order, payment) -> str:
         """Insert a crypto-payment recap into Pretix's order confirmation mail
         (the `{payment_info}` placeholder in the email template). Matches the
