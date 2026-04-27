@@ -120,6 +120,13 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
             expires=timezone.now(),
             sales_channel=sc,
             locale=order_data.get('locale', 'en'),
+            # Propagate the event's test mode flag onto the order. Without this,
+            # x402-created orders default to testmode=False even on test events
+            # (the wc_inject flow gets this for free via Pretix's native
+            # checkout; we have to set it explicitly because we instantiate
+            # Order ourselves). On-chain verification still runs regardless —
+            # this is purely an admin/accounting flag.
+            testmode=getattr(event, 'testmode', False),
         )
 
         attendee = order_data.get('attendee', {}) or {}
