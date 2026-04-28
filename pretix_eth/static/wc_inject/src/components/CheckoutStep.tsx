@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   useAccount,
   useSignMessage,
@@ -76,6 +76,20 @@ export function CheckoutStep({
 }) {
   const [tokenFilter, setTokenFilter] = useState<string | null>(null)
   const [picked, setPicked] = useState<PaymentOption | null>(null)
+
+  // Pre-select ETH when payment options first arrive — saves the user a click
+  // for the most common case. Falls back to leaving everything unselected if
+  // ETH isn't offered (oracle divergence, chain disabled, etc.); the user
+  // picks an asset manually then. Only fires when nothing has been picked yet
+  // so we don't clobber an explicit user choice on a re-render.
+  useEffect(() => {
+    if (tokenFilter !== null || picked !== null) return
+    if (options.length === 0) return
+    const firstEth = options.find(o => o.symbol === 'ETH')
+    if (!firstEth) return
+    setTokenFilter('ETH')
+    setPicked(firstEth)
+  }, [options, tokenFilter, picked])
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
