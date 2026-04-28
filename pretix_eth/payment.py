@@ -63,6 +63,17 @@ class WalletConnectPayment(BasePaymentProvider):
             required=False,
             widget=forms.PasswordInput(render_value=True),
         )
+        base['zapper_api_key'] = forms.CharField(
+            label=_('Zapper API key (optional)'),
+            help_text=_(
+                'When set, the payment-options endpoint fetches wallet balances '
+                'via Zapper in a single GraphQL call (~200ms) instead of fanning '
+                'out RPC eth_calls per chain (~2s). RPC is used automatically as '
+                'a fallback if Zapper fails.'
+            ),
+            required=False,
+            widget=forms.PasswordInput(render_value=True),
+        )
         base['relayer_private_key'] = forms.CharField(
             label=_('Relayer private key (gasless USDC/USDT0). Overridden by WC_RELAYER_PRIVATE_KEY env.'),
             required=False,

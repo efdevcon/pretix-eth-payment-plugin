@@ -36,7 +36,7 @@ def test_payment_options_requires_wallet_and_ref(api_client, event):
 def test_payment_options_rich_shape_with_signing_request(api_client, event, pending_order_for_options, monkeypatch):
     event.settings.set('payment_walletconnect_payment_recipient', '0x' + '2' * 40)
 
-    def fake_fetch(*, wallet, chain_ids, alchemy_key):
+    def fake_fetch(*, wallet, chain_ids, alchemy_key, zapper_api_key=None):
         return [
             {'chain_id': 8453, 'symbol': 'USDC', 'balance': '50000000', 'decimals': 6,
              'token_address': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'},

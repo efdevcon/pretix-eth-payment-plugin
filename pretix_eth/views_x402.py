@@ -192,6 +192,7 @@ def payment_options(request: HttpRequest):
 
     provider = _get_provider(event)
     alchemy_key = provider.settings.get('alchemy_api_key', default=None) or None
+    zapper_key = provider.settings.get('zapper_api_key', default=None) or None
     recipient = provider.settings.get('payment_recipient')
     if not recipient:
         return JsonResponse({'error': 'merchant recipient not configured'}, status=500)
@@ -212,6 +213,7 @@ def payment_options(request: HttpRequest):
     })
     raw_balances = fetch_balances_for_wallet(
         wallet=wallet, chain_ids=enabled_chain_ids, alchemy_key=alchemy_key,
+        zapper_api_key=zapper_key,
     )
     # Map for lookup: (chain_id, symbol, token_address_lower) -> balance_raw
     bal_map = {}
