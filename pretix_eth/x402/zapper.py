@@ -95,6 +95,13 @@ def fetch_balances_via_zapper(
         headers={
             'Content-Type': 'application/json',
             'x-zapper-api-key': api_key,
+            # Cloudflare in front of public.zapper.xyz blocks the default
+            # `Python-urllib/x.y` UA with HTTP 403 "error code: 1010" (banned
+            # browser signature). Send a generic UA so the request isn't
+            # treated as a bot. The actual UA string just needs to look real;
+            # Cloudflare doesn't validate it semantically.
+            'User-Agent': 'pretix-eth-plugin/1.0 (+https://pretix.eu)',
+            'Accept': 'application/json',
         },
         method='POST',
     )
