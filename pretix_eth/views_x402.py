@@ -198,23 +198,36 @@ def payment_options(request: HttpRequest):
         return JsonResponse({'error': 'merchant recipient not configured'}, status=500)
     expires_at = int(pending.expires_at.timestamp())
 
-    # Fetch ETH price (may be None if oracles diverge — ETH options will be skipped)
+    # Fetch ETH price + wallet balances in parallel — neither depends on the
+    # other, so the endpoint's wall-clock time becomes max(price, balances)
+    # instead of price + balances. Two threads is enough; both calls are I/O
+    # bound and release the GIL inside socket reads.
     import asyncio
+    import concurrent.futures
     from pretix_eth.pricing import fetch_eth_price_usd
-    try:
-        eth_price_result = asyncio.run(fetch_eth_price_usd())
-        eth_price_usd = eth_price_result.price if eth_price_result else None
-    except Exception:
-        eth_price_usd = None
 
-    # Fetch wallet balances across all enabled chains
     enabled_chain_ids = sorted({
         a['chainId'] for a in _supported_assets_for_event(provider)
     })
-    raw_balances = fetch_balances_for_wallet(
-        wallet=wallet, chain_ids=enabled_chain_ids, alchemy_key=alchemy_key,
-        zapper_api_key=zapper_key,
-    )
+
+    def _run_price():
+        try:
+            res = asyncio.run(fetch_eth_price_usd())
+            return res.price if res else None
+        except Exception:
+            return None
+
+    def _run_balances():
+        return fetch_balances_for_wallet(
+            wallet=wallet, chain_ids=enabled_chain_ids,
+            alchemy_key=alchemy_key, zapper_api_key=zapper_key,
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        price_future = pool.submit(_run_price)
+        balances_future = pool.submit(_run_balances)
+        eth_price_usd = price_future.result()
+        raw_balances = balances_future.result()
     # Map for lookup: (chain_id, symbol, token_address_lower) -> balance_raw
     bal_map = {}
     for b in raw_balances:
