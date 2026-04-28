@@ -26,6 +26,16 @@ const NETWORKS: [AppKitNetwork, ...AppKitNetwork[]] = [
   mainnet, optimism, polygon, base, arbitrum,
 ]
 
+// Wallets pinned to the top of the AppKit picker. Mirrors devcon's
+// src/context/appkit-config.ts so the same shortlist appears across surfaces.
+// IDs come from cloud.reown.com's wallet directory.
+const FEATURED_WALLET_IDS = [
+  'ecc4036f814562b41a5268adc86270fba1365471402006302e70169465b7ac18', // Zerion
+  '1ae92b26df02f0abca6304df07debccd18262fdf5fe82daa81593582dac9a369', // Rainbow
+  'fd20dc426fb37566d803205b19bbc1d4096b248ac04548e3cfb6b3a38bd033aa', // Coinbase
+  'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96', // MetaMask
+]
+
 export function initAppKit(projectId: string) {
   const wagmiAdapter = new WagmiAdapter({
     projectId,
@@ -47,6 +57,7 @@ export function initAppKit(projectId: string) {
       email: false,
       socials: [],
     },
+    featuredWalletIds: FEATURED_WALLET_IDS,
   })
 
   return { wagmiAdapter, appKit, open: () => appKit.open() }
