@@ -147,11 +147,15 @@ def admin_orders(request: HttpRequest):
 
         # Single round-trip to fetch all relevant Pretix Orders so the
         # admin UI can show the buyer's email per row without N+1 queries.
+        # `.only('code', 'email')` skips Pretix Order's wide payload (~30+
+        # columns including meta_info JSON, transactions, attendee data) —
+        # we read only `code` + `email` here.
         x402_codes = {o.pretix_order_code for o in x402_completed_list if o.pretix_order_code}
         email_by_code: dict = {}
         if x402_codes:
             email_by_code.update({
-                o.code: o.email for o in Order.objects.filter(event=event, code__in=x402_codes)
+                o.code: o.email
+                for o in Order.objects.filter(event=event, code__in=x402_codes).only('code', 'email')
             })
 
         x402_rows = [
@@ -174,23 +178,28 @@ def admin_orders(request: HttpRequest):
                 .order_by('-created_at')[:500]
             )
             wc_codes = {w.order_code for w in wc_attempts}
+            # `.only(...)`: the wc_attempt serializer reads `total` and `email`
+            # only — skip the rest of Pretix Order's wide payload.
             orders_by_code = {
-                o.code: o for o in Order.objects.filter(event=event, code__in=wc_codes)
+                o.code: o
+                for o in Order.objects.filter(event=event, code__in=wc_codes).only('code', 'email', 'total')
             } if wc_codes else {}
-            # Reuse the email lookup (Order.email) we already loaded above
-            # plus anything new from this query.
             for code, order in orders_by_code.items():
                 email_by_code.setdefault(code, order.email)
             # The legacy verify handler (views.py) writes token_symbol + amount
             # into the matching Pretix OrderPayment.info_data by tx_hash. Pull
-            # that side so the admin UI can show accurate token + amount without
-            # relying on heuristics.
+            # that side so the admin UI can show accurate token + amount.
+            # Filter by `order__code__in=wc_codes` so we don't scan every
+            # walletconnect payment in the event — events with many wc_inject
+            # orders previously paid O(all walletconnect payments) just to find
+            # the few that match this batch's tx_hashes.
             from pretix.base.models import OrderPayment
             payments_by_tx: dict = {}
             if wc_attempts:
                 tx_hashes = {w.tx_hash for w in wc_attempts}
                 for p in OrderPayment.objects.filter(
                     order__event=event, provider='walletconnect',
+                    order__code__in=wc_codes,
                 ).only('id', 'info'):
                     info = p.info_data or {}
                     tx = info.get('tx_hash')
