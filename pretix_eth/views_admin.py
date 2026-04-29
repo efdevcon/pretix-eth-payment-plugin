@@ -50,7 +50,7 @@ def _get_event(org_slug: str, event_slug: str):
         return None
 
 
-def _serialize_completed(o: X402CompletedOrder) -> dict:
+def _serialize_completed(o: X402CompletedOrder, email: Optional[str] = None) -> dict:
     return {
         'source': 'x402',
         'paymentReference': o.payment_reference,
@@ -63,6 +63,7 @@ def _serialize_completed(o: X402CompletedOrder) -> dict:
         'tokenSymbol': o.token_symbol,
         'cryptoAmount': o.crypto_amount,
         'gasCostWei': o.gas_cost_wei,
+        'email': email,
         'refundStatus': o.refund_status,
         'refundTxHash': o.refund_tx_hash,
         'refundMeta': o.refund_meta or {},
@@ -71,6 +72,7 @@ def _serialize_completed(o: X402CompletedOrder) -> dict:
 
 def _serialize_wc_attempt(
     w: WCPaymentAttempt, total: Optional[Decimal], payment_info: Optional[dict] = None,
+    email: Optional[str] = None,
 ) -> dict:
     """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
     the tx hash was verified on-chain and the Pretix order confirmed.
@@ -97,6 +99,7 @@ def _serialize_wc_attempt(
         'totalUsd': str(total) if total is not None else None,
         'tokenSymbol': token_symbol,
         'cryptoAmount': crypto_amount if crypto_amount else None,
+        'email': email,
     }
 
 
@@ -140,7 +143,21 @@ def admin_orders(request: HttpRequest):
     with scopes_disabled():
         completed_qs = X402CompletedOrder.objects.filter(event=event)
         pending_qs = X402PendingOrder.objects.filter(event=event)
-        x402_rows = [_serialize_completed(o) for o in completed_qs.order_by('-completed_at')[:500]]
+        x402_completed_list = list(completed_qs.order_by('-completed_at')[:500])
+
+        # Single round-trip to fetch all relevant Pretix Orders so the
+        # admin UI can show the buyer's email per row without N+1 queries.
+        x402_codes = {o.pretix_order_code for o in x402_completed_list if o.pretix_order_code}
+        email_by_code: dict = {}
+        if x402_codes:
+            email_by_code.update({
+                o.code: o.email for o in Order.objects.filter(event=event, code__in=x402_codes)
+            })
+
+        x402_rows = [
+            _serialize_completed(o, email=email_by_code.get(o.pretix_order_code))
+            for o in x402_completed_list
+        ]
         pending = [_serialize_pending(o) for o in pending_qs.order_by('-created_at')[:200]]
 
         # Legacy pre-x402 WalletConnect direct-send rows are merged into
@@ -160,6 +177,10 @@ def admin_orders(request: HttpRequest):
             orders_by_code = {
                 o.code: o for o in Order.objects.filter(event=event, code__in=wc_codes)
             } if wc_codes else {}
+            # Reuse the email lookup (Order.email) we already loaded above
+            # plus anything new from this query.
+            for code, order in orders_by_code.items():
+                email_by_code.setdefault(code, order.email)
             # The legacy verify handler (views.py) writes token_symbol + amount
             # into the matching Pretix OrderPayment.info_data by tx_hash. Pull
             # that side so the admin UI can show accurate token + amount without
@@ -180,6 +201,7 @@ def admin_orders(request: HttpRequest):
                     w,
                     total=orders_by_code[w.order_code].total if w.order_code in orders_by_code else None,
                     payment_info=payments_by_tx.get(w.tx_hash),
+                    email=email_by_code.get(w.order_code),
                 )
                 for w in wc_attempts if w.order_code in orders_by_code
             ]
