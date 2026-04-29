@@ -35,7 +35,18 @@ Buyer signs an EIP-3009 `transferWithAuthorization`; a relayer broadcasts it and
 
 ### Native ETH (with payer signature)
 
-Same as WalletConnect flow but with an additional `ethPayerSignature` at verify time that cryptographically binds the payer's wallet to the order. Supports smart wallets (ERC-1271, ERC-6492) and ERC-4337 bundler flows via `debug_traceTransaction` internal call detection.
+Same as WalletConnect flow but with an additional `ethPayerSignature` at verify time that cryptographically binds the payer's wallet to the order. Supports:
+
+- EOA (ECDSA recovery)
+- Smart wallets (ERC-1271, with ERC-6492 unwrapping for counterfactual wallets)
+- EIP-7702-delegated EOAs (e.g. MetaMask Smart Account in 7702 mode) — the verifier detects the `0xef0100…` code prefix and retries ERC-1271 against the wallet's chain-bound EIP-712 envelope (via `DOMAIN_SEPARATOR()`) when the plain EIP-191 hash is rejected
+- ERC-4337 bundler flows — `debug_traceTransaction` walks internal calls to locate the actual ETH transfer when the outer `tx.from` is a bundler EOA
+
+**Slippage tolerance:** ETH verification accepts up to **0.5%** under-payment vs. the quote (industry default, same as Uniswap). This absorbs two real-world drift sources without the merchant needing to over-quote:
+- ETH spot price moves between when our oracles fetch it and when the wallet signs
+- Smart-account wallets (notably MetaMask 7702 mode) re-derive `value` at signing time using their own price feed instead of passing the exact wei amount through
+
+USDC/USDT0 transfers stay strict — stables don't drift, and the EIP-3009 typed-data signature commits to an exact value.
 
 ## Pricing
 
@@ -49,7 +60,7 @@ Same as WalletConnect flow but with an additional `ethPayerSignature` at verify 
 
 - **Authentication:** all `/plugin/x402/*` endpoints require a valid Pretix API token (`Authorization: Token <token>`) — same token system Pretix uses for its own REST API. No custom secrets to manage.
 - **USDC/USDT0 gasless:** Payer cryptographically bound via EIP-3009 signature (on-chain verified by token contract). Accepts both EOA (`{v, r, s}` object) and smart wallet (`rawSignature` hex) formats.
-- **Native ETH:** Payer bound via `ethPayerSignature` — supports EOA (ECDSA), smart wallets (ERC-1271), and counterfactual wallets (ERC-6492)
+- **Native ETH:** Payer bound via `ethPayerSignature` — supports EOA (ECDSA), smart wallets (ERC-1271), counterfactual wallets (ERC-6492), and EIP-7702-delegated EOAs (chain-bound `DOMAIN_SEPARATOR()` retry). 0.5% slippage tolerance on the on-chain `value` to absorb price drift + wallet-side re-quoting (see Payment flows above)
 - **Smart wallet ETH (ERC-4337):** `debug_traceTransaction` fallback walks internal call tree to find the actual ETH transfer from the smart wallet
 - **WalletConnect direct:** SIWE-lite challenge at quote creation proves wallet ownership
 - **Relayer binding:** Before sponsoring gas, the plugin verifies `authorization.to == configured recipient`, `authorization.value >= expected amount`, `authorization.from == intendedPayer`, and `validBefore > now` — an attacker with a valid token cannot redirect funds or underpay
