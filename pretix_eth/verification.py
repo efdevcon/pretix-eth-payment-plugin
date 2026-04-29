@@ -136,6 +136,21 @@ def _find_internal_eth_transfer(w3, tx_hash: str, from_lower: str,
         return 'trace_unavailable'
 
 
+SLIPPAGE_BPS = 50  # 0.50%
+
+def _min_acceptable_wei(expected_wei: int) -> int:
+    """How much ETH we'll accept as 'paid in full' for an `expected_wei` quote.
+    Allows for two real-world drift sources:
+      - ETH spot price moves between our oracle fetch and the wallet's signing
+      - Smart-account wallets (notably MetaMask 7702 mode) re-derive `value`
+        at signing time using their own price feed instead of passing through
+        our exact wei amount
+    Industry-standard 0.5% (50 bps) — same as Uniswap's default — comfortably
+    absorbs both. The merchant's worst case loss per order at this bound is
+    half a percent of the order's USD total."""
+    return expected_wei - (expected_wei * SLIPPAGE_BPS) // 10_000
+
+
 def verify_native_eth(*, w3, tx_hash: str, expected_from: str,
                       expected_to: str, expected_amount_wei: int,
                       min_confirmations: int = 1) -> VerificationResult:
@@ -162,19 +177,28 @@ def verify_native_eth(*, w3, tx_hash: str, expected_from: str,
             False, error=f'insufficient confirmations ({head - block}/{min_confirmations})',
         )
 
+    min_wei = _min_acceptable_wei(expected_amount_wei)
+
     # Happy path: EOA direct send
     from_match = _addr_eq(tx.get('from', ''), expected_from)
     to_match = _addr_eq(tx.get('to', ''), expected_to)
     if from_match and to_match:
-        if int(tx.get('value', 0)) < expected_amount_wei:
-            return VerificationResult(False, error='tx value too low')
+        actual = int(tx.get('value', 0))
+        if actual < min_wei:
+            return VerificationResult(
+                False,
+                error=f'tx value too low: {actual} < {min_wei} '
+                      f'(expected ≥{min_wei}, quote was {expected_amount_wei}, slippage tolerance {SLIPPAGE_BPS / 100:.2f}%)',
+            )
         return VerificationResult(True, block_number=block)
 
-    # Smart wallet / ERC-4337 fallback: trace internal calls
+    # Smart wallet / ERC-4337 fallback: trace internal calls. Use the same
+    # slippage-adjusted minimum so we don't reject 7702/UserOp transfers that
+    # underpay the quote by tiny amounts due to wallet-side re-quoting.
     from_lower = _normalize_hex(expected_from).lower()
     to_lower = _normalize_hex(expected_to).lower()
     trace_outcome = _find_internal_eth_transfer(
-        w3, tx_hash, from_lower, to_lower, expected_amount_wei,
+        w3, tx_hash, from_lower, to_lower, min_wei,
     )
     if trace_outcome == 'match':
         return VerificationResult(True, block_number=block)

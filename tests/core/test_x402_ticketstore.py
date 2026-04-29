@@ -36,7 +36,10 @@ def test_store_and_get_pending(event):
 
 
 @pytest.mark.django_db
-def test_get_expired_returns_none_and_deletes(event):
+def test_get_expired_returns_none_by_default_but_keeps_row(event):
+    """Expired pendings are hidden from the buyer flow but the row is kept
+    so admin recovery (`include_expired=True`) can still resurrect it.
+    Actual cleanup is the periodic task's job, not the read path's."""
     with scopes_disabled():
         past = timezone.now() - timedelta(seconds=1)
         X402PendingOrder.objects.create(
@@ -46,7 +49,25 @@ def test_get_expired_returns_none_and_deletes(event):
         )
         got = get_pending_order(event=event, payment_reference='x402_exp')
         assert got is None
-        assert not X402PendingOrder.objects.filter(payment_reference='x402_exp').exists()
+        # Row must still exist — cleanup is the periodic task's responsibility.
+        assert X402PendingOrder.objects.filter(payment_reference='x402_exp').exists()
+
+
+@pytest.mark.django_db
+def test_get_expired_with_include_expired_returns_row(event):
+    """Admin manual-verify path: expired pendings are still recoverable."""
+    with scopes_disabled():
+        past = timezone.now() - timedelta(seconds=1)
+        X402PendingOrder.objects.create(
+            event=event, payment_reference='x402_exp_admin',
+            order_data={'foo': 'bar'}, total_usd=Decimal('1'), expires_at=past,
+            intended_payer='0x' + '1' * 40,
+        )
+        got = get_pending_order(
+            event=event, payment_reference='x402_exp_admin', include_expired=True,
+        )
+        assert got is not None
+        assert got.order_data == {'foo': 'bar'}
 
 
 @pytest.mark.django_db
