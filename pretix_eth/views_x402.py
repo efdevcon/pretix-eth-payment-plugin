@@ -873,6 +873,7 @@ def execute_transfer(request):
 def _x402_verify_and_finalize(
     *, event, pending, payment_reference: str, tx_hash: str, chain_id: int,
     symbol: str, payer: str, eth_payer_signature: Optional[str],
+    skip_eth_payer_signature: bool = False,
 ):
     """Shared verification + finalization pipeline used by both the public
     verify endpoint and the admin manual-verify endpoint.
@@ -881,6 +882,12 @@ def _x402_verify_and_finalize(
       - tx_hash uniqueness (not already linked to another completed order)
       - payer address matches the pending order's intended_payer
       - ETH payments require an ethPayerSignature matching the payer address
+        (admin manual-verify can bypass via `skip_eth_payer_signature=True` —
+        the admin endpoint is auth-gated by `@require_pretix_token` and is
+        meant for stuck-payment recovery where collecting a fresh signature
+        from the user isn't practical; payer-binding is then degraded to
+        "payer-from-tx-trace == intended_payer", which is still enforced
+        on-chain by `verify_native_eth`)
       - On-chain verification of amount + recipient + confirmations
       - Atomic claim-then-reserve to prevent parallel duplicate-claim races
 
@@ -911,19 +918,29 @@ def _x402_verify_and_finalize(
     w3 = _w3_for_chain(chain_id, alchemy_key)
 
     if symbol == 'ETH':
-        # ETH path requires a payer signature (prevents cross-order tx reuse).
-        # USDC/USDT0 are already bound via EIP-3009 authorization and don't need it.
-        if not eth_payer_signature:
-            return _x402_verify_bad(
-                'ethPayerSignature is required for native ETH payments',
-                payer=payer, chain_id=chain_id, payment_reference=payment_reference,
+        # ETH path normally requires a payer signature (prevents cross-order
+        # tx reuse). USDC/USDT0 are already bound via EIP-3009 authorization
+        # and don't need it. Admin manual-verify can skip the signature for
+        # stuck-payment recovery — see `skip_eth_payer_signature` doc above.
+        if skip_eth_payer_signature:
+            log.warning(
+                '[admin manual verify] bypassing ethPayerSignature for '
+                'payer=%s chain=%s payment_reference=%s — payer-binding '
+                'falls back to on-chain tx.from match',
+                payer, chain_id, payment_reference,
             )
-        eth_msg = build_eth_payer_message(payment_reference, payer, chain_id)
-        if not verify_eth_payer_signature(w3=w3, payer=payer, message=eth_msg, signature=eth_payer_signature):
-            return _x402_verify_bad(
-                'ethPayerSignature does not match the payer address', status=403,
-                payer=payer, chain_id=chain_id, payment_reference=payment_reference,
-            )
+        else:
+            if not eth_payer_signature:
+                return _x402_verify_bad(
+                    'ethPayerSignature is required for native ETH payments',
+                    payer=payer, chain_id=chain_id, payment_reference=payment_reference,
+                )
+            eth_msg = build_eth_payer_message(payment_reference, payer, chain_id)
+            if not verify_eth_payer_signature(w3=w3, payer=payer, message=eth_msg, signature=eth_payer_signature):
+                return _x402_verify_bad(
+                    'ethPayerSignature does not match the payer address', status=403,
+                    payer=payer, chain_id=chain_id, payment_reference=payment_reference,
+                )
 
         expected_wei_str = (pending.expected_eth_amount_wei_by_chain or {}).get(str(chain_id))
         if not expected_wei_str:

@@ -96,9 +96,14 @@ def test_admin_verify_rejects_payer_mismatch(api_client, event_with_recipient, p
 
 
 @pytest.mark.django_db
-def test_admin_verify_requires_eth_signature_for_eth(api_client, event_with_recipient, pending_for_admin_verify):
-    """Same ETH signature requirement as user-facing verify — can't be
-    bypassed via the admin path."""
+def test_admin_verify_bypasses_eth_signature_requirement(api_client, event_with_recipient, pending_for_admin_verify):
+    """Admin manual-verify is a stuck-payment recovery path. Re-collecting an
+    `ethPayerSignature` from the user is impractical at recovery time, so the
+    requirement is intentionally skipped here — payer-binding falls back to
+    the on-chain `tx.from == intended_payer` check enforced by
+    `verify_native_eth`. Mirrors the bypass the user-facing verify endpoint
+    explicitly forbids; the admin endpoint is auth-gated by the Pretix API
+    token and intended for operator use only."""
     resp = api_client.post('/plugin/x402/admin/verify/', data=json.dumps({
         'organizer': event_with_recipient.organizer.slug, 'event': event_with_recipient.slug,
         'paymentReference': 'x402_admin_v1',
@@ -106,5 +111,11 @@ def test_admin_verify_requires_eth_signature_for_eth(api_client, event_with_reci
         'payer': '0x' + '1' * 40,
         'chainId': 1, 'symbol': 'ETH',
     }), content_type='application/json')
-    assert resp.status_code == 400
-    assert 'ethpayersignature' in resp.json()['error'].lower().replace(' ', '')
+    # Should NOT 400 with "ethPayerSignature is required" anymore. The flow
+    # proceeds past the signature gate and fails later (on-chain verify
+    # against a fake tx, etc.) — we just assert the signature gate didn't
+    # short-circuit.
+    body = resp.json()
+    err = (body.get('error') or '').lower()
+    assert 'ethpayersignature' not in err.replace(' ', ''), \
+        f'admin verify should bypass ethPayerSignature requirement; got: {body}'

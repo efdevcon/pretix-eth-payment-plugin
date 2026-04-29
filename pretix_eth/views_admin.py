@@ -363,5 +363,12 @@ def admin_verify(request: HttpRequest):
         payment_reference=body['payment_reference'],
         tx_hash=tx_hash, chain_id=chain_id, symbol=body['symbol'],
         payer=body['payer'],
+        # Admin recovery path: the user has typically already signed-and-sent,
+        # then the verify call failed for some other reason (RPC flake, stale
+        # bundle, browser closed before the receipt landed). Re-collecting a
+        # fresh signature isn't practical, and on-chain verification still
+        # binds payer→tx via `tx.from`, so the signature requirement is
+        # bypassed here. The bypass is logged at WARNING for audit.
         eth_payer_signature=body.get('eth_payer_signature'),
+        skip_eth_payer_signature=True,
     )
