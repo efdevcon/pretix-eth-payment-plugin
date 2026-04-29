@@ -111,6 +111,10 @@ def _serialize_pending(o: X402PendingOrder) -> dict:
         'intendedPayer': o.intended_payer,
         'totalUsd': str(o.total_usd),
         'expectedChainId': o.expected_chain_id,
+        # Pre-computed ETH wei per chain (snapshot at pending creation time —
+        # locks in the rate the buyer was quoted). Stables aren't pre-stored
+        # because their amount is just `total_usd * 10^6`.
+        'expectedEthAmountWeiByChain': o.expected_eth_amount_wei_by_chain or {},
         'metadata': {
             **(o.metadata or {}),
             **({'addonIds': [i for i in addon_ids if i is not None]} if addon_ids else {}),
