@@ -393,8 +393,11 @@ def verify(request):
     except (TypeError, ValueError):
         return _verify_bad('invalid chain_id', chain_id=body.get('chain_id'))
 
-    # Fail fast on one-time tx_hash check
-    if WCPaymentAttempt.objects.filter(tx_hash=tx_hash, state='completed').exists():
+    # Fail fast on one-time tx_hash check. Case-insensitive: clients normally
+    # send lowercase 0x-hex, but tooling-generated hashes (Etherscan exports,
+    # wallet UI copy) sometimes come back mixed/upper-case — the dup guard
+    # must catch all of those.
+    if WCPaymentAttempt.objects.filter(tx_hash__iexact=tx_hash, state='completed').exists():
         return _verify_bad('tx already used for a completed order', tx_hash=tx_hash)
 
     with scopes_disabled():

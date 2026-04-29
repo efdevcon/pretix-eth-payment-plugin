@@ -123,16 +123,24 @@ def reserve_completed_order(
 ) -> X402CompletedOrder:
     """Insert a completed order with placeholder pretix_order_code.
     Raises TxHashAlreadyUsedError if another order already claimed this tx hash
-    (unique constraint). Must be called BEFORE creating the Pretix order."""
+    (unique constraint). Must be called BEFORE creating the Pretix order.
+
+    `tx_hash` is normalized to lowercase before insert. The unique constraint
+    is byte-equal (not case-folded), so storing two casings of the same hash
+    would otherwise both succeed and defeat the dup guard. Pre-check with
+    `get_completed_by_tx_hash` (case-insensitive) catches the user-facing
+    case; this normalization closes the concurrent-insert race window where
+    both attempts pass the pre-check before either has committed."""
+    tx_hash_norm = tx_hash.lower() if tx_hash else tx_hash
     try:
         return X402CompletedOrder.objects.create(
-            event=event, tx_hash=tx_hash, payment_reference=payment_reference,
+            event=event, tx_hash=tx_hash_norm, payment_reference=payment_reference,
             pretix_order_code='__RESERVED__', payer=payer, chain_id=chain_id,
             total_usd=total_usd, token_symbol=token_symbol,
             crypto_amount=crypto_amount, gas_cost_wei=gas_cost_wei,
         )
     except IntegrityError as e:
-        raise TxHashAlreadyUsedError(f'tx_hash {tx_hash} already used') from e
+        raise TxHashAlreadyUsedError(f'tx_hash {tx_hash_norm} already used') from e
 
 
 def finalize_completed_order(*, event, payment_reference: str, pretix_order_code: str) -> None:
@@ -150,8 +158,12 @@ def remove_completed_reservation(*, event, payment_reference: str) -> None:
 
 
 def get_completed_by_tx_hash(tx_hash: str) -> Optional[X402CompletedOrder]:
+    """Case-insensitive lookup. Tx hashes are 0x-prefixed hex; clients normally
+    send lowercase but some tooling (Etherscan exports, MetaMask UI copy) may
+    use mixed/upper case. We compare insensitively so the duplicate-tx guard
+    can't be bypassed by case drift."""
     try:
-        return X402CompletedOrder.objects.get(tx_hash=tx_hash)
+        return X402CompletedOrder.objects.get(tx_hash__iexact=tx_hash)
     except X402CompletedOrder.DoesNotExist:
         return None
 
