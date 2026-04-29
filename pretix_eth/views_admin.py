@@ -348,13 +348,18 @@ def admin_verify(request: HttpRequest):
         return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
 
     with scopes_disabled():
+        # Admin recovery: don't filter out expired pendings. The on-chain tx
+        # is valid forever; the TTL is a UX guard for the buyer flow, not a
+        # security control. Operators need to be able to verify a payment
+        # whose user took >TTL to broadcast.
         pending = ticketstore.get_pending_order(
             event=event, payment_reference=body['payment_reference'],
+            include_expired=True,
         )
     if pending is None:
         return JsonResponse({
             'success': False,
-            'error': 'payment_reference not found or expired (cannot verify against a missing pending order)',
+            'error': 'payment_reference not found (cannot verify against a missing pending order)',
         }, status=404)
 
     from pretix_eth.views_x402 import _x402_verify_and_finalize

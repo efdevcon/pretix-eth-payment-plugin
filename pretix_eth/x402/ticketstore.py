@@ -44,15 +44,31 @@ def store_pending_order(
     )
 
 
-def get_pending_order(*, event, payment_reference: str) -> Optional[X402PendingOrder]:
-    """Returns the pending order if it exists and hasn't expired.
-    Deletes expired rows as a side effect."""
+def get_pending_order(
+    *, event, payment_reference: str, include_expired: bool = False,
+) -> Optional[X402PendingOrder]:
+    """Returns the pending order if it exists.
+
+    Default behaviour (used by the buyer-facing verify endpoint): treat an
+    expired row as if it doesn't exist — the buyer needs to refresh quote.
+
+    Pass `include_expired=True` from operator-only paths (admin manual
+    verify) to recover stuck payments whose pending row has aged past its
+    TTL. The on-chain tx is valid forever, so the plugin should still be
+    able to bind it to the order.
+
+    Notably this does NOT delete expired rows as a side effect anymore —
+    that previously made admin recovery impossible if any buyer-side call
+    happened to hit `verify` first. Actual cleanup is handled hourly by
+    `cleanup_expired_pending_task` (registered via Pretix's `periodic_task`
+    signal in `signals.py`), which gives operators up to ~1 h to recover
+    a stuck payment after its quote TTL elapses.
+    """
     try:
         o = X402PendingOrder.objects.get(event=event, payment_reference=payment_reference)
     except X402PendingOrder.DoesNotExist:
         return None
-    if o.expires_at < timezone.now():
-        o.delete()
+    if o.expires_at < timezone.now() and not include_expired:
         return None
     return o
 
