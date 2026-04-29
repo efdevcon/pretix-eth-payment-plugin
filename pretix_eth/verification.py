@@ -211,6 +211,60 @@ ERC1271_MAGIC = bytes.fromhex('1626ba7e')
 ERC6492_MAGIC_SUFFIX = bytes.fromhex(
     '6492649264926492649264926492649264926492649264926492649264926492',
 )
+# EIP-7702 designator: a delegated EOA's `eth_getCode` returns
+# `0xef0100 || <delegated_implementation_address>` (3 + 20 = 23 bytes).
+EIP7702_PREFIX = bytes.fromhex('ef0100')
+
+# `bytes4(keccak256("DOMAIN_SEPARATOR()"))` — most OpenZeppelin / EIP-712-based
+# contracts expose this view; we use it to discover the contract's chain-bound
+# hash envelope without having to know the implementation type.
+DOMAIN_SEPARATOR_SELECTOR = bytes.fromhex('3644e515')
+
+
+def _try_erc1271(w3, payer_cs: str, hash_to_check: bytes, sig_bytes: bytes) -> Optional[bytes]:
+    """Call isValidSignature(bytes32, bytes) on `payer_cs`. Returns the magic
+    bytes (or whatever the contract returned) on success, or None if the call
+    reverted / returned garbage."""
+    from eth_abi import encode as abi_encode
+    selector = bytes.fromhex('1626ba7e')
+    try:
+        encoded_args = abi_encode(['bytes32', 'bytes'], [hash_to_check, sig_bytes])
+        calldata = '0x' + (selector + encoded_args).hex()
+        result = w3.eth.call({'to': payer_cs, 'data': calldata})
+    except Exception as e:
+        log.warning(
+            'eth_payer_signature: isValidSignature eth_call reverted on %s: %s',
+            payer_cs, e,
+        )
+        return None
+    if isinstance(result, (bytes, bytearray)):
+        return bytes(result[:4])
+    try:
+        return bytes.fromhex(result.hex()[:8])
+    except Exception:
+        return None
+
+
+def _try_fetch_domain_separator(w3, payer_cs: str) -> Optional[bytes]:
+    """Read `DOMAIN_SEPARATOR()` (ERC-1967/EIP-712 convention) from the wallet
+    contract. Used as the chain-bound envelope when the wallet is a 7702-style
+    smart account that expects ERC-7739-flavored signatures.
+
+    Returns the 32-byte separator or None if the call reverts / the contract
+    doesn't expose it."""
+    try:
+        result = w3.eth.call({
+            'to': payer_cs, 'data': '0x' + DOMAIN_SEPARATOR_SELECTOR.hex(),
+        })
+    except Exception as e:
+        log.debug(
+            'eth_payer_signature: DOMAIN_SEPARATOR() probe failed on %s: %s',
+            payer_cs, e,
+        )
+        return None
+    if isinstance(result, (bytes, bytearray)) and len(result) >= 32:
+        return bytes(result[:32])
+    return None
 
 
 def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) -> bool:
@@ -230,11 +284,11 @@ def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) 
     having to reproduce locally."""
     from eth_account import Account
     from eth_account.messages import encode_defunct
-    from eth_abi import encode as abi_encode
     from eth_abi import decode as abi_decode
     from web3 import Web3
 
     # 1) EOA ECDSA recovery — fast, no RPC.
+    recovered = None
     try:
         msg = encode_defunct(text=message)
         recovered = Account.recover_message(msg, signature=signature)
@@ -242,6 +296,17 @@ def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) 
             return True
     except Exception as e:
         log.debug('eth_payer_signature: ECDSA recovery skipped (%s)', e)
+    # If recovery succeeded but to a *different* address, that's diagnostic
+    # gold — Frame's "MetaMask compatibility" mode and some 7702 setups can
+    # produce signatures that recover to an unrelated key. Surface it instead
+    # of silently falling through to ERC-1271 (which then reports the
+    # confusing "no contract code on this chain" error).
+    if recovered and not _addr_eq(recovered, payer):
+        log.warning(
+            'eth_payer_signature: ECDSA recovered %s but expected payer=%s '
+            '(falling through to ERC-1271)',
+            recovered, payer,
+        )
 
     # Normalize sig bytes
     try:
@@ -275,11 +340,8 @@ def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) 
         msg_bytes = message.encode('utf-8')
         prefix = f'\x19Ethereum Signed Message:\n{len(msg_bytes)}'.encode('utf-8')
         msg_hash = Web3.keccak(prefix + msg_bytes)
-        selector = bytes.fromhex('1626ba7e')
-        encoded_args = abi_encode(['bytes32', 'bytes'], [msg_hash, sig_bytes])
-        calldata = '0x' + (selector + encoded_args).hex()
     except Exception as e:
-        log.warning('eth_payer_signature: calldata build failed: %s', e)
+        log.warning('eth_payer_signature: hash build failed: %s', e)
         return False
 
     payer_cs = Web3.to_checksum_address(payer)
@@ -298,19 +360,58 @@ def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) 
         )
         return False
 
-    try:
-        result = w3.eth.call({'to': payer_cs, 'data': calldata})
-    except Exception as e:
-        log.warning('eth_payer_signature: isValidSignature eth_call reverted on %s: %s', payer, e)
-        return False
+    # EIP-7702 detection: a delegated EOA's bytecode is `0xef0100 || <impl>`
+    # (23 bytes total). MetaMask Smart Account in 7702 mode signs through the
+    # delegated implementation, which often expects an ERC-7739-style nested
+    # hash bound to the wallet's domain separator instead of the raw EIP-191
+    # hash. Detect the prefix so we know to attempt the chain-bound retry.
+    is_7702 = code[:3] == EIP7702_PREFIX
 
-    magic = result[:4] if isinstance(result, (bytes, bytearray)) else bytes.fromhex(result.hex()[:8])
+    # Try plain EIP-191 hash first. This is what CSW (and most smart accounts)
+    # accept directly — they internally compute their own chain-bound hash and
+    # verify the signature against it.
+    magic = _try_erc1271(w3, payer_cs, msg_hash, sig_bytes)
     if magic == ERC1271_MAGIC:
         return True
+
+    # Fallback for 7702-delegated EOAs (and any other smart account that wants
+    # an ERC-7739 chain-bound envelope): retry with
+    #   keccak256("\x19\x01" || DOMAIN_SEPARATOR() || msg_hash)
+    # This works for any contract that exposes the standard EIP-712
+    # `DOMAIN_SEPARATOR()` view (selector 0x3644e515) — covers OpenZeppelin
+    # EIP712 base and most smart-account implementations including MetaMask
+    # Smart Account on 7702.
+    if is_7702:
+        log.info(
+            'eth_payer_signature: payer %s is EIP-7702-delegated (impl=0x%s); trying chain-bound retry',
+            payer, code[3:23].hex() if len(code) >= 23 else '?',
+        )
+        domain_separator = _try_fetch_domain_separator(w3, payer_cs)
+        if domain_separator is not None:
+            chain_bound = Web3.keccak(b'\x19\x01' + domain_separator + msg_hash)
+            magic_cb = _try_erc1271(w3, payer_cs, chain_bound, sig_bytes)
+            if magic_cb == ERC1271_MAGIC:
+                log.info(
+                    'eth_payer_signature: 7702 chain-bound retry succeeded for %s',
+                    payer,
+                )
+                return True
+            log.warning(
+                'eth_payer_signature: 7702 chain-bound retry returned %s (expected %s) for payer=%s',
+                magic_cb.hex() if magic_cb else 'no-result',
+                ERC1271_MAGIC.hex(), payer,
+            )
+        else:
+            log.warning(
+                'eth_payer_signature: 7702 wallet %s does not expose DOMAIN_SEPARATOR(); '
+                'cannot perform chain-bound retry',
+                payer,
+            )
+
     log.warning(
-        'eth_payer_signature: ERC-1271 returned non-magic bytes (got %s, expected %s) for payer=%s',
+        'eth_payer_signature: ERC-1271 returned non-magic bytes (got %s, expected %s) for payer=%s%s',
         magic.hex() if isinstance(magic, (bytes, bytearray)) else magic,
-        ERC1271_MAGIC.hex(),
-        payer,
+        ERC1271_MAGIC.hex(), payer,
+        ' [7702-delegated]' if is_7702 else '',
     )
     return False

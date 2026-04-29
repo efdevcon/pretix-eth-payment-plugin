@@ -92,6 +92,15 @@ def _w3_for_chain(chain_id: int, alchemy_key):
 
 NATIVE_ETH_PLACEHOLDER = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE'
 
+
+def _x402_verify_bad(reason: str, status: int = 400, **extra):
+    """Return a 4xx JsonResponse AND log the reason so production 'Bad Request:
+    /plugin/x402/verify/' lines in the Django request middleware become
+    diagnosable without having to reproduce. Mirrors the wc_verify pattern in
+    views.py — keep both helpers in sync if you change the format."""
+    log.warning('x402_verify rejected: %s (extra=%s)', reason, extra or '-')
+    return JsonResponse({'success': False, 'error': reason}, status=status)
+
 CHAIN_NAMES = {
     1: 'Ethereum', 10: 'Optimism', 137: 'Polygon', 8453: 'Base', 42161: 'Arbitrum',
 }
@@ -882,10 +891,17 @@ def _x402_verify_and_finalize(
 
     with scopes_disabled():
         if ticketstore.get_completed_by_tx_hash(tx_hash):
-            return JsonResponse({'success': False, 'error': 'tx already used for a completed order'}, status=400)
+            return _x402_verify_bad(
+                'tx already used for a completed order',
+                tx_hash=tx_hash, payment_reference=payment_reference,
+            )
 
     if not _addr_eq(pending.intended_payer, payer):
-        return JsonResponse({'success': False, 'error': 'payer does not match intendedPayer'}, status=403)
+        return _x402_verify_bad(
+            'payer does not match intendedPayer', status=403,
+            payer=payer, intended_payer=pending.intended_payer,
+            payment_reference=payment_reference,
+        )
 
     provider = _get_provider(event)
     alchemy_key = provider.settings.get('alchemy_api_key', default=None) or None
@@ -898,20 +914,23 @@ def _x402_verify_and_finalize(
         # ETH path requires a payer signature (prevents cross-order tx reuse).
         # USDC/USDT0 are already bound via EIP-3009 authorization and don't need it.
         if not eth_payer_signature:
-            return JsonResponse({
-                'success': False,
-                'error': 'ethPayerSignature is required for native ETH payments',
-            }, status=400)
+            return _x402_verify_bad(
+                'ethPayerSignature is required for native ETH payments',
+                payer=payer, chain_id=chain_id, payment_reference=payment_reference,
+            )
         eth_msg = build_eth_payer_message(payment_reference, payer, chain_id)
         if not verify_eth_payer_signature(w3=w3, payer=payer, message=eth_msg, signature=eth_payer_signature):
-            return JsonResponse({
-                'success': False,
-                'error': 'ethPayerSignature does not match the payer address',
-            }, status=403)
+            return _x402_verify_bad(
+                'ethPayerSignature does not match the payer address', status=403,
+                payer=payer, chain_id=chain_id, payment_reference=payment_reference,
+            )
 
         expected_wei_str = (pending.expected_eth_amount_wei_by_chain or {}).get(str(chain_id))
         if not expected_wei_str:
-            return JsonResponse({'success': False, 'error': 'no ETH wei recorded for this chain'}, status=400)
+            return _x402_verify_bad(
+                'no ETH wei recorded for this chain',
+                chain_id=chain_id, payment_reference=payment_reference,
+            )
         vr = verify_native_eth(
             w3=w3, tx_hash=tx_hash,
             expected_from=payer, expected_to=recipient,
@@ -920,7 +939,10 @@ def _x402_verify_and_finalize(
     else:
         contract = get_token_contract(chain_id, symbol)
         if contract is None:
-            return JsonResponse({'success': False, 'error': 'unsupported chain/token combo'}, status=400)
+            return _x402_verify_bad(
+                'unsupported chain/token combo',
+                chain_id=chain_id, symbol=symbol, payment_reference=payment_reference,
+            )
         expected_amount = usd_to_token_raw(
             pending.total_usd, symbol, chain_id=chain_id, eth_price=None,
         )
@@ -932,7 +954,11 @@ def _x402_verify_and_finalize(
         )
 
     if not vr.verified:
-        return JsonResponse({'success': False, 'error': vr.error}, status=400)
+        return _x402_verify_bad(
+            f'on-chain verify failed: {vr.error}',
+            tx_hash=tx_hash, chain_id=chain_id, symbol=symbol,
+            payment_reference=payment_reference,
+        )
 
     # Record crypto amount paid (for admin reporting) + relayer-sponsored gas.
     # Only ERC-20 flows go through our relayer; native ETH payers cover their
@@ -954,7 +980,10 @@ def _x402_verify_and_finalize(
     with scopes_disabled():
         claimed = ticketstore.claim_pending_order(event=event, payment_reference=payment_reference)
         if claimed is None:
-            return JsonResponse({'success': False, 'error': 'already claimed'}, status=409)
+            return _x402_verify_bad(
+                'already claimed', status=409,
+                payment_reference=payment_reference,
+            )
 
         try:
             ticketstore.reserve_completed_order(
@@ -973,7 +1002,10 @@ def _x402_verify_and_finalize(
                 expected_chain_id=claimed.expected_chain_id,
                 metadata=claimed.metadata,
             )
-            return JsonResponse({'success': False, 'error': 'tx already used (race)'}, status=409)
+            return _x402_verify_bad(
+                'tx already used (race)', status=409,
+                tx_hash=tx_hash, payment_reference=payment_reference,
+            )
 
         try:
             pretix_order = create_pretix_order(
@@ -1031,16 +1063,16 @@ def verify(request):
     required = ('payment_reference', 'tx_hash', 'payer', 'chain_id', 'symbol')
     missing = [k for k in required if not body.get(k)]
     if missing:
-        return JsonResponse({'success': False, 'error': f'missing fields: {missing}'}, status=400)
+        return _x402_verify_bad(f'missing fields: {missing}')
 
     tx_hash = body['tx_hash']
     if not _TX_HASH_RE.match(tx_hash):
-        return JsonResponse({'success': False, 'error': 'invalid tx_hash format'}, status=400)
+        return _x402_verify_bad('invalid tx_hash format', tx_hash=tx_hash)
 
     try:
         chain_id = int(body['chain_id'])
     except (TypeError, ValueError):
-        return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
+        return _x402_verify_bad('invalid chain_id', chain_id=body.get('chain_id'))
 
     # Rate limit (per payment_reference + client IP). Applies only to the
     # buyer-facing endpoint; admin manual-verify is auth-gated and skips it.
@@ -1050,11 +1082,17 @@ def verify(request):
         if not ticketstore.check_verify_rate_limit(
             payment_reference=body['payment_reference'], client_ip=client_ip,
         ):
-            return JsonResponse({'success': False, 'error': 'rate limit exceeded'}, status=429)
+            return _x402_verify_bad(
+                'rate limit exceeded', status=429,
+                payment_reference=body.get('payment_reference'), client_ip=client_ip,
+            )
 
         pending = ticketstore.get_pending_order(event=event, payment_reference=body['payment_reference'])
         if pending is None:
-            return JsonResponse({'success': False, 'error': 'payment_reference not found or expired'}, status=404)
+            return _x402_verify_bad(
+                'payment_reference not found or expired', status=404,
+                payment_reference=body.get('payment_reference'),
+            )
 
     return _x402_verify_and_finalize(
         event=event, pending=pending,
