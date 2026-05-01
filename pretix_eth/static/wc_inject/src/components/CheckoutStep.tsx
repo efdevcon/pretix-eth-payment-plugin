@@ -7,7 +7,13 @@ import {
   useSendTransaction,
   useConfig,
 } from 'wagmi'
-import { waitForTransactionReceipt } from 'wagmi/actions'
+import {
+  waitForTransactionReceipt,
+  getTransaction,
+  getTransactionCount,
+  getBlock,
+  getBlockNumber,
+} from 'wagmi/actions'
 import { erc20Abi } from 'viem'
 import { NETWORK_LOGOS, TOKEN_LOGOS } from '../assetIcons'
 import type { WCConfig } from '../config'
@@ -131,6 +137,126 @@ function formatRawAmount(rawStr: string, decimals: number): string {
 function formatAmount(q: Quote): string {
   const decimals = q.symbol === 'ETH' ? 18 : 6
   return `${formatRawAmount(q.amount_raw, decimals)} ${q.symbol}`
+}
+
+/** Robust receipt-waiter that handles wallet-side speed-ups and cancellations
+ *  even when our chain RPC didn't see the original tx broadcast.
+ *
+ *  Strategy: race two paths against each other.
+ *   (a) viem's `waitForTransactionReceipt(hash, onReplaced)` — succeeds
+ *       quickly in the happy path, also detects replacement IF our RPC has
+ *       the original tx's from/nonce cached.
+ *   (b) Nonce-based fallback — captures the broadcast nonce, polls
+ *       `getTransactionCount(payer, 'latest')`, and once it advances we walk
+ *       recent blocks looking for any tx whose `from === payer && nonce ===
+ *       broadcastNonce`. Resolves with the hash of *whatever* mined at that
+ *       nonce — original, sped-up replacement, or even a wallet-side cancel
+ *       (a 0-value self-tx, which the backend then rejects with "no
+ *       matching transfer", surfacing the right error to the user).
+ *
+ *  Returns `{ hash, cancelled }`. `cancelled=true` means viem fired
+ *  `onReplaced({reason:'cancelled'})` — caller should treat as user abort.
+ */
+async function waitForReceiptOrReplacement(opts: {
+  wagmiConfig: Parameters<typeof waitForTransactionReceipt>[0]
+  chainId: number
+  hash: `0x${string}`
+  payer: `0x${string}`
+  /** The nonce captured BEFORE broadcast (= getTransactionCount(payer, 'pending')
+   *  at the moment just before the wallet was asked to sign). Authoritative —
+   *  use this when available so we don't have to guess. */
+  expectedNonce?: number
+}): Promise<{ hash: `0x${string}`; cancelled: boolean }> {
+  const { wagmiConfig, chainId, hash, payer } = opts
+
+  // Caller passes `expectedNonce` (captured BEFORE broadcast) — that's the
+  // unambiguous identifier for this payment regardless of how many times
+  // it gets replaced. Falling back to fetching from the tx itself, and
+  // finally to `pending` if nothing else works (last-ditch — race-prone).
+  let broadcastNonce = opts.expectedNonce ?? null
+  if (broadcastNonce == null) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const tx = await getTransaction(wagmiConfig, { hash, chainId })
+        if (tx?.nonce != null) {
+          broadcastNonce = Number(tx.nonce)
+          break
+        }
+      } catch {
+        // not seen yet
+      }
+      await new Promise(r => setTimeout(r, 700))
+    }
+  }
+  if (broadcastNonce == null) {
+    try {
+      const pending = await getTransactionCount(wagmiConfig, {
+        address: payer, blockTag: 'pending', chainId,
+      })
+      broadcastNonce = Math.max(0, pending - 1)
+    } catch {
+      broadcastNonce = -1
+    }
+  }
+
+  let cancelled = false
+
+  const viemPath = waitForTransactionReceipt(wagmiConfig, {
+    hash,
+    chainId,
+    onReplaced(replacement: { reason: string }) {
+      if (replacement.reason === 'cancelled') cancelled = true
+    },
+  }).then(receipt => receipt.transactionHash as `0x${string}`)
+
+  const noncePath = (async (): Promise<`0x${string}`> => {
+    if (broadcastNonce === -1) {
+      // Sit forever — viem's path is the only chance.
+      return new Promise<`0x${string}`>(() => {})
+    }
+    const startBlock = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
+    let walkFrom = startBlock != null ? startBlock - 5n : null
+    while (true) {
+      await new Promise(r => setTimeout(r, 3000))
+      let latestNonce: number
+      try {
+        latestNonce = await getTransactionCount(wagmiConfig, {
+          address: payer, blockTag: 'latest', chainId,
+        })
+      } catch {
+        continue
+      }
+      if (latestNonce <= broadcastNonce) continue
+
+      // Nonce has advanced past our broadcast — find the hash by walking
+      // blocks from a few before broadcast up to current head.
+      const head = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
+      if (head == null) continue
+      const fromBlock = walkFrom ?? head - 25n
+      walkFrom = head + 1n
+      for (let bn = fromBlock; bn <= head; bn++) {
+        let txs: Array<{ from: string; nonce: number; hash: string }> = []
+        try {
+          const block = await getBlock(wagmiConfig, {
+            blockNumber: bn, includeTransactions: true, chainId,
+          })
+          // With `includeTransactions: true` viem returns full Transaction
+          // objects; the type union just confuses TS without the runtime
+          // discriminator, so we narrow defensively.
+          txs = (block?.transactions as Array<{ from: string; nonce: number; hash: string }>) ?? []
+        } catch {
+          continue
+        }
+        const match = txs.find(
+          t => t?.from?.toLowerCase() === payer.toLowerCase() && Number(t?.nonce) === broadcastNonce
+        )
+        if (match?.hash) return match.hash as `0x${string}`
+      }
+    }
+  })()
+
+  const winner = await Promise.race([viemPath, noncePath])
+  return { hash: winner, cancelled }
 }
 
 export function CheckoutStep({
@@ -332,6 +458,24 @@ export function CheckoutStep({
 
       // Step 5: Send tx
       setStatus('signing-tx')
+
+      // Capture the payer's pending-nonce BEFORE broadcast — the value the
+      // wallet is about to use. Used by waitForReceiptOrReplacement so the
+      // nonce-based fallback works even if our chain RPC never sees the
+      // original tx hash (wallet broadcast on a different RPC; user clicked
+      // "Speed Up" before viem's getTransaction could populate).
+      let expectedNonce: number | undefined
+      try {
+        expectedNonce = await getTransactionCount(wagmiConfig, {
+          address: address as `0x${string}`,
+          blockTag: 'pending',
+          chainId: q.chain_id,
+        })
+      } catch {
+        // Best-effort — without this, the helper falls back to its own
+        // discovery path. Don't block the broadcast on a transient RPC error.
+      }
+
       let txHash: string
       if (q.symbol === 'ETH') {
         txHash = await sendTransactionAsync({
@@ -355,29 +499,36 @@ export function CheckoutStep({
       // on inclusion — calling verify before the block is produced used to
       // surface as `RPC error: transaction with hash ... not found`.
       //
-      // `onReplaced` fires when the wallet user clicks "Speed Up" / sends a
-      // replacement / clicks "Cancel" — viem detects this via nonce. We use
-      // the receipt's `transactionHash` for verify so the backend always
-      // targets the hash that actually mined, never the orphaned original.
+      // viem's built-in replacement detection in `waitForTransactionReceipt`
+      // requires that we can resolve the original tx's `from`+`nonce` via
+      // our chain RPC. That fails when the wallet broadcast through its own
+      // RPC and ours hasn't seen the tx yet — the user clicks "Speed Up"
+      // before viem ever fetched the original, and viem then has nothing to
+      // diff against. Symptom: page hangs forever on the orphaned hash.
+      //
+      // Fix: race two strategies and take whichever resolves first.
+      //   (a) viem's onReplaced-aware `waitForTransactionReceipt`
+      //   (b) a nonce-based watcher that polls `getTransactionCount(latest)`
+      //       for the payer until it advances past the broadcast nonce, then
+      //       walks recent blocks for the actual hash at that nonce
+      // We also pre-fetch the tx info up-front (with retries) so viem's
+      // internal cache has a real chance to populate before any speed-up.
       let minedHash = txHash
-      let cancelled = false
       try {
-        const receipt = await waitForTransactionReceipt(wagmiConfig, {
-          hash: txHash as `0x${string}`,
+        const result = await waitForReceiptOrReplacement({
+          wagmiConfig,
           chainId: q.chain_id,
-          onReplaced(replacement) {
-            if (replacement.reason === 'cancelled') {
-              cancelled = true
-            }
-          },
+          hash: txHash as `0x${string}`,
+          payer: address as `0x${string}`,
+          expectedNonce,
         })
-        if (cancelled) {
-          throw new Error('Transaction was cancelled in your wallet — please retry.')
-        }
-        minedHash = receipt.transactionHash
+        minedHash = result.hash
         if (minedHash !== txHash) {
           // eslint-disable-next-line no-console
           console.info('[wc_inject] tx replaced/sped-up:', txHash, '→', minedHash)
+        }
+        if (result.cancelled) {
+          throw new Error('Transaction was cancelled in your wallet — please retry.')
         }
       } catch (e) {
         const msg = (e as Error).message ?? ''
