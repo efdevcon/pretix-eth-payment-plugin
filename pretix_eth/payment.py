@@ -41,11 +41,49 @@ def _format_crypto_amount(raw, token_symbol):
     return f'{whole}.{frac_str}'
 
 
+_SYMBOL_DISPLAY = {'USDT0': 'USD₮0'}
+
+
+def _english_list(items):
+    """Format ['ETH', 'USDC', 'USDT0'] as 'ETH, USDC, or USD₮0'. Display
+    symbols (`USDT0 → USD₮0`) are applied here so callers don't have to
+    remember. Falls back gracefully for 0/1/2-element lists."""
+    xs = [_SYMBOL_DISPLAY.get(s, s) for s in items]
+    if not xs:
+        return ''
+    if len(xs) == 1:
+        return xs[0]
+    if len(xs) == 2:
+        return '{} or {}'.format(*xs)
+    return '{}, or {}'.format(', '.join(xs[:-1]), xs[-1])
+
+
 class WalletConnectPayment(BasePaymentProvider):
     identifier = 'walletconnect'
     verbose_name = _('Pay with crypto (WalletConnect)')
-    public_name = _('Crypto (ETH, USDC, USDT0)')
     abort_pending_allowed = True
+
+    def _enabled_symbols(self):
+        """Symbols this event has actually enabled, in canonical display
+        order (ETH → USDC → USDT0). Drives public_name and the
+        pre-confirm template — both stay in sync with operator toggles."""
+        order = ('ETH', 'USDC', 'USDT0')
+        return [
+            sym for sym in order
+            if sym in ALL_SYMBOLS
+            and str(self.settings.get(f'token_{sym}', default='True')).lower() in ('true', '1', 'yes')
+        ]
+
+    @property
+    def public_name(self):
+        # Buyer-facing name in Pretix's checkout method picker. Reflects
+        # only the tokens this event has enabled — never lists USDC if
+        # the operator turned it off.
+        symbols = self._english_token_list()
+        return _('Crypto') if not symbols else _('Crypto ({symbols})').format(symbols=symbols)
+
+    def _english_token_list(self) -> str:
+        return _english_list(self._enabled_symbols())
 
     @property
     def settings_form_fields(self):
@@ -140,6 +178,9 @@ class WalletConnectPayment(BasePaymentProvider):
                 # in the asset/network picker. Render as a plain decimal
                 # string ("12.34") — the bundle parses with parseFloat.
                 'order_total_usd': str(order.total),
+                # Buyer's email from the Pretix Order — pre-fills the support
+                # mailto in the wc UI so the buyer doesn't have to retype it.
+                'buyer_email': order.email or '',
                 'support_email': self.settings.get('support_email', default='') or '',
                 # Cache-buster for the bundle + stylesheet. Pretix serves /static/
                 # with a long max-age header; without a version query string,
@@ -152,9 +193,11 @@ class WalletConnectPayment(BasePaymentProvider):
             }
             return tpl.render(ctx, request=request)
         else:
-            # Initial checkout — order not yet created, just confirm payment method
+            # Initial checkout — order not yet created, just confirm payment method.
+            # Pass the enabled-token list so the copy reflects this event's actual
+            # config (won't list USDC if the operator disabled it).
             tpl = get_template('pretix_eth/checkout_pre_confirm.html')
-            return tpl.render({}, request=request)
+            return tpl.render({'enabled_tokens': self._english_token_list()}, request=request)
 
     def payment_is_valid_session(self, request: HttpRequest) -> bool:
         return True

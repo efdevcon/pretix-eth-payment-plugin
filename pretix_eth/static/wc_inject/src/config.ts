@@ -14,6 +14,10 @@ export interface WCConfig {
    *  wallet balances returned from /plugin/wc/wallet-balances/. May be empty
    *  if the template rendered the page without the field (older deploys). */
   orderTotalUsd?: string
+  /** Buyer's email from the Pretix Order. Pre-filled into the support-email
+   *  body so the buyer doesn't have to retype it. Empty when the order has
+   *  no email recorded (rare). */
+  buyerEmail?: string
   urlPrefix: string
   csrfToken: string
   /** Optional support email set in the plugin admin. Shown in a fallback

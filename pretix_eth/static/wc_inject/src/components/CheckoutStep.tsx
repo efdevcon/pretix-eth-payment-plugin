@@ -54,11 +54,38 @@ const RETRYABLE_ERROR_SUBSTRINGS = [
   'rpc error',
 ]
 
-const ETH_REASON_TEXT: Record<string, string> = {
-  oracle_unavailable_or_diverged:
-    'ETH payments temporarily unavailable. Our price oracles (Coinbase, Binance) disagree by more than 5% or are unreachable. Please pay with USDC or USDT0 instead.',
-  oracle_error:
-    'ETH payments temporarily unavailable due to a price lookup error. Please pay with USDC or USDT0 instead.',
+const SYMBOL_DISPLAY: Record<string, string> = { USDT0: 'USD₮0' }
+
+function displaySymbol(sym: string): string {
+  return SYMBOL_DISPLAY[sym] ?? sym
+}
+
+/** Format a list of token symbols as English-readable copy
+ *  ("USDC or USDT0", "USDC, USDT0, or DAI", etc.). */
+function englishList(items: string[]): string {
+  const xs = items.map(displaySymbol)
+  if (xs.length === 0) return ''
+  if (xs.length === 1) return xs[0]
+  if (xs.length === 2) return `${xs[0]} or ${xs[1]}`
+  return `${xs.slice(0, -1).join(', ')}, or ${xs[xs.length - 1]}`
+}
+
+/** Reason copy is built dynamically from the fallback symbols actually
+ *  enabled in this event's plugin config — never hard-codes "USDC or USDT0"
+ *  if either is disabled. Falls back to a generic phrase if no stable is
+ *  enabled (an event configured ETH-only would just stay broken at the
+ *  picker anyway, but the message stays correct). */
+function ethReasonText(reason: string, fallbackSymbols: string[]): string {
+  const fallback = fallbackSymbols.length
+    ? `Please pay with ${englishList(fallbackSymbols)} instead.`
+    : 'Please try again later.'
+  if (reason === 'oracle_unavailable_or_diverged') {
+    return `ETH payments temporarily unavailable. Our price oracles (Coinbase, Binance) disagree by more than 5% or are unreachable. ${fallback}`
+  }
+  if (reason === 'oracle_error') {
+    return `ETH payments temporarily unavailable due to a price lookup error. ${fallback}`
+  }
+  return `ETH payments temporarily unavailable. ${fallback}`
 }
 
 type Status =
@@ -77,13 +104,33 @@ function parseOrgAndEvent(): { organizer: string; event: string } {
   return { organizer: match[1], event: match[2] }
 }
 
-function formatAmount(q: Quote): string {
-  if (q.symbol === 'ETH') {
-    const eth = Number(BigInt(q.amount_raw)) / 1e18
-    return `${eth.toFixed(6)} ETH`
+/** Format a raw on-chain integer (wei for ETH, base units for stables) at
+ *  full precision via BigInt division. The previous `Number(BigInt(...)) / 1e18`
+ *  + `.toFixed(6)` path lost both arithmetic precision (Number caps at ~15 sig
+ *  figs) and display precision — small ETH amounts like 4_333_520_758_106 wei
+ *  rendered as "0.000004 ETH" instead of "0.000004333520758106 ETH", hiding
+ *  the actual amount the buyer was about to authorize. We now show every
+ *  significant digit; the wallet's confirm popup will show the same number,
+ *  so they should match exactly. */
+function formatRawAmount(rawStr: string, decimals: number): string {
+  try {
+    const n = BigInt(rawStr)
+    const ZERO = BigInt(0)
+    if (n === ZERO) return '0'
+    const base = BigInt('1' + '0'.repeat(decimals))
+    const whole = n / base
+    const frac = n % base
+    if (frac === ZERO) return whole.toString()
+    const fracStr = frac.toString().padStart(decimals, '0').replace(/0+$/, '')
+    return `${whole}.${fracStr}`
+  } catch {
+    return rawStr
   }
-  const usd = Number(BigInt(q.amount_raw)) / 1e6
-  return `${usd.toFixed(2)} ${q.symbol}`
+}
+
+function formatAmount(q: Quote): string {
+  const decimals = q.symbol === 'ETH' ? 18 : 6
+  return `${formatRawAmount(q.amount_raw, decimals)} ${q.symbol}`
 }
 
 export function CheckoutStep({
@@ -396,7 +443,12 @@ export function CheckoutStep({
 
       {!ethAvailable && ethDisabledReason && (
         <div className="wc-notice">
-          {ETH_REASON_TEXT[ethDisabledReason] || 'ETH payments temporarily unavailable.'}
+          {ethReasonText(
+            ethDisabledReason,
+            // Stables actually offered by this event (= options minus ETH).
+            // Keeps the suggestion in sync with the plugin's chain/token toggles.
+            [...new Set(options.filter(o => o.symbol !== 'ETH').map(o => o.symbol))],
+          )}
         </div>
       )}
 
@@ -565,6 +617,7 @@ export function CheckoutStep({
           "",
           "I tried to pay for a Pretix order with crypto and the page didn't complete.",
           "",
+          `Email: ${fill(config.buyerEmail || '')}`,
           `Order code: ${config.orderCode}`,
           `Wallet address: ${fill(address || '')}`,
           `Network: ${fill(networkValue)}`,
@@ -595,6 +648,49 @@ export function CheckoutStep({
               )}
             </div>
           </div>
+        )
+      })()}
+
+      {/* Persistent support link. Always rendered when an operator-side
+          support email is configured — visible during the picker, while
+          confirming, and after errors — so a stuck buyer can always reach
+          out. The pre-fill includes every piece of session context we have
+          so the operator can triage with one read. The error-state recovery
+          block above is more specific (handles "I already sent the tx");
+          this is the catch-all. */}
+      {config.supportEmail && (() => {
+        const networkValue = picked ? picked.chain_name : (quote ? (chainMetadata[String(quote.chain_id)]?.name || String(quote.chain_id)) : '')
+        const tokenValue = picked ? picked.symbol : (quote ? quote.symbol : '')
+        const amountValue = quote ? formatAmount(quote) : ''
+        const recipientValue = quote ? quote.receive_address : ''
+        const fill = (v: string) => v || '(please fill in)'
+        const lines: string[] = [
+          'Hi,',
+          '',
+          'I need help with my Devcon ticket payment.',
+          '',
+          `Email: ${fill(config.buyerEmail || '')}`,
+          `Order code: ${config.orderCode}`,
+          `Wallet address: ${fill(address || '')}`,
+          `Network: ${fill(networkValue)}`,
+          `Token: ${fill(tokenValue)}`,
+          `Amount: ${fill(amountValue)}`,
+          `Recipient: ${fill(recipientValue)}`,
+          `Stage: ${status}`,
+          ...(error ? [`Error: ${error}`] : []),
+          '',
+          'What I need help with: (please describe)',
+          '',
+          'Thanks!',
+        ]
+        const subject = `Payment help for order ${config.orderCode}`
+        const mailtoHref = `mailto:${config.supportEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n'))}`
+        return (
+          <p className="wc-small" style={{ marginTop: 16, textAlign: 'center', color: '#666' }}>
+            Need help?{' '}
+            <a href={mailtoHref}>Contact support</a>
+            {' '}— we&apos;ve pre-filled the details we know.
+          </p>
         )
       })()}
     </div>
