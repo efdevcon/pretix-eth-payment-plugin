@@ -307,20 +307,43 @@ export function CheckoutStep({
       // backend to verify. `sendTransactionAsync` resolves on broadcast, not
       // on inclusion — calling verify before the block is produced used to
       // surface as `RPC error: transaction with hash ... not found`.
+      //
+      // `onReplaced` fires when the wallet user clicks "Speed Up" / sends a
+      // replacement / clicks "Cancel" — viem detects this via nonce. We use
+      // the receipt's `transactionHash` for verify so the backend always
+      // targets the hash that actually mined, never the orphaned original.
+      let minedHash = txHash
+      let cancelled = false
       try {
-        await waitForTransactionReceipt(wagmiConfig, {
+        const receipt = await waitForTransactionReceipt(wagmiConfig, {
           hash: txHash as `0x${string}`,
           chainId: q.chain_id,
+          onReplaced(replacement) {
+            if (replacement.reason === 'cancelled') {
+              cancelled = true
+            }
+          },
         })
-      } catch {
-        // Fall through to pollVerify, whose retry loop will pick up any
-        // lingering indexer lag.
+        if (cancelled) {
+          throw new Error('Transaction was cancelled in your wallet — please retry.')
+        }
+        minedHash = receipt.transactionHash
+        if (minedHash !== txHash) {
+          // eslint-disable-next-line no-console
+          console.info('[wc_inject] tx replaced/sped-up:', txHash, '→', minedHash)
+        }
+      } catch (e) {
+        const msg = (e as Error).message ?? ''
+        if (msg.includes('cancelled in your wallet')) throw e
+        // Otherwise: indexer lag / network blip — fall through; pollVerify's
+        // retry loop will pick it up. We keep `minedHash = txHash` since we
+        // weren't able to detect a replacement.
       }
 
       // Step 7: Verify
       setStatus('verifying')
-      await pollVerify(q, txHash)
-      onConfirmed(txHash, q)
+      await pollVerify(q, minedHash)
+      onConfirmed(minedHash, q)
     } catch (e: unknown) {
       const err = e as { shortMessage?: string; message?: string }
       setError(err.shortMessage || err.message || String(e))

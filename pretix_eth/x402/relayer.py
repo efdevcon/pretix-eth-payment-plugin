@@ -126,6 +126,17 @@ def execute_transfer_with_authorization(
             'nonce': w3.eth.get_transaction_count(account.address),
             'chainId': chain_id,
         })
+        # Apply a 25% headroom on `maxFeePerGas` over what web3.py / the node
+        # estimated. Without this, a rapid base-fee spike between estimate and
+        # inclusion can leave the relayer's tx stuck — and we don't have a
+        # bump-and-rebroadcast loop yet (TODO in README). Buffer is cheap on
+        # L2/Polygon (sub-gwei base fees) and reasonable on L1 (we're paying
+        # for buyer's gas anyway). `maxPriorityFeePerGas` is left as estimated
+        # so we don't overpay tip when the network is calm.
+        if 'maxFeePerGas' in tx and isinstance(tx['maxFeePerGas'], int):
+            tx['maxFeePerGas'] = (tx['maxFeePerGas'] * 5) // 4
+        elif 'gasPrice' in tx and isinstance(tx['gasPrice'], int):
+            tx['gasPrice'] = (tx['gasPrice'] * 5) // 4
         signed = account.sign_transaction(tx)
         raw = getattr(signed, 'raw_transaction', None) or signed.rawTransaction
         tx_hash_bytes = w3.eth.send_raw_transaction(raw)
