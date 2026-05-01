@@ -15,6 +15,10 @@ class VerificationResult:
     block_number: Optional[int] = None
     confirmed_at: Optional[int] = None
     error: Optional[str] = None
+    # Surfaced even when `verified=False` so the buyer-facing UI can render
+    # a confirmation progress bar (X/N) instead of an opaque spinner.
+    confirmations: Optional[int] = None
+    min_confirmations: Optional[int] = None
 
 
 def _normalize_hex(val) -> str:
@@ -59,9 +63,11 @@ def verify_erc20_transfer(*, w3, chain_id: int, tx_hash: str,
 
     block = receipt.get('blockNumber')
     head = w3.eth.block_number
-    if head - block < min_confirmations:
+    confirmations = max(0, head - block)
+    if confirmations < min_confirmations:
         return VerificationResult(
-            False, error=f'insufficient confirmations ({head - block}/{min_confirmations})',
+            False, error=f'insufficient confirmations ({confirmations}/{min_confirmations})',
+            confirmations=confirmations, min_confirmations=min_confirmations,
         )
 
     # Find matching Transfer log
@@ -172,9 +178,11 @@ def verify_native_eth(*, w3, tx_hash: str, expected_from: str,
 
     block = receipt.get('blockNumber')
     head = w3.eth.block_number
-    if head - block < min_confirmations:
+    confirmations = max(0, head - block)
+    if confirmations < min_confirmations:
         return VerificationResult(
-            False, error=f'insufficient confirmations ({head - block}/{min_confirmations})',
+            False, error=f'insufficient confirmations ({confirmations}/{min_confirmations})',
+            confirmations=confirmations, min_confirmations=min_confirmations,
         )
 
     min_wei = _min_acceptable_wei(expected_amount_wei)

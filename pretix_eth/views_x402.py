@@ -971,11 +971,22 @@ def _x402_verify_and_finalize(
         )
 
     if not vr.verified:
-        return _x402_verify_bad(
-            f'on-chain verify failed: {vr.error}',
-            tx_hash=tx_hash, chain_id=chain_id, symbol=symbol,
-            payment_reference=payment_reference,
+        # When the failure is "insufficient confirmations", surface the
+        # current/required counts so the buyer-facing UI can render
+        # progress (e.g. "Confirming on-chain (1/3)") instead of an opaque
+        # spinner. Other failure reasons (tx not mined, wrong recipient,
+        # etc.) just leave the fields null and the UI shows a generic msg.
+        log.warning(
+            'x402_verify rejected: on-chain verify failed: %s '
+            '(tx_hash=%s chain_id=%s symbol=%s payment_reference=%s)',
+            vr.error, tx_hash, chain_id, symbol, payment_reference,
         )
+        return JsonResponse({
+            'success': False,
+            'error': f'on-chain verify failed: {vr.error}',
+            'confirmations': vr.confirmations,
+            'confirmations_required': vr.min_confirmations,
+        }, status=400)
 
     # Record crypto amount paid (for admin reporting) + relayer-sponsored gas.
     # Only ERC-20 flows go through our relayer; native ETH payers cover their

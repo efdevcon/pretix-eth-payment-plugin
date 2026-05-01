@@ -540,7 +540,13 @@ def verify(request):
 
         if not vr.verified:
             log.warning('wc_verify rejected: on-chain verify failed: %s (tx=%s)', vr.error, tx_hash)
-            return JsonResponse({'verified': False, 'error': vr.error}, status=400)
+            # Surface confirmation progress for the wc_inject UI's progress bar.
+            return JsonResponse({
+                'verified': False,
+                'error': vr.error,
+                'confirmations': vr.confirmations,
+                'confirmations_required': vr.min_confirmations,
+            }, status=400)
 
         # Atomic claim: unique constraint on tx_hash prevents race
         try:

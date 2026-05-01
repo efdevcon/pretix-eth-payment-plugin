@@ -16,7 +16,33 @@ import type { Quote } from '../WCPaymentApp'
 import { useWalletBalances, findBalance, formatBalance } from '../hooks/useWalletBalances'
 import { WalletHeader } from './WalletHeader'
 
-const MAX_VERIFY_ATTEMPTS = 8
+// Per-chain block time (ms). The verify-poll interval is derived from this
+// so we don't waste polls on slow chains (Ethereum L1 ~12 s blocks) and
+// don't burn the API on fast chains (Arbitrum ~250 ms blocks).
+const BLOCK_TIME_MS: Record<number, number> = {
+  1: 12_000,    // Ethereum
+  10: 2_000,    // Optimism
+  137: 2_000,   // Polygon
+  8453: 2_000,  // Base
+  42161: 250,   // Arbitrum
+}
+
+/** Poll roughly twice per block, but never tighter than 1.5 s and never
+ *  looser than 8 s. Keeps Arbitrum from hammering us and gives Ethereum
+ *  enough headroom that we don't spin during the 12 s gap. */
+function pollIntervalMs(chainId: number): number {
+  const blockTime = BLOCK_TIME_MS[chainId] ?? 4_000
+  return Math.max(1_500, Math.min(8_000, Math.floor(blockTime / 2)))
+}
+
+/** Total poll budget = enough to wait for the confirmation requirement
+ *  plus one extra block of slack. Bounded at 90 s so a stuck chain
+ *  surfaces as an error rather than hanging forever. */
+function pollMaxDurationMs(chainId: number, requiredConfs: number): number {
+  const blockTime = BLOCK_TIME_MS[chainId] ?? 4_000
+  return Math.min(90_000, blockTime * (requiredConfs + 1) + 4_000)
+}
+
 // Backend verify errors that are transient (RPC indexer lag after tx is mined,
 // trace endpoint briefly unavailable, etc.) and should auto-retry instead of
 // bailing. `not found` covers the common `get_transaction_receipt` case where
@@ -96,6 +122,10 @@ export function CheckoutStep({
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
+  // Confirmation progress surfaced from the backend's `confirmations` /
+  // `confirmations_required` fields. Used to render "Confirming on-chain
+  // (X/N)" instead of an opaque spinner during the verify poll.
+  const [confirmProgress, setConfirmProgress] = useState<{ current: number; required: number } | null>(null)
 
   const { address, chainId: walletChainId } = useAccount()
   const { signMessageAsync } = useSignMessage()
@@ -142,8 +172,17 @@ export function CheckoutStep({
   // is now owned by WCPaymentApp (covers all stages, not just checkout).
 
   async function pollVerify(q: Quote, txHash: string) {
-    for (let attempt = 0; attempt < MAX_VERIFY_ATTEMPTS; attempt++) {
-      await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, attempt)))
+    // Adaptive cadence: poll roughly every half-block-time for the chain.
+    // Total budget covers `min_confirmations + 1` blocks of waiting.
+    const interval = pollIntervalMs(q.chain_id)
+    // We don't know the chain's required confs until the first response —
+    // use an optimistic 3 as the budget upper-bound (matches typical configs).
+    const initialBudget = pollMaxDurationMs(q.chain_id, 3)
+    const startedAt = Date.now()
+    let budget = initialBudget
+
+    while (Date.now() - startedAt < budget) {
+      await new Promise((r) => setTimeout(r, interval))
       const r = await fetch(`${config.urlPrefix}/verify/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -155,15 +194,27 @@ export function CheckoutStep({
       })
       if (r.ok) {
         const body = await r.json()
-        if (body.verified) return
+        if (body.verified) {
+          setConfirmProgress(null)
+          return
+        }
       } else {
-        const body = await r.json().catch(() => ({}))
+        const body = await r.json().catch(() => ({} as { error?: string; confirmations?: number | null; confirmations_required?: number | null }))
         const errMsg = (body.error as string | undefined) || `verify HTTP ${r.status}`
         if (!RETRYABLE_ERROR_SUBSTRINGS.some((s) => errMsg.includes(s))) {
+          setConfirmProgress(null)
           throw new Error(errMsg)
+        }
+        // Update progress + recompute budget once we know the chain's threshold.
+        const cur = typeof body.confirmations === 'number' ? body.confirmations : null
+        const req = typeof body.confirmations_required === 'number' ? body.confirmations_required : null
+        if (cur !== null && req !== null) {
+          setConfirmProgress({ current: cur, required: req })
+          budget = pollMaxDurationMs(q.chain_id, req)
         }
       }
     }
+    setConfirmProgress(null)
     throw new Error('Verification timed out. Try submitting the transaction hash manually below.')
   }
 
@@ -285,7 +336,14 @@ export function CheckoutStep({
       case 'quoting': return 'Creating quote\u2026'
       case 'switching': return 'Switching chain\u2026'
       case 'signing-tx': return 'Confirm payment in wallet\u2026'
-      case 'verifying': return 'Verifying on-chain\u2026'
+      case 'verifying':
+        // Once the backend has reported `confirmations`, surface the
+        // progress fraction so users see motion instead of a stalled spinner
+        // (especially on Ethereum L1 where 3 confs \u2248 36 s).
+        if (confirmProgress) {
+          return `Confirming on-chain (${confirmProgress.current}/${confirmProgress.required})\u2026`
+        }
+        return 'Verifying on-chain\u2026'
       case 'error': return 'Retry'
     }
   })()
