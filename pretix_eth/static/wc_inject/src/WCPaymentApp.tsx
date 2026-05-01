@@ -54,6 +54,7 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
         options={opts.data.options}
         ethAvailable={opts.data.eth_available}
         ethDisabledReason={opts.data.eth_disabled_reason}
+        ethPriceUsd={opts.data.eth_price_usd}
         chainMetadata={opts.data.chain_metadata}
         onConfirmed={(hash, q) => { setTxHash(hash); setQuote(q); setStage('success') }}
       />

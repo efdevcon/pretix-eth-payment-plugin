@@ -9,6 +9,11 @@ export interface WCConfig {
   wcProjectId: string
   orderCode: string
   orderSecret: string
+  /** Pretix order total in USD as a decimal string ("12.34"). Used by the
+   *  asset/network picker to compute insufficient-balance gating against the
+   *  wallet balances returned from /plugin/wc/wallet-balances/. May be empty
+   *  if the template rendered the page without the field (older deploys). */
+  orderTotalUsd?: string
   urlPrefix: string
   csrfToken: string
   /** Optional support email set in the plugin admin. Shown in a fallback

@@ -13,6 +13,7 @@ import { NETWORK_LOGOS, TOKEN_LOGOS } from '../assetIcons'
 import type { WCConfig } from '../config'
 import type { PaymentOption } from '../hooks/usePaymentOptions'
 import type { Quote } from '../WCPaymentApp'
+import { useWalletBalances, findBalance, formatBalance } from '../hooks/useWalletBalances'
 import { WalletHeader } from './WalletHeader'
 
 const MAX_VERIFY_ATTEMPTS = 8
@@ -64,6 +65,7 @@ export function CheckoutStep({
   options,
   ethAvailable,
   ethDisabledReason,
+  ethPriceUsd,
   chainMetadata,
   onConfirmed,
 }: {
@@ -71,6 +73,7 @@ export function CheckoutStep({
   options: PaymentOption[]
   ethAvailable: boolean
   ethDisabledReason: string | null
+  ethPriceUsd: number | null
   chainMetadata: Record<string, { name: string; explorer_url: string }>
   onConfirmed: (txHash: string, quote: Quote) => void
 }) {
@@ -99,6 +102,34 @@ export function CheckoutStep({
   const { switchChainAsync } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
   const { sendTransactionAsync } = useSendTransaction()
+
+  // Pull per-(chain, token) balances for the connected wallet so we can show
+  // them in the picker and grey out rows the user can't afford. Plugin uses
+  // Zapper-first / RPC-fallback (same engine the x402 endpoint uses).
+  const balancesQuery = useWalletBalances(config, address)
+
+  // For each option, compute the raw amount expected at the order's USD total.
+  // Stables: total_usd × 10^6 (both USDC and USDT0 are 6-dec USD-pegged).
+  // ETH: uses `ethPriceUsd` from the payment-options response — the same
+  // dual-oracle (Coinbase + Binance) value the quote-creation endpoint uses,
+  // so the picker's sufficiency check matches what the server will accept.
+  // The actual quote-time check remains authoritative; this is just a
+  // pre-flight filter so users with clearly-empty wallets see it early.
+  const totalUsdFloat = parseFloat(config.orderTotalUsd || '0') || 0
+  function expectedRaw(symbol: string): bigint | null {
+    if (!totalUsdFloat) return null
+    if (symbol === 'USDC' || symbol === 'USDT0') {
+      // Round up so we don't say "sufficient" when the user has exactly $X − 1 wei.
+      return BigInt(Math.ceil(totalUsdFloat * 1e6))
+    }
+    if (symbol === 'ETH') {
+      // No price means oracles diverged or were unreachable — the ETH option
+      // would already be filtered out upstream, but skip the check defensively.
+      if (!ethPriceUsd || ethPriceUsd <= 0) return null
+      return BigInt(Math.ceil((totalUsdFloat / ethPriceUsd) * 1e18))
+    }
+    return null
+  }
   // Use the wagmi `config` imperatively via `waitForTransactionReceipt` so we
   // can target the quote's chainId explicitly. Necessary because the user's
   // wallet may have been on a different chain when this component mounted;
@@ -330,11 +361,29 @@ export function CheckoutStep({
                   {networksForToken.map(opt => {
                     const isSelected = picked?.chain_id === opt.chain_id && picked?.symbol === opt.symbol
                     const logo = NETWORK_LOGOS[opt.chain_id]
+                    const balanceEntry = findBalance(balancesQuery.data, opt.chain_id, opt.symbol)
+                    const expected = expectedRaw(opt.symbol)
+                    let sufficient: boolean | null = null
+                    if (balanceEntry && expected !== null) {
+                      try {
+                        sufficient = BigInt(balanceEntry.balance) >= expected
+                      } catch {
+                        sufficient = null
+                      }
+                    }
+                    const balanceDisplay = balanceEntry
+                      ? `${formatBalance(balanceEntry.balance, balanceEntry.decimals)} ${opt.symbol}`
+                      : null
+                    const insufficient = sufficient === false
                     return (
                       <button
                         key={`${opt.chain_id}-${opt.symbol}`}
                         type="button"
-                        className={`wc-network-row ${isSelected ? 'wc-network-row--selected' : ''}`}
+                        className={`wc-network-row ${isSelected ? 'wc-network-row--selected' : ''} ${insufficient ? 'wc-network-row--insufficient' : ''}`}
+                        // Allow selecting an insufficient row anyway — the
+                        // ETH check is heuristic ($3000/ETH ceiling) and the
+                        // real sufficiency check happens at quote time. This
+                        // prevents over-blocking when the heuristic is wrong.
                         disabled={busy}
                         onClick={() => setPicked(opt)}
                       >
@@ -344,7 +393,24 @@ export function CheckoutStep({
                           )}
                           <span className="wc-network-row-name">{opt.chain_name}</span>
                         </span>
-                        {isSelected && <span className="wc-network-row-check">&#10003;</span>}
+                        <span className="wc-network-row-right">
+                          {balanceDisplay && (
+                            <span
+                              className={`wc-network-row-balance ${insufficient ? 'wc-network-row-balance--low' : ''}`}
+                              title={
+                                insufficient
+                                  ? 'Balance may be insufficient — final check happens at quote time'
+                                  : undefined
+                              }
+                            >
+                              {balanceDisplay}
+                            </span>
+                          )}
+                          {balancesQuery.isLoading && !balanceDisplay && (
+                            <span className="wc-network-row-balance">…</span>
+                          )}
+                          {isSelected && <span className="wc-network-row-check">&#10003;</span>}
+                        </span>
                       </button>
                     )
                   })}

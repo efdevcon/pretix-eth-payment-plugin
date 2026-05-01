@@ -198,6 +198,29 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   font-weight: bold;
 }
 
+.wc-network-row-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.wc-network-row-balance {
+  font-variant-numeric: tabular-nums;
+  color: #666;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+/* Heuristic-only flag: pre-quote we can't know the exact ETH amount, so we
+   tint the row instead of disabling it. The real check happens at quote time. */
+.wc-network-row--insufficient {
+  opacity: 0.85;
+}
+
+.wc-network-row-balance--low {
+  color: #c44;
+}
+
 .wc-asset-icon {
   width: 18px;
   height: 18px;

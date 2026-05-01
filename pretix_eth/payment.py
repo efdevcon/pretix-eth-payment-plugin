@@ -136,6 +136,10 @@ class WalletConnectPayment(BasePaymentProvider):
                 'url_prefix': '/plugin/wc',
                 'order_code': order.code,
                 'order_secret': order.secret,
+                # Used by the wc_inject UI to gate insufficient-balance rows
+                # in the asset/network picker. Render as a plain decimal
+                # string ("12.34") — the bundle parses with parseFloat.
+                'order_total_usd': str(order.total),
                 'support_email': self.settings.get('support_email', default='') or '',
                 # Cache-buster for the bundle + stylesheet. Pretix serves /static/
                 # with a long max-age header; without a version query string,

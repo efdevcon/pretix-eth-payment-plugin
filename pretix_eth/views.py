@@ -7,6 +7,7 @@ import re
 import secrets
 import time
 from decimal import Decimal
+from typing import Optional
 
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
@@ -106,15 +107,21 @@ def payment_options(request):
                     'symbol': sym,
                 })
 
-    # ETH availability (dual-oracle)
+    # ETH availability (dual-oracle). Capture the price too so the wc_inject
+    # picker can do an accurate "is the wallet's ETH balance enough" check
+    # without re-fetching the oracles client-side. Stays consistent with the
+    # quote-creation endpoint, which uses the same `fetch_eth_price_usd()`.
     eth_available = True
     eth_disabled_reason = None
+    eth_price_usd: Optional[float] = None
     if 'ETH' in enabled_tokens:
         try:
             result = asyncio.run(fetch_eth_price_usd())
             if result is None:
                 eth_available = False
                 eth_disabled_reason = 'oracle_unavailable_or_diverged'
+            else:
+                eth_price_usd = result.price
         except Exception as e:
             log.warning('ETH price fetch failed: %s', e)
             eth_available = False
@@ -127,9 +134,65 @@ def payment_options(request):
         'options': options,
         'eth_available': eth_available,
         'eth_disabled_reason': eth_disabled_reason,
+        'eth_price_usd': eth_price_usd,
         'receive_address': receive_address,
         'chain_metadata': {str(cid): CHAIN_METADATA[cid] for cid in enabled_chains},
     })
+
+
+# ---------------------------------------------------------------------------
+# Wallet balances (Zapper main + RPC fallback) — same engine as /plugin/x402
+# ---------------------------------------------------------------------------
+
+
+def _is_address(s: str) -> bool:
+    return isinstance(s, str) and bool(re.match(r'^0x[a-fA-F0-9]{40}$', s))
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def wallet_balances(request):
+    """Return per-(chain, token) balances for `wallet`, scoped to chains/tokens
+    enabled in the event's plugin settings. Used by the wc_inject UI to gate
+    the network/token picker on actual holdings, same as /plugin/x402's
+    payment-options does for the devcon checkout.
+
+    Reuses `fetch_balances_for_wallet` so the Zapper-first / RPC-fallback
+    behaviour is identical across both flows. Failures (Zapper down, RPC
+    flake) return an empty list — the UI should still render all options
+    and just skip the balance badge."""
+    from pretix_eth.x402.balances import fetch_balances_for_wallet
+
+    provider = _get_provider_for_event(request)
+    if provider is None:
+        return JsonResponse({'error': 'event not found'}, status=404)
+
+    wallet = (request.GET.get('wallet') or '').strip()
+    if not _is_address(wallet):
+        return JsonResponse({'error': 'wallet must be 0x + 40 hex'}, status=400)
+    wallet = Web3.to_checksum_address(wallet)
+
+    enabled_chains = [
+        cid for cid in SUPPORTED_CHAINS
+        if str(provider.settings.get(f'chain_{cid}', default='True')).lower() in ('true', '1', 'yes')
+    ]
+    if not enabled_chains:
+        return JsonResponse({'wallet': wallet, 'balances': []})
+
+    alchemy_key = provider.settings.get('alchemy_api_key', default=None) or None
+    zapper_key = provider.settings.get('zapper_api_key', default=None) or None
+
+    try:
+        raw = fetch_balances_for_wallet(
+            wallet=wallet, chain_ids=enabled_chains,
+            alchemy_key=alchemy_key, zapper_api_key=zapper_key,
+        )
+    except Exception as e:
+        # Best-effort: don't block the buyer if the balance lookup blows up.
+        log.warning('wc_wallet_balances: fetch failed for %s: %s', wallet, e)
+        raw = []
+
+    return JsonResponse({'wallet': wallet, 'balances': raw})
 
 
 CHALLENGE_TTL = 600  # 10 min

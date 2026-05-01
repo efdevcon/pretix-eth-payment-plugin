@@ -11,6 +11,11 @@ export interface PaymentOptionsResponse {
   options: PaymentOption[]
   eth_available: boolean
   eth_disabled_reason: string | null
+  /** Live ETH price in USD from the plugin's dual-oracle fetch (Coinbase +
+   *  Binance). Same value the quote-creation endpoint uses, so the picker's
+   *  "balance is enough" check matches what the server will accept at quote
+   *  time. `null` when ETH is disabled (oracles diverged or unreachable). */
+  eth_price_usd: number | null
   receive_address: string
   chain_metadata: Record<string, { name: string; explorer_url: string }>
 }

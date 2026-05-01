@@ -9,6 +9,7 @@ from pretix_eth import views, views_x402, views_admin
 urlpatterns = [
     # Legacy WC flow
     path('plugin/wc/payment-options/', views.payment_options, name='wc_payment_options'),
+    path('plugin/wc/wallet-balances/', views.wallet_balances, name='wc_wallet_balances'),
     path('plugin/wc/challenge/',       views.challenge,        name='wc_challenge'),
     path('plugin/wc/create-quote/',    views.create_quote,     name='wc_create_quote'),
     path('plugin/wc/verify/',          views.verify,           name='wc_verify'),
