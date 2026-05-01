@@ -351,9 +351,24 @@ export function CheckoutStep({
     }
   }
 
+  // Build the "Pay: 0.000004 ETH on Arbitrum" label dynamically from the
+  // currently-picked option. Pre-quote we use:
+  //   USDC/USDT0 \u2192 totalUsd \u00d7 10^6 (1:1 USD-pegged stables)
+  //   ETH \u2192 totalUsd / ethPriceUsd (live dual-oracle from /payment-options/)
+  // The quote-creation endpoint locks in the exact amount on its side, so
+  // the displayed value matches what the wallet will actually be asked to
+  // sign within ~0.5% (covered by the verify-side slippage tolerance).
+  function idlePayLabel(): string {
+    if (!picked) return 'Pay now'
+    const raw = expectedRaw(picked.symbol)
+    if (raw === null) return `Pay with ${picked.symbol} on ${picked.chain_name}`
+    const decimals = picked.symbol === 'ETH' ? 18 : 6
+    return `Pay: ${formatBalance(raw.toString(), decimals)} ${picked.symbol} on ${picked.chain_name}`
+  }
+
   const buttonLabel = (() => {
     switch (status) {
-      case 'idle': return 'Pay now'
+      case 'idle': return idlePayLabel()
       case 'challenge': return 'Preparing\u2026'
       case 'signing-challenge': return 'Sign message in wallet\u2026'
       case 'quoting': return 'Creating quote\u2026'
@@ -375,7 +390,7 @@ export function CheckoutStep({
 
   return (
     <div className="wc-root">
-      <WalletHeader />
+      <WalletHeader disabled={busy} />
 
       <h3 style={{ marginTop: 0 }}>Select payment method</h3>
 

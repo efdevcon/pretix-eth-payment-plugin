@@ -1,6 +1,6 @@
 import { useAccount, useDisconnect } from 'wagmi'
 
-export function WalletHeader() {
+export function WalletHeader({ disabled = false }: { disabled?: boolean }) {
   const { address } = useAccount()
   const { disconnect } = useDisconnect()
 
@@ -16,6 +16,13 @@ export function WalletHeader() {
       <button
         className="wc-link-button"
         onClick={() => disconnect()}
+        // Lock disconnect mid-flight: swapping wallets during tx-broadcast
+        // or the verify poll leaves the backend tracking the original payer
+        // while the UI reflects a different session. Caller passes `disabled`
+        // bound to the parent's busy flag so the button is greyed out from
+        // first sign through verify-success.
+        disabled={disabled}
+        title={disabled ? 'Disconnect disabled while a payment is being verified.' : undefined}
       >
         Disconnect
       </button>
