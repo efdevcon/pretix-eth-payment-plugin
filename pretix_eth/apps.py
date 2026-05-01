@@ -6,13 +6,13 @@ from . import __version__
 
 class EthApp(AppConfig):
     name = 'pretix_eth'
-    verbose_name = 'Pretix Crypto Payment (WalletConnect)'
+    verbose_name = 'Pretix Ethereum Payment'
 
     class PretixPluginMeta:
-        name = _('Crypto payment (WalletConnect)')
+        name = _('Ethereum Payment')
         author = 'Ethereum Foundation'
         category = 'PAYMENT'
-        description = _('Accept crypto payments (ETH, USDC, USDT0) via WalletConnect directly in Pretix checkout.')
+        description = _('Accept Ethereum-based payments (ETH, USDC, USDT0) directly in Pretix checkout.')
         visible = True
         version = __version__
 

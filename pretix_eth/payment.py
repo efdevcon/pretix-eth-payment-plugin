@@ -60,7 +60,7 @@ def _english_list(items):
 
 class WalletConnectPayment(BasePaymentProvider):
     identifier = 'walletconnect'
-    verbose_name = _('Pay with crypto (WalletConnect)')
+    verbose_name = _('Ethereum Payment')
     abort_pending_allowed = True
 
     def _enabled_symbols(self):
