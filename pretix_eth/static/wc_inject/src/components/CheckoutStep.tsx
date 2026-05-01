@@ -33,12 +33,14 @@ const BLOCK_TIME_MS: Record<number, number> = {
   42161: 250,   // Arbitrum
 }
 
-/** Poll roughly twice per block, but never tighter than 1.5 s and never
- *  looser than 8 s. Keeps Arbitrum from hammering us and gives Ethereum
- *  enough headroom that we don't spin during the 12 s gap. */
+/** Poll at 2 s on Ethereum L1 (so we don't sit idle for ~6 s after the
+ *  block lands while waiting on receipt indexing) and 1.5 s on faster
+ *  chains. Cap at 2 s upper bound — RPC indexer lag is the real latency
+ *  source on L1, not block time itself, so polling more often than once
+ *  per block actually pays off. */
 function pollIntervalMs(chainId: number): number {
   const blockTime = BLOCK_TIME_MS[chainId] ?? 4_000
-  return Math.max(1_500, Math.min(8_000, Math.floor(blockTime / 2)))
+  return Math.max(1_500, Math.min(2_000, Math.floor(blockTime / 2)))
 }
 
 /** Total poll budget = enough to wait for the confirmation requirement
