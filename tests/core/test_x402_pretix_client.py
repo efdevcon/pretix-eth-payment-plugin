@@ -1,6 +1,5 @@
 # tests/core/test_x402_pretix_client.py
 import pytest
-from unittest import mock
 from django_scopes import scopes_disabled
 from pretix_eth.x402.pretix_client import create_pretix_order, confirm_x402_payment
 
@@ -30,7 +29,7 @@ def test_create_pretix_order_makes_pretix_order(event):
 @pytest.mark.django_db
 def test_confirm_x402_payment_marks_confirmed(event):
     """confirm_x402_payment sets info_data and transitions payment state."""
-    from pretix.base.models import Item, ItemCategory, Order
+    from pretix.base.models import Item, ItemCategory
     from decimal import Decimal
     with scopes_disabled():
         cat = ItemCategory.objects.create(event=event, name='Admission', position=0)

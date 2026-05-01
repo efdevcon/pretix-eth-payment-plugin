@@ -9,7 +9,6 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from django.db import transaction, IntegrityError
-from django.db.models import Q
 from django.utils import timezone
 
 from pretix_eth.models import X402PendingOrder, X402CompletedOrder, X402VerifyAttempt

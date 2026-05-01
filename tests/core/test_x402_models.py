@@ -9,7 +9,7 @@ from pretix_eth.models import X402PendingOrder, X402CompletedOrder, X402VerifyAt
 @pytest.mark.django_db
 def test_pending_order_create_and_read(event):
     with scopes_disabled():
-        o = X402PendingOrder.objects.create(
+        X402PendingOrder.objects.create(
             event=event,
             payment_reference='x402_abc',
             order_data={'email': 'a@b.c', 'tickets': []},

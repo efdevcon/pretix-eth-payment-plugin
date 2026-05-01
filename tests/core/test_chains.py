@@ -1,9 +1,8 @@
-import pytest
 from pretix_eth.chains import (
-    SUPPORTED_CHAINS, TOKEN_CONTRACTS, CHAIN_METADATA,
+    SUPPORTED_CHAINS, CHAIN_METADATA,
     get_token_contract, is_supported,
 )
-from pretix_eth.chains import get_eip712_domain, TOKEN_CONFIGS
+from pretix_eth.chains import get_eip712_domain
 
 
 def test_all_five_chains_present():

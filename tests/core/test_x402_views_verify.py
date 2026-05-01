@@ -2,7 +2,6 @@
 import json
 import pytest
 from decimal import Decimal
-from unittest import mock
 from datetime import timedelta
 from django.utils import timezone
 from django_scopes import scopes_disabled
@@ -25,7 +24,8 @@ def pending_x402_for_verify(event):
 
 @pytest.fixture
 def event_with_recipient(event):
-    event.settings.set('payment_walletconnect_payment_recipient', '0xA163a78C0b811A984fFe1B98b4b1b95BAb24aAcD')
+    recipient = '0xA163a78C0b811A984fFe1B98b4b1b95BAb24aAcD'
+    event.settings.set('payment_walletconnect_payment_recipient', recipient)
     return event
 
 

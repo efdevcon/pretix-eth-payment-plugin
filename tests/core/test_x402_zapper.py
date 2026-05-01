@@ -1,8 +1,6 @@
 """Unit tests for the Zapper GraphQL fast-path balance fetcher."""
 from unittest import mock
 
-import pytest
-
 from pretix_eth.x402 import zapper
 
 

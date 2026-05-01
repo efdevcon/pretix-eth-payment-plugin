@@ -60,6 +60,7 @@ def test_execute_transfer_calls_relayer(api_client, event, pending_x402_order, m
     event.settings.set('payment_walletconnect_relayer_private_key', '0xdeadbeef' * 8)
 
     from pretix_eth.x402.relayer import RelayerResult
+
     def fake_execute(**kwargs):
         return RelayerResult(tx_hash='0x' + 'c' * 64, chain_id=kwargs['chain_id'])
     monkeypatch.setattr('pretix_eth.views_x402.execute_transfer_with_authorization', fake_execute)

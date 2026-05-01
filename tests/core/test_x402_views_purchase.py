@@ -1,8 +1,6 @@
 # tests/core/test_x402_views_purchase.py
 import json
 import pytest
-from decimal import Decimal
-from unittest import mock
 from django_scopes import scopes_disabled
 
 

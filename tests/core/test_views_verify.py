@@ -187,7 +187,6 @@ def test_verify_rate_limits_after_many_attempts(client, event_configured, quoted
     # Override rate limit env var
     monkeypatch.setenv('WC_VERIFY_RATE_LIMIT_PER_MIN', '2')
     # Force views module to re-read the value
-    import importlib
     import pretix_eth.views as views_mod
     monkeypatch.setattr(views_mod, 'RATE_LIMIT_PER_MIN', 2)
 

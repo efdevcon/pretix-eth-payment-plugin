@@ -1,6 +1,6 @@
 from unittest import mock
 import pytest
-from pretix_eth.verification import verify_erc20_transfer, VerificationResult
+from pretix_eth.verification import verify_erc20_transfer
 
 # keccak256("Transfer(address,address,uint256)")
 TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'

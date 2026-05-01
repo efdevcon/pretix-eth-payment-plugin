@@ -24,7 +24,7 @@ from eth_utils import to_checksum_address
 from pretix.base.models import Order
 from pretix_eth.chains import (
     SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA,
-    TOKEN_CONTRACTS, is_supported,
+    is_supported,
 )
 from pretix_eth.models import WCPaymentAttempt
 from pretix_eth.pricing import build_quote, fetch_eth_price_usd

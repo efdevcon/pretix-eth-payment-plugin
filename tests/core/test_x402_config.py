@@ -1,7 +1,6 @@
 # tests/core/test_x402_config.py
 import os
 from unittest import mock
-import pytest
 from pretix_eth.x402.config import resolve_relayer_pk
 
 

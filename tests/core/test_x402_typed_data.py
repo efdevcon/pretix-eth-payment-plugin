@@ -1,5 +1,4 @@
 # tests/core/test_x402_typed_data.py
-import secrets
 from pretix_eth.x402.typed_data import build_transfer_authorization_typed_data
 
 

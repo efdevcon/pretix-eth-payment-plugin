@@ -1,5 +1,4 @@
 from unittest import mock
-import pytest
 from pretix_eth.x402.balances import fetch_balances_for_wallet
 
 

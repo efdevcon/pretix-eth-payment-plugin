@@ -17,7 +17,7 @@ from web3 import Web3
 
 from pretix_eth.chains import SUPPORTED_CHAINS, get_token_contract, is_supported
 from pretix_eth.payment import WalletConnectPayment
-from pretix_eth.pricing import usd_to_token_raw
+from pretix_eth.pricing import fetch_eth_price_usd, usd_to_token_raw
 from pretix_eth.rpc import get_rpc_url
 from pretix_eth.verification import verify_erc20_transfer, verify_native_eth
 from pretix_eth.x402 import ticketstore
@@ -211,9 +211,13 @@ def payment_options(request: HttpRequest):
     # other, so the endpoint's wall-clock time becomes max(price, balances)
     # instead of price + balances. Two threads is enough; both calls are I/O
     # bound and release the GIL inside socket reads.
+    #
+    # `fetch_eth_price_usd` is imported at module-level (top of file) — keep
+    # it there so tests can `monkeypatch.setattr('pretix_eth.views_x402.
+    # fetch_eth_price_usd', ...)` without the patch being bypassed by a
+    # function-local re-import.
     import asyncio
     import concurrent.futures
-    from pretix_eth.pricing import fetch_eth_price_usd
 
     enabled_chain_ids = sorted({
         a['chainId'] for a in _supported_assets_for_event(provider)

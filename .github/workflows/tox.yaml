@@ -58,7 +58,9 @@ jobs:
         run: |
           if [ "${{ matrix.toxenv }}" = "lint" ]; then
             pip install flake8
-            flake8 pretix_eth tests setup.py --max-line-length=100 --exclude venv,docs
+            # Config (max-line-length, ignore list, excludes) lives in setup.cfg
+            # so the same rules apply locally and in CI. No CLI overrides here.
+            flake8 pretix_eth tests setup.py
           else
             pytest tests/core -v
           fi
