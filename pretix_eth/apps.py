@@ -9,7 +9,7 @@ class EthApp(AppConfig):
     verbose_name = 'Pretix Ethereum Payment'
 
     class PretixPluginMeta:
-        name = _('Ethereum Payment')
+        name = _('Ethereum payment')
         author = 'Ethereum Foundation'
         category = 'PAYMENT'
         description = _('Accept Ethereum-based payments (ETH, USDC, USDT0) directly in Pretix checkout.')
