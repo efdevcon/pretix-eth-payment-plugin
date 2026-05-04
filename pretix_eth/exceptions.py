@@ -1,0 +1,2 @@
+class TransactionProviderError(Exception):
+    pass

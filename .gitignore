@@ -6,9 +6,6 @@ __pycache__/
 # C extensions
 *.so
 
-# Dev Pretix config
-pretix.cfg
-
 # Distribution / packaging
 .Python
 env/
@@ -75,10 +72,3 @@ data/
 /.idea
 
 venv
-
-node_modules
-.DS_Store
-
-# Check in bundle
-!pretix_eth/static/wc_inject/dist/
-pretix_eth/static/wc_inject/dist/meta.json
