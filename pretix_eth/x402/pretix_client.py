@@ -105,7 +105,7 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
       voucher: str | None,
     }
     """
-    from pretix.base.models import Order, OrderPosition, Item, ItemVariation
+    from pretix.base.models import Order, OrderPosition, OrderFee, Item, ItemVariation
     # Pretix requires Order/OrderPosition/OrderFee writes to happen inside an
     # atomic block — otherwise its transaction-ledger bookkeeping warns
     # ("... however you are not doing it inside a database transaction!").
@@ -196,6 +196,30 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
                 OrderPosition.objects.create(
                     order=order, item=item, variation=variation, price=price,
                     addon_to=first_ticket_position,
+                )
+
+        # Mirror the wc-native checkout: surface `crypto_discount_percent` as a
+        # negative OrderFee (fee_type='payment'). The Order's `total` was set
+        # explicitly above to the already-discounted amount, so this fee is
+        # purely cosmetic — positions(sum) + fee(-discount) == order.total.
+        # Without this row, x402 orders would have no on-Order trace of the
+        # discount; the Pretix admin would only see positions summing to
+        # subtotal but order.total mysteriously lower. With it, the order page
+        # shows "Payment fee: -$X.XX" identical to the wc path.
+        crypto_discount_str = order_data.get('crypto_discount')
+        if crypto_discount_str:
+            try:
+                crypto_discount_dec = Decimal(str(crypto_discount_str))
+            except Exception:
+                crypto_discount_dec = Decimal('0')
+            if crypto_discount_dec > 0:
+                OrderFee.objects.create(
+                    order=order,
+                    fee_type=OrderFee.FEE_TYPE_PAYMENT,
+                    value=-crypto_discount_dec,
+                    description='',
+                    tax_rate=Decimal('0.00'),
+                    tax_value=Decimal('0.00'),
                 )
 
         # Create a walletconnect payment record

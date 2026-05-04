@@ -631,6 +631,11 @@ def purchase(request):
                 'attendee': body.get('attendee', {}),
                 'payment_provider': 'x402_crypto',
                 'locale': body.get('locale', 'en'),
+                # Persisted on the pending order so create_pretix_order can
+                # write a matching negative OrderFee (fee_type='payment'),
+                # mirroring how the legacy wc-native checkout shows the
+                # discount as a "Payment fee: -$x.xx" line on the order.
+                'crypto_discount': str(crypto_discount),
                 **({'voucher': voucher_code} if voucher_code else {}),
             },
             total_usd=total,
