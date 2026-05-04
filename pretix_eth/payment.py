@@ -1,8 +1,10 @@
 """Pretix payment provider for WalletConnect-based crypto checkout."""
 import logging
 from collections import OrderedDict
+from decimal import Decimal, ROUND_HALF_UP
 
 from django import forms
+from django.conf import settings as dj_settings
 from django.http import HttpRequest
 from django.template.loader import get_template
 from django.utils.translation import gettext_lazy as _
@@ -154,6 +156,23 @@ class WalletConnectPayment(BasePaymentProvider):
             required=False,
         )
         return base
+
+    def calculate_fee(self, price: Decimal) -> Decimal:
+        """Apply `crypto_discount_percent` as a negative payment fee on the
+        Pretix-native checkout path. Pretix pipes payment-method fees through
+        cart/order totals, so a negative return surfaces the discount on the
+        confirm step and makes `order.total` (used by quote-build, payment.amount,
+        and on-chain verification) reflect it. The x402 path bypasses this:
+        it computes its own discounted total and writes it to `order.total`
+        directly, so there is no double-application.
+        """
+        pct = self.settings.get('crypto_discount_percent', as_type=Decimal, default=Decimal('0'))
+        if pct <= 0:
+            return Decimal('0')
+        places = dj_settings.CURRENCY_PLACES.get(self.event.currency, 2)
+        return (-price * pct / Decimal('100')).quantize(
+            Decimal('1') / 10 ** places, ROUND_HALF_UP
+        )
 
     def is_allowed(self, request=None, total=None):
         return bool(self.settings.get('receive_address')) and bool(self.settings.get('wc_project_id'))
