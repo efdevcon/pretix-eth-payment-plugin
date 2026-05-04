@@ -13,4 +13,16 @@ devserver:
 devmigrate:
 	python -mpretix migrate
 
-.PHONY: all localecompile localegen
+.PHONY: all localecompile localegen frontend-install frontend-build frontend-watch build-all
+
+frontend-install:
+	cd pretix_eth/static/wc_inject && pnpm install
+
+frontend-build: frontend-install
+	cd pretix_eth/static/wc_inject && pnpm run build
+
+frontend-watch:
+	cd pretix_eth/static/wc_inject && pnpm run watch
+
+build-all: frontend-build
+	@echo 'Run "pip install -e ." to build Python side'

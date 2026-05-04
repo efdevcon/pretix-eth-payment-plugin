@@ -1,0 +1,8 @@
+{% load i18n %}
+<div class="wc-root">
+  {% if enabled_tokens %}
+    <p>{% blocktrans with tokens=enabled_tokens %}You will pay with crypto ({{ tokens }}) after confirming your order.{% endblocktrans %}</p>
+  {% else %}
+    <p>{% trans "You will pay with crypto after confirming your order." %}</p>
+  {% endif %}
+</div>

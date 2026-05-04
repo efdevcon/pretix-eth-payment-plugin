@@ -1,193 +1,593 @@
-from datetime import timedelta
+"""HTTP endpoints for the WalletConnect payment flow."""
+import asyncio
+import json
+import logging
+import os
+import re
+import secrets
+import time
+from decimal import Decimal
+from typing import Optional
 
-from django.contrib import messages
-from django.contrib.humanize.templatetags.humanize import NaturalTimeFormatter
-from django.core.signing import BadSignature, TimestampSigner
-from django.shortcuts import redirect
-from django.urls import reverse
-from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
-from django.views.generic import FormView
-from pretix.control.views.event import EventSettingsViewMixin
+from django.core.cache import cache
+from django.db import IntegrityError, transaction
+from django.http import JsonResponse, HttpRequest
+from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_http_methods
+from django_scopes import scopes_disabled
+from web3 import Web3
 
-from . import forms, models
+from eth_account import Account
+from eth_account.messages import encode_defunct
+from eth_utils import to_checksum_address
 
+from pretix.base.models import Order
+from pretix_eth.chains import (
+    SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA,
+    is_supported,
+)
+from pretix_eth.models import WCPaymentAttempt
+from pretix_eth.pricing import build_quote, fetch_eth_price_usd
+from pretix_eth.payment import WalletConnectPayment
+from pretix_eth.rpc import get_rpc_url
+from pretix_eth.verification import verify_erc20_transfer, verify_native_eth
 
-UPLOAD_ADDRESS_KEY = "pretix_eth_upload_addresses"
-UPLOAD_VALID_DURATION = timedelta(minutes=5)
+log = logging.getLogger(__name__)
 
-
-class WalletAddressUploadView(EventSettingsViewMixin, FormView):
-    form_class = forms.WalletAddressUploadForm
-    template_name = 'pretix_eth/wallet_address_upload.html'
-    permission = 'can_change_event_settings'
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-        existing_unused_addresses = (
-            models.WalletAddress.objects.get_queryset()
-            .unused()
-            .for_event(self.request.event)
-        )
-        ctx["existing_unused_addresses"] = len(existing_unused_addresses)
-        return ctx
-
-    def form_valid(self, form):
-        file_addresses = form.cleaned_data["wallet_addresses"]
-
-        now = timezone.now()
-        expire_time = now + UPLOAD_VALID_DURATION
-        signer = TimestampSigner()
-        signed_file_addresses = signer.sign(file_addresses)
-
-        self.request.session[UPLOAD_ADDRESS_KEY] = signed_file_addresses
-
-        messages.success(
-            self.request,
-            _(
-                'Successfully parsed {n} wallet addresses.  '
-                'You have until {expire_time} to confirm your address upload.'
-            ).format(
-                n=len(file_addresses.splitlines()),
-                expire_time=NaturalTimeFormatter.string_for(expire_time),
-            ),
-        )
-
-        return super().form_valid(form)
-
-    def form_invalid(self, form):
-        messages.error(self.request, _('We could not save your changes. See below for details.'))
-        return super().form_invalid(form)
-
-    def get_success_url(self, **kwargs):
-        return reverse('plugins:pretix_eth:wallet_address_upload_confirm', kwargs={
-            'organizer': self.request.event.organizer.slug,
-            'event': self.request.event.slug,
-        })
+RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_RATE_LIMIT_PER_MIN', '10'))
 
 
-class AddressUploadSessionError(Exception):
-    def __init__(self, message, response=None):
-        super().__init__(message)
-        self.response = response
+def _check_rate_limit(quote_id: str, ip: str) -> bool:
+    """Return False if caller has exceeded WC_VERIFY_RATE_LIMIT_PER_MIN for this quote+IP pair."""
+    key = f'wc_verify_rl:{quote_id}:{ip}'
+    count = cache.get(key, 0)
+    if count >= RATE_LIMIT_PER_MIN:
+        return False
+    cache.set(key, count + 1, timeout=60)
+    return True
 
 
-class WalletAddressUploadConfirmView(EventSettingsViewMixin, FormView):
-    form_class = forms.WalletAddressUploadConfirmForm
-    template_name = 'pretix_eth/wallet_address_upload_confirm.html'
-    permission = 'can_change_event_settings'
+def _read_body(request) -> dict:
+    try:
+        return json.loads(request.body or b'{}')
+    except json.JSONDecodeError:
+        return {}
 
-    def get(self, request, *args, **kwargs):
+
+_TX_HASH_RE = re.compile(r'^0x[a-fA-F0-9]{64}$')
+
+
+def _get_web3(chain_id: int, settings_key):
+    url = get_rpc_url(chain_id, settings_key=settings_key)
+    return Web3(Web3.HTTPProvider(url, request_kwargs={'timeout': 10}))
+
+
+@scopes_disabled()
+def _get_provider_for_event(request: HttpRequest):
+    """Resolve the event from query string (GET) or JSON body (POST),
+    then instantiate our payment provider bound to that event."""
+    from pretix.base.models import Event
+    body = _read_body(request) if request.method == 'POST' else {}
+    ev_slug = request.GET.get('event') or body.get('event')
+    org_slug = request.GET.get('organizer') or body.get('organizer')
+    if not ev_slug or not org_slug:
+        return None
+    try:
+        event = Event.objects.get(slug=ev_slug, organizer__slug=org_slug)
+    except Event.DoesNotExist:
+        return None
+    return WalletConnectPayment(event)
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def payment_options(request):
+    provider = _get_provider_for_event(request)
+    if provider is None:
+        return JsonResponse({'error': 'event not found'}, status=404)
+
+    # Read per-chain and per-token boolean settings (default: all enabled)
+    enabled_chains = [
+        cid for cid in SUPPORTED_CHAINS
+        if str(provider.settings.get(f'chain_{cid}', default='True')).lower() in ('true', '1', 'yes')
+    ]
+    enabled_tokens = [
+        sym for sym in ALL_SYMBOLS
+        if str(provider.settings.get(f'token_{sym}', default='True')).lower() in ('true', '1', 'yes')
+    ]
+    receive_address = provider.settings.get('receive_address')
+
+    options = []
+    for cid in enabled_chains:
+        for sym in enabled_tokens:
+            if is_supported(cid, sym):
+                options.append({
+                    'chain_id': cid,
+                    'chain_name': CHAIN_METADATA[cid]['name'],
+                    'symbol': sym,
+                })
+
+    # ETH availability (dual-oracle). Capture the price too so the wc_inject
+    # picker can do an accurate "is the wallet's ETH balance enough" check
+    # without re-fetching the oracles client-side. Stays consistent with the
+    # quote-creation endpoint, which uses the same `fetch_eth_price_usd()`.
+    eth_available = True
+    eth_disabled_reason = None
+    eth_price_usd: Optional[float] = None
+    if 'ETH' in enabled_tokens:
         try:
-            return super().get(request, *args, **kwargs)
-        except AddressUploadSessionError as e:
-            return e.response
+            result = asyncio.run(fetch_eth_price_usd())
+            if result is None:
+                eth_available = False
+                eth_disabled_reason = 'oracle_unavailable_or_diverged'
+            else:
+                eth_price_usd = result.price
+        except Exception as e:
+            log.warning('ETH price fetch failed: %s', e)
+            eth_available = False
+            eth_disabled_reason = 'oracle_error'
 
-    def post(self, request, *args, **kwargs):
+    if not eth_available:
+        options = [o for o in options if o['symbol'] != 'ETH']
+
+    return JsonResponse({
+        'options': options,
+        'eth_available': eth_available,
+        'eth_disabled_reason': eth_disabled_reason,
+        'eth_price_usd': eth_price_usd,
+        'receive_address': receive_address,
+        'chain_metadata': {str(cid): CHAIN_METADATA[cid] for cid in enabled_chains},
+    })
+
+
+# ---------------------------------------------------------------------------
+# Wallet balances (Zapper main + RPC fallback) — same engine as /plugin/x402
+# ---------------------------------------------------------------------------
+
+
+def _is_address(s: str) -> bool:
+    return isinstance(s, str) and bool(re.match(r'^0x[a-fA-F0-9]{40}$', s))
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def wallet_balances(request):
+    """Return per-(chain, token) balances for `wallet`, scoped to chains/tokens
+    enabled in the event's plugin settings. Used by the wc_inject UI to gate
+    the network/token picker on actual holdings, same as /plugin/x402's
+    payment-options does for the devcon checkout.
+
+    Reuses `fetch_balances_for_wallet` so the Zapper-first / RPC-fallback
+    behaviour is identical across both flows. Failures (Zapper down, RPC
+    flake) return an empty list — the UI should still render all options
+    and just skip the balance badge."""
+    from pretix_eth.x402.balances import fetch_balances_for_wallet
+
+    provider = _get_provider_for_event(request)
+    if provider is None:
+        return JsonResponse({'error': 'event not found'}, status=404)
+
+    wallet = (request.GET.get('wallet') or '').strip()
+    if not _is_address(wallet):
+        return JsonResponse({'error': 'wallet must be 0x + 40 hex'}, status=400)
+    wallet = Web3.to_checksum_address(wallet)
+
+    enabled_chains = [
+        cid for cid in SUPPORTED_CHAINS
+        if str(provider.settings.get(f'chain_{cid}', default='True')).lower() in ('true', '1', 'yes')
+    ]
+    if not enabled_chains:
+        return JsonResponse({'wallet': wallet, 'balances': []})
+
+    alchemy_key = provider.settings.get('alchemy_api_key', default=None) or None
+    zapper_key = provider.settings.get('zapper_api_key', default=None) or None
+
+    try:
+        raw = fetch_balances_for_wallet(
+            wallet=wallet, chain_ids=enabled_chains,
+            alchemy_key=alchemy_key, zapper_api_key=zapper_key,
+        )
+    except Exception as e:
+        # Best-effort: don't block the buyer if the balance lookup blows up.
+        log.warning('wc_wallet_balances: fetch failed for %s: %s', wallet, e)
+        raw = []
+
+    return JsonResponse({'wallet': wallet, 'balances': raw})
+
+
+CHALLENGE_TTL = 600  # 10 min
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def challenge(request):
+    """Issue a signed-message challenge that the user's wallet must sign,
+    proving ownership of the address that will pay."""
+    body = _read_body(request)
+
+    required = ('order_code', 'order_secret', 'organizer', 'event')
+    missing = [k for k in required if not body.get(k)]
+    if missing:
+        return JsonResponse({'error': f'missing fields: {missing}'}, status=400)
+
+    with scopes_disabled():
         try:
-            return super().post(request, *args, **kwargs)
-        except AddressUploadSessionError as e:
-            return e.response
-
-    def get_context_data(self, **kwargs):
-        ctx = super().get_context_data(**kwargs)
-
-        file_addresses = self.get_file_addresses()
-        hex_addresses = file_addresses.splitlines()
-        hex_address_set = set(hex_addresses)
-        existing_addresses = models.WalletAddress.objects.filter(hex_address__in=hex_address_set)
-        existing_address_set = set(existing_addresses.values_list("hex_address", flat=True))
-        new_addresses = hex_address_set - existing_address_set
-
-        ctx["file_address_count"] = len(hex_addresses)
-        ctx["unique_address_count"] = len(hex_address_set)
-        ctx["existing_address_count"] = existing_addresses.count()
-        ctx["new_address_count"] = len(new_addresses)
-
-        return ctx
-
-    def form_valid(self, form):
-        file_addresses = self.get_file_addresses()
-        return self.session_key_valid(form, file_addresses)
-
-    def session_key_valid(self, form, file_addresses):
-        action = form.cleaned_data["action"]
-
-        if action == "cancel":
-            messages.info(self.request, _('Wallet address upload cancelled.'))
-            return self.clear_and_start_over()
-
-        file_addresses = self.get_file_addresses()
-        hex_addresses = file_addresses.splitlines()
-        hex_address_set = set(hex_addresses)
-        existing_addresses = models.WalletAddress.objects.filter(hex_address__in=hex_address_set)
-        existing_address_set = set(existing_addresses.values_list("hex_address", flat=True))
-        new_addresses = hex_address_set - existing_address_set
-
-        created = models.WalletAddress.objects.bulk_create([
-            models.WalletAddress(
-                hex_address=hex_address,
-                event=self.request.event,
+            order = Order.objects.get(
+                code=body['order_code'],
+                event__slug=body['event'],
+                event__organizer__slug=body['organizer'],
             )
-            for hex_address in new_addresses
-        ])
+        except Order.DoesNotExist:
+            return JsonResponse({'error': 'order not found'}, status=404)
 
-        self.request.event.log_action(
-            'pretix_eth.wallet_address_upload',
-            user=self.request.user,
-            data={
-                'file_addresses': file_addresses,
-                'file_address_count': len(hex_addresses),
-                'unique_address_count': len(hex_address_set),
-                'existing_address_count': existing_addresses.count(),
-                'new_address_count': len(new_addresses),
-            },
+        if order.secret != body['order_secret']:
+            return JsonResponse({'error': 'invalid secret'}, status=403)
+
+        if order.status != Order.STATUS_PENDING:
+            return JsonResponse({'error': 'order not pending'}, status=409)
+
+        nonce = secrets.token_urlsafe(24)
+        expires_at = int(time.time()) + CHALLENGE_TTL
+
+        message = (
+            'Pretix ticket payment\n'
+            f'Order: {order.code}\n'
+            f'Nonce: {nonce}\n'
+            f'Expires: {expires_at}'
         )
 
-        messages.success(
-            self.request,
-            _('Created {n} new wallet addresses!').format(n=len(created)),
+        # Find or create the pending walletconnect payment and stash nonce on info_data
+        payment = order.payments.filter(provider='walletconnect', state='created').first()
+        if payment is None:
+            payment = order.payments.create(
+                provider='walletconnect',
+                amount=order.total,
+                state='created',
+            )
+
+        info = payment.info_data or {}
+        info['challenge_nonce'] = nonce
+        info['challenge_expires_at'] = expires_at
+        info['challenge_message'] = message
+        payment.info_data = info
+        payment.save()
+
+    return JsonResponse({
+        'nonce': nonce,
+        'message': message,
+        'expires_at': expires_at,
+    })
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def create_quote(request):
+    """Recover the payer from a SIWE-lite signature, validate the challenge,
+    build a quote, and persist it to the pending payment's info_data."""
+    body = _read_body(request)
+
+    required = ('order_code', 'order_secret', 'organizer', 'event',
+                'chain_id', 'symbol', 'nonce', 'signature')
+    missing = [k for k in required if not body.get(k)]
+    if missing:
+        return JsonResponse({'error': f'missing fields: {missing}'}, status=400)
+
+    try:
+        chain_id = int(body['chain_id'])
+    except (TypeError, ValueError):
+        return JsonResponse({'error': 'invalid chain_id'}, status=400)
+
+    symbol = body['symbol']
+    if not is_supported(chain_id, symbol):
+        return JsonResponse({'error': 'unsupported chain/token combination'}, status=400)
+
+    with scopes_disabled():
+        try:
+            order = Order.objects.get(
+                code=body['order_code'],
+                event__slug=body['event'],
+                event__organizer__slug=body['organizer'],
+            )
+        except Order.DoesNotExist:
+            return JsonResponse({'error': 'order not found'}, status=404)
+
+        if order.secret != body['order_secret']:
+            return JsonResponse({'error': 'invalid secret'}, status=403)
+
+        payment = order.payments.filter(provider='walletconnect', state='created').first()
+        if payment is None:
+            return JsonResponse({'error': 'no pending walletconnect payment; call /challenge/ first'}, status=409)
+
+        info = payment.info_data or {}
+        stored_nonce = info.get('challenge_nonce')
+        message = info.get('challenge_message')
+        expires_at = info.get('challenge_expires_at', 0)
+
+        if not stored_nonce or stored_nonce != body['nonce']:
+            return JsonResponse({'error': 'nonce mismatch'}, status=400)
+        if time.time() > expires_at:
+            return JsonResponse({'error': 'challenge expired'}, status=400)
+
+        # Two acceptable signature modes:
+        #
+        # 1) EOA (65 bytes): standard ECDSA. We recover the signer locally and
+        #    use it as the payer. No on-chain lookup needed.
+        #
+        # 2) Smart wallet (ERC-1271 / ERC-6492, variable length — Coinbase/Base
+        #    Smart Wallet returns ~640 bytes): the signature is a contract-level
+        #    proof, NOT an ECDSA signature, so `Account.recover_message` throws
+        #    with "Unexpected recoverable signature length". The client MUST
+        #    provide `payer_address` alongside the signature so we can verify
+        #    it via ERC-1271's isValidSignature eth_call (same code path as the
+        #    x402 flow's eth_payer_signature).
+        claimed_payer = body.get('payer_address')
+        signature_hex = body['signature']
+        sig_len_bytes = len(signature_hex[2:]) // 2 if signature_hex.startswith('0x') else len(signature_hex) // 2
+
+        if sig_len_bytes == 65 and not claimed_payer:
+            # EOA path (backward-compatible with clients that don't send payer_address)
+            try:
+                msg = encode_defunct(text=message)
+                recovered = Account.recover_message(msg, signature=signature_hex)
+            except Exception as e:
+                return JsonResponse({'error': f'signature recovery failed: {e}'}, status=400)
+            payer = to_checksum_address(recovered)
+        else:
+            if not claimed_payer:
+                return JsonResponse({
+                    'error': (
+                        'payer_address is required for smart-wallet signatures '
+                        f'(got {sig_len_bytes}-byte signature, not a 65-byte ECDSA)'
+                    ),
+                }, status=400)
+            provider = WalletConnectPayment(order.event)
+            settings_key = provider.settings.get('alchemy_api_key', default=None)
+            from pretix_eth.verification import verify_eth_payer_signature
+            # Coinbase/Base Smart Wallet (and other ERC-1271 wallets that use
+            # EIP-712 domain separators) bind signatures to the chain the
+            # wallet was on at signing time — the `replaySafeHash` wrapper
+            # pulls chainId from `block.chainid`, so a signature made on
+            # chain X validates ONLY when isValidSignature is called on
+            # chain X. We try, in order:
+            #   1. `signing_chain_id` (wallet's chain at sign time) — best guess
+            #   2. the payment chain (common case when user didn't switch chains)
+            #   3. every other supported chain (covers users whose wallet is
+            #      on a chain other than the payment chain)
+            # A single success anywhere proves signature validity.
+            signing_chain_id = body.get('signing_chain_id')
+            fallback_chain_ids: list = []
+            if signing_chain_id is not None:
+                try:
+                    fallback_chain_ids.append(int(signing_chain_id))
+                except (TypeError, ValueError):
+                    pass
+            if chain_id not in fallback_chain_ids:
+                fallback_chain_ids.append(chain_id)
+            for supported in SUPPORTED_CHAINS:
+                if supported not in fallback_chain_ids:
+                    fallback_chain_ids.append(supported)
+            sig_ok = False
+            for cid in fallback_chain_ids:
+                try:
+                    w3_for_sig = _get_web3(cid, settings_key)
+                    if verify_eth_payer_signature(
+                        w3=w3_for_sig, payer=claimed_payer, message=message, signature=signature_hex,
+                    ):
+                        sig_ok = True
+                        break
+                except Exception as e:
+                    log.warning('eth_payer_signature chain %s verify errored: %s', cid, e)
+            if not sig_ok:
+                return JsonResponse({
+                    'error': (
+                        'signature does not validate against payer_address '
+                        '(checked chain(s): ' + ','.join(str(c) for c in fallback_chain_ids) + ')'
+                    ),
+                }, status=400)
+            payer = to_checksum_address(claimed_payer)
+
+        # ETH price (only if symbol == 'ETH')
+        eth_price = None
+        if symbol == 'ETH':
+            result = asyncio.run(fetch_eth_price_usd())
+            if result is None:
+                return JsonResponse({'error': 'ETH temporarily unavailable'}, status=503)
+            eth_price = result.price
+
+        provider = WalletConnectPayment(order.event)
+        receive_address = provider.settings.get('receive_address')
+        if not receive_address:
+            return JsonResponse({'error': 'receive_address not configured'}, status=500)
+        ttl = int(provider.settings.get('quote_ttl_seconds', default=600))
+
+        quote = build_quote(
+            order_code=order.code,
+            order_total_usd=Decimal(str(order.total)),
+            chain_id=chain_id, symbol=symbol, payer=payer,
+            receive_address=receive_address,
+            eth_price=eth_price, ttl_seconds=ttl,
         )
-        return self.clear_and_start_over()
 
-    def get_file_addresses(self):
+        info['quote'] = quote
+        payment.info_data = info
+        payment.save()
+
+    return JsonResponse(quote)
+
+
+def _verify_bad(reason: str, status: int = 400, **extra):
+    """Return a 4xx JsonResponse AND log the reason so production 'Bad Request:
+    /plugin/wc/verify/' lines in the Django middleware log become diagnosable
+    without having to reproduce. The response body shape is unchanged so the
+    frontend retry logic keeps working."""
+    log.warning('wc_verify rejected: %s (extra=%s)', reason, extra or '-')
+    return JsonResponse({'error': reason}, status=status)
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+def verify(request):
+    """Full verification chain:
+    1. Input validation
+    2. One-time tx_hash check
+    3. Look up order + quote
+    4. Chain/quote expiry checks
+    5. On-chain verify (web3.py)
+    6. Atomic claim + Pretix payment.confirm()
+    """
+    body = _read_body(request)
+
+    required = ('quote_id', 'tx_hash', 'chain_id', 'organizer', 'event')
+    missing = [k for k in required if not body.get(k)]
+    if missing:
+        return _verify_bad(f'missing fields: {missing}')
+
+    client_ip = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip() \
+        or request.META.get('REMOTE_ADDR', 'unknown')
+    if not _check_rate_limit(body['quote_id'], client_ip):
+        return _verify_bad('rate limit exceeded', status=429, quote_id=body.get('quote_id'), ip=client_ip)
+
+    tx_hash = body['tx_hash']
+    if not _TX_HASH_RE.match(tx_hash):
+        return _verify_bad('invalid tx_hash format', tx_hash=tx_hash)
+
+    try:
+        chain_id = int(body['chain_id'])
+    except (TypeError, ValueError):
+        return _verify_bad('invalid chain_id', chain_id=body.get('chain_id'))
+
+    # Fail fast on one-time tx_hash check. Case-insensitive: clients normally
+    # send lowercase 0x-hex, but tooling-generated hashes (Etherscan exports,
+    # wallet UI copy) sometimes come back mixed/upper-case — the dup guard
+    # must catch all of those.
+    if WCPaymentAttempt.objects.filter(tx_hash__iexact=tx_hash, state='completed').exists():
+        return _verify_bad('tx already used for a completed order', tx_hash=tx_hash)
+
+    with scopes_disabled():
+        # Find the order by matching quote_id in any pending walletconnect payment
         try:
-            signed_file_addresses = self.request.session[UPLOAD_ADDRESS_KEY]
-        except KeyError:
-            raise AddressUploadSessionError(
-                "no session key",
-                response=self.no_session_key(),
+            order = Order.objects.get(
+                event__slug=body['event'],
+                event__organizer__slug=body['organizer'],
+                payments__provider='walletconnect',
+                payments__state='created',
             )
-        signer = TimestampSigner()
+        except Order.DoesNotExist:
+            return _verify_bad('order not found', status=404,
+                               event=body.get('event'), organizer=body.get('organizer'))
+        except Order.MultipleObjectsReturned:
+            # Multiple pending orders on event — disambiguate by quote_id below
+            order = None
+
+        # Find the payment with matching quote_id
+        if order is None:
+            candidates = Order.objects.filter(
+                event__slug=body['event'],
+                event__organizer__slug=body['organizer'],
+                payments__provider='walletconnect',
+                payments__state='created',
+            ).distinct()
+        else:
+            candidates = [order]
+
+        payment = None
+        for candidate in candidates:
+            for p in candidate.payments.filter(provider='walletconnect', state='created'):
+                if (p.info_data or {}).get('quote', {}).get('quote_id') == body['quote_id']:
+                    order = candidate
+                    payment = p
+                    break
+            if payment is not None:
+                break
+
+        if payment is None:
+            return _verify_bad('quote not found', status=404, quote_id=body.get('quote_id'))
+
+        quote = payment.info_data['quote']
+
+        if chain_id != quote['chain_id']:
+            return _verify_bad('chain_id mismatch',
+                               submitted=chain_id, quote=quote.get('chain_id'))
+
+        if time.time() > quote['expires_at']:
+            return _verify_bad('quote expired',
+                               expires_at=quote['expires_at'], now=int(time.time()))
+
+        provider = WalletConnectPayment(order.event)
+        settings_key = provider.settings.get('alchemy_api_key', default=None)
+        min_conf = int(provider.settings.get('min_confirmations', default=1))
+
+        w3 = _get_web3(chain_id, settings_key)
+
+        amount_raw = int(quote['amount_raw'])
+        if quote['symbol'] == 'ETH':
+            vr = verify_native_eth(
+                w3=w3, tx_hash=tx_hash,
+                expected_from=quote['intended_payer'],
+                expected_to=quote['receive_address'],
+                expected_amount_wei=amount_raw,
+                min_confirmations=min_conf,
+            )
+        else:
+            vr = verify_erc20_transfer(
+                w3=w3, chain_id=chain_id, tx_hash=tx_hash,
+                expected_from=quote['intended_payer'],
+                expected_to=quote['receive_address'],
+                expected_token=quote['token_address'],
+                expected_amount=amount_raw,
+                min_confirmations=min_conf,
+            )
+
+        if not vr.verified:
+            log.warning('wc_verify rejected: on-chain verify failed: %s (tx=%s)', vr.error, tx_hash)
+            # Surface confirmation progress for the wc_inject UI's progress bar.
+            return JsonResponse({
+                'verified': False,
+                'error': vr.error,
+                'confirmations': vr.confirmations,
+                'confirmations_required': vr.min_confirmations,
+            }, status=400)
+
+        # Atomic claim: unique constraint on tx_hash prevents race
         try:
-            file_addresses = signer.unsign(signed_file_addresses, max_age=UPLOAD_VALID_DURATION)
-        except BadSignature:
-            raise AddressUploadSessionError(
-                "session key expired",
-                response=self.session_key_expired(),
-            )
-        return file_addresses
+            with transaction.atomic():
+                WCPaymentAttempt.objects.create(
+                    tx_hash=tx_hash, quote_id=quote['quote_id'],
+                    order_code=order.code, payer=quote['intended_payer'],
+                    chain_id=chain_id, state='completed',
+                )
 
-    def clear_session_key(self):
-        del self.request.session[UPLOAD_ADDRESS_KEY]
+                info = payment.info_data or {}
+                info['tx_hash'] = tx_hash
+                info['chain_id'] = chain_id
+                info['token_symbol'] = quote['symbol']
+                info['token_address'] = quote.get('token_address')
+                info['payer'] = quote['intended_payer']
+                # Store as a plain integer string — the payment_control_render
+                # helper formats it to human-readable decimals using the token
+                # symbol. The old `f"{raw} (raw)"` format leaked into the Pretix
+                # admin UI as literal text.
+                info['amount'] = str(quote['amount_raw'])
+                info['block_number'] = vr.block_number
+                payment.info_data = info
+                payment.save()
 
-    def clear_and_start_over(self):
-        self.clear_session_key()
-        return redirect(self.get_success_url())
+                # Render the payment recap for the order-paid email. The paid
+                # email path uses `{payment_info}` = whatever we pass as
+                # `mail_text=` to payment.confirm() — it does NOT call
+                # `order_pending_mail_render` on its own. Without this, the
+                # confirmation email's {payment_info} placeholder renders empty.
+                try:
+                    mail_text = WalletConnectPayment(order.event).order_pending_mail_render(order, payment)
+                except Exception as e:
+                    log.warning('[wc verify] failed to render mail_text for %s: %s', order.code, e)
+                    mail_text = ''
+                payment.confirm(mail_text=mail_text)
+        except IntegrityError:
+            return _verify_bad('tx already used (race)', status=409, tx_hash=tx_hash)
 
-    def no_session_key(self):
-        return redirect(self.get_success_url())
-
-    def session_key_expired(self):
-        messages.error(self.request, _('Wallet address upload expired! Please try again.'))
-        return self.clear_and_start_over()
-
-    def form_invalid(self, form):
-        messages.error(self.request, _('Unrecognized action. Please try again.'))
-        return self.clear_and_start_over()
-
-    def get_success_url(self, **kwargs):
-        return reverse('plugins:pretix_eth:wallet_address_upload', kwargs={
-            'organizer': self.request.event.organizer.slug,
-            'event': self.request.event.slug,
-        })
+    return JsonResponse({
+        'verified': True,
+        'block_number': vr.block_number,
+        'order_code': order.code,
+    })

@@ -1,8 +1,19 @@
 {% load i18n %}
 
-<p>
-    {% blocktrans trimmed %}
-    Click the "Place binding order" or "Pay now" button to confirm that you
-    intend to pay the order total.
-    {% endblocktrans %}
-</p>
+<div id="wc-payment-root"></div>
+
+<script id="wc-config" type="application/json">
+{
+  "wcProjectId": "{{ wc_project_id|escapejs }}",
+  "orderCode": "{{ order_code|escapejs }}",
+  "orderSecret": "{{ order_secret|escapejs }}",
+  "orderTotalUsd": "{{ order_total_usd|escapejs }}",
+  "buyerEmail": "{{ buyer_email|escapejs }}",
+  "urlPrefix": "{{ url_prefix|escapejs }}",
+  "csrfToken": "{{ csrf_token|escapejs }}",
+  "supportEmail": "{{ support_email|escapejs }}"
+}
+</script>
+
+<link rel="stylesheet" href="/static/wc_inject/dist/styles.css?v={{ plugin_version|urlencode }}">
+<script type="module" src="/static/wc_inject/dist/bundle.js?v={{ plugin_version|urlencode }}"></script>
