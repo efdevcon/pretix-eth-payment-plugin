@@ -1,3 +1,7 @@
 recursive-include pretix_eth/static *
 recursive-include pretix_eth/templates *
 recursive-include pretix_eth/locale *
+recursive-include pretix_eth/static/wc_inject/dist *
+prune pretix_eth/static/wc_inject/node_modules
+recursive-exclude pretix_eth/static/wc_inject/node_modules *
+global-exclude *.log

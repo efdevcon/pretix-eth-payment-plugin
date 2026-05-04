@@ -1,306 +1,414 @@
+"""Pretix payment provider for WalletConnect-based crypto checkout."""
 import logging
-import time
 from collections import OrderedDict
 
 from django import forms
-from django.core.exceptions import ImproperlyConfigured
 from django.http import HttpRequest
 from django.template.loader import get_template
-from django.utils.translation import ugettext_lazy as _
-
-from pretix.base.models import (
-    OrderPayment,
-    OrderRefund,
-)
+from django.utils.translation import gettext_lazy as _
 from pretix.base.payment import BasePaymentProvider
 
-from eth_utils import from_wei
+from pretix_eth.chains import SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA
 
-from .models import WalletAddress
-from .network.tokens import (
-    IToken,
-    registry,
-    all_network_verbose_names_to_ids,
-    all_token_and_network_ids_to_tokens,
-    token_verbose_name_to_token_network_id,
-)
-
-logger = logging.getLogger(__name__)
-
-RESERVED_ORDER_DIGITS = 5
+log = logging.getLogger(__name__)
 
 
-def truncate_wei_value(value: int, digits: int) -> int:
-    multiplier = 10 ** digits
-    return int(round(value / multiplier) * multiplier)
+def _format_crypto_amount(raw, token_symbol):
+    """Convert a stored raw on-chain integer (USDC/USDT0 in 6-decimal base units,
+    ETH in wei) into a human-readable decimal string. Returns None on bad input
+    so the Pretix control template can omit the row entirely.
+
+    Legacy quirk: historical rows from `views.py` stored `"<int> (raw)"` — strip
+    the suffix before parsing so those display correctly without a DB backfill."""
+    if raw in (None, ''):
+        return None
+    decimals = 18 if token_symbol == 'ETH' else 6
+    # Tolerate the legacy "<int> (raw)" format written by views.py prior to fix.
+    s = str(raw).strip()
+    if s.endswith('(raw)'):
+        s = s[:-len('(raw)')].strip()
+    try:
+        n = int(s)
+    except (TypeError, ValueError):
+        return str(raw)  # fall back to raw value for forward-compat
+    if n == 0:
+        return '0'
+    base = 10 ** decimals
+    whole, frac = divmod(n, base)
+    if frac == 0:
+        return str(whole)
+    frac_str = f'{frac:0{decimals}d}'.rstrip('0')
+    return f'{whole}.{frac_str}'
 
 
-class Ethereum(BasePaymentProvider):
-    identifier = "ethereum"
-    verbose_name = _("ETH or DAI")
-    public_name = _("ETH or DAI")
-    test_mode_message = "Paying in Test Mode"
+_SYMBOL_DISPLAY = {'USDT0': 'USD₮0'}
+
+
+def _english_list(items):
+    """Format ['ETH', 'USDC', 'USDT0'] as 'ETH, USDC, or USD₮0'. Display
+    symbols (`USDT0 → USD₮0`) are applied here so callers don't have to
+    remember. Falls back gracefully for 0/1/2-element lists."""
+    xs = [_SYMBOL_DISPLAY.get(s, s) for s in items]
+    if not xs:
+        return ''
+    if len(xs) == 1:
+        return xs[0]
+    if len(xs) == 2:
+        return '{} or {}'.format(*xs)
+    return '{}, or {}'.format(', '.join(xs[:-1]), xs[-1])
+
+
+class WalletConnectPayment(BasePaymentProvider):
+    identifier = 'walletconnect'
+    verbose_name = _('Ethereum payment')
+    abort_pending_allowed = True
+
+    def _enabled_symbols(self):
+        """Symbols this event has actually enabled, in canonical display
+        order (ETH → USDC → USDT0). Drives public_name and the
+        pre-confirm template — both stay in sync with operator toggles."""
+        order = ('ETH', 'USDC', 'USDT0')
+        return [
+            sym for sym in order
+            if sym in ALL_SYMBOLS
+            and str(self.settings.get(f'token_{sym}', default='True')).lower() in ('true', '1', 'yes')
+        ]
+
+    @property
+    def public_name(self):
+        # Buyer-facing name in Pretix's checkout method picker. Reflects
+        # only the tokens this event has enabled — never lists USDC if
+        # the operator turned it off.
+        symbols = self._english_token_list()
+        return _('Crypto') if not symbols else _('Crypto ({symbols})').format(symbols=symbols)
+
+    def _english_token_list(self) -> str:
+        return _english_list(self._enabled_symbols())
 
     @property
     def settings_form_fields(self):
-        form_fields = OrderedDict(
-            list(super().settings_form_fields.items())
-            + [
-                (
-                    "TOKEN_RATES",
-                    forms.JSONField(
-                        label=_("Token Rate"),
-                        help_text=_(
-                            "JSON field with key = {TOKEN_SYMBOL}_RATE and value = amount for a token in the fiat currency you have chosen. E.g. 'ETH_RATE':4000 means 1 ETH = 4000 in the fiat currency."  # noqa: E501
-                        ),
-                    ),
-                ),
-                # Based on pretix source code, MultipleChoiceField breaks if settings doesnt start with an "_". No idea how this works... # noqa: E501
-                (
-                    "_NETWORKS",
-                    forms.MultipleChoiceField(
-                        label=_("Networks"),
-                        choices=[
-                            (
-                                all_network_verbose_names_to_ids[network_verbose_name],
-                                network_verbose_name,
-                            )
-                            for network_verbose_name in all_network_verbose_names_to_ids
-                        ],
-                        help_text=_(
-                            "The networks to be configured for crypto payments"
-                        ),
-                        widget=forms.CheckboxSelectMultiple(
-                            attrs={"class": "scrolling-multiple-choice"}
-                        ),
-                    ),
-                ),
-                (
-                    "NETWORK_RPC_URL",
-                    forms.JSONField(
-                        label=_("RPC URLs for networks"),
-                        help_text=_(
-                            "JSON field with key = {NETWORK_IDENTIFIER}_RPC_URL and value = url of the network RPC endpoint you are using"  # noqa: E501
-                        ),
-                    ),
-                ),
-            ]
+        base = OrderedDict(list(super().settings_form_fields.items()))
+        base['receive_address'] = forms.CharField(
+            label=_('Receive wallet address (EIP-55)'),
+            max_length=42, min_length=42, required=True,
         )
-
-        form_fields["_NETWORKS"]._as_type = list
-        return form_fields
-
-    def get_token_rates_from_admin_settings(self):
-        return self.settings.get("TOKEN_RATES", as_type=dict, default={})
-
-    def get_networks_chosen_from_admin_settings(self):
-        return set(self.settings.get("_NETWORKS", as_type=list, default=[]))
-
-    def is_allowed(self, request, **kwargs):
-        one_or_more_currencies_configured = (
-            len(self.get_token_rates_from_admin_settings()) > 0
+        base['wc_project_id'] = forms.CharField(
+            label=_('WalletConnect project ID (from cloud.reown.com)'),
+            required=True,
         )
-        # TODO: Check that TOKEN_RATES conforms to a schema.
-        if not one_or_more_currencies_configured:
-            logger.error("No currencies configured")
-
-        at_least_one_unused_address = (
-            WalletAddress.objects.all().unused().for_event(request.event).exists()
+        base['alchemy_api_key'] = forms.CharField(
+            label=_('Alchemy API key (optional; overridden by WC_ALCHEMY_API_KEY env)'),
+            required=False,
+            widget=forms.PasswordInput(render_value=True),
         )
-        if not at_least_one_unused_address:
-            logger.error("No unused wallet addresses left")
-
-        at_least_one_network_configured = all(
-            (
-                len(self.get_networks_chosen_from_admin_settings()) > 0,
-                # TODO: Check that NETWORK_RPC_URL mappings contain all networks selected
-                # TODO: Check that NETWORK_RPC_URL conforms to a schema
-                len(self.settings.NETWORK_RPC_URL) > 0,
+        base['zapper_api_key'] = forms.CharField(
+            label=_('Zapper API key (optional)'),
+            help_text=_(
+                'When set, the payment-options endpoint fetches wallet balances '
+                'via Zapper in a single GraphQL call (~200ms) instead of fanning '
+                'out RPC eth_calls per chain (~2s). RPC is used automatically as '
+                'a fallback if Zapper fails.'
+            ),
+            required=False,
+            widget=forms.PasswordInput(render_value=True),
+        )
+        base['relayer_private_key'] = forms.CharField(
+            label=_('Relayer private key (gasless USDC/USDT0). Overridden by WC_RELAYER_PRIVATE_KEY env.'),
+            required=False,
+            widget=forms.PasswordInput(render_value=True),
+        )
+        base['crypto_discount_percent'] = forms.DecimalField(
+            label=_('Crypto discount (% off the fiat price)'),
+            initial=0, min_value=0, max_value=50, decimal_places=2,
+        )
+        base['payment_recipient'] = forms.CharField(
+            label=_('Merchant wallet address (EIP-55) where crypto payments are sent'),
+            max_length=42, min_length=42, required=True,
+        )
+        # Individual boolean per chain (hierarkey stores bools cleanly)
+        for cid in SUPPORTED_CHAINS:
+            base[f'chain_{cid}'] = forms.BooleanField(
+                label=_('Chain: %s') % CHAIN_METADATA[cid]['name'],
+                required=False, initial=True,
             )
-        )
-        if not at_least_one_network_configured:
-            logger.error("No networks configured")
-
-        return all(
-            (
-                one_or_more_currencies_configured,
-                at_least_one_unused_address,
-                at_least_one_network_configured,
-                super().is_allowed(request),
+        for sym in ALL_SYMBOLS:
+            base[f'token_{sym}'] = forms.BooleanField(
+                label=_('Token: %s') % sym,
+                required=False, initial=True,
             )
+        base['quote_ttl_seconds'] = forms.IntegerField(
+            label=_('Quote TTL (seconds)'),
+            initial=600, min_value=60, max_value=3600,
         )
-
-    @property
-    def payment_form_fields(self):
-        currency_type_choices = ()
-
-        rates = self.get_token_rates_from_admin_settings()
-        network_ids = self.get_networks_chosen_from_admin_settings()
-
-        for token in registry:
-            if token.is_allowed(rates, network_ids):
-                currency_type_choices += token.TOKEN_VERBOSE_NAME_TRANSLATED
-
-        if len(currency_type_choices) == 0:
-            raise ImproperlyConfigured("No currencies configured")
-
-        form_fields = OrderedDict(
-            list(super().payment_form_fields.items())
-            + [
-                (
-                    "currency_type",
-                    forms.ChoiceField(
-                        label=_("Payment currency"),
-                        help_text=_("Select the currency you will use for payment."),
-                        widget=forms.RadioSelect,
-                        choices=currency_type_choices,
-                        initial="ETH",
-                    ),
-                )
-            ]
+        base['min_confirmations'] = forms.IntegerField(
+            label=_('Minimum confirmations'),
+            initial=1, min_value=0, max_value=50,
         )
+        base['support_email'] = forms.EmailField(
+            label=_('Support email for payment issues'),
+            help_text=_(
+                'Shown to buyers if their payment gets stuck. Leave blank to hide the '
+                'support contact block. Admin-side manual verification is available in the '
+                'admin page regardless of this setting.'
+            ),
+            required=False,
+        )
+        return base
 
-        return form_fields
+    def is_allowed(self, request=None, total=None):
+        return bool(self.settings.get('receive_address')) and bool(self.settings.get('wc_project_id'))
 
-    def checkout_confirm_render(self, request):
-        template = get_template("pretix_eth/checkout_payment_confirm.html")
+    def checkout_prepare(self, request: HttpRequest, cart):
+        return True
 
-        return template.render()
+    def payment_form_render(self, request: HttpRequest) -> str:
+        return ''
 
-    def checkout_prepare(self, request, cart):
-        form = self.payment_form(request)
+    def checkout_confirm_render(self, request: HttpRequest, order=None, info_data=None) -> str:
+        if order:
+            # Payment retry/continue — order exists, show full crypto checkout UI
+            from pretix_eth import __version__ as _plugin_version
+            tpl = get_template('pretix_eth/checkout_payment_confirm.html')
+            ctx = {
+                'wc_project_id': self.settings.get('wc_project_id'),
+                'url_prefix': '/plugin/wc',
+                'order_code': order.code,
+                'order_secret': order.secret,
+                # Used by the wc_inject UI to gate insufficient-balance rows
+                # in the asset/network picker. Render as a plain decimal
+                # string ("12.34") — the bundle parses with parseFloat.
+                'order_total_usd': str(order.total),
+                # Buyer's email from the Pretix Order — pre-fills the support
+                # mailto in the wc UI so the buyer doesn't have to retype it.
+                'buyer_email': order.email or '',
+                'support_email': self.settings.get('support_email', default='') or '',
+                # Cache-buster for the bundle + stylesheet. Pretix serves /static/
+                # with a long max-age header; without a version query string,
+                # mobile browsers (and service workers) serve stale copies of
+                # bundle.js/styles.css for days after a plugin update. Bumping
+                # __version__ in pretix_eth/__init__.py busts the cache across
+                # every client. For dev iteration between version bumps, admins
+                # can also force a hard refresh / clear cache.
+                'plugin_version': _plugin_version,
+            }
+            return tpl.render(ctx, request=request)
+        else:
+            # Initial checkout — order not yet created, just confirm payment method.
+            # Pass the enabled-token list so the copy reflects this event's actual
+            # config (won't list USDC if the operator disabled it).
+            tpl = get_template('pretix_eth/checkout_pre_confirm.html')
+            return tpl.render({'enabled_tokens': self._english_token_list()}, request=request)
 
-        if form.is_valid():
-            # currency_type = "<token_symbol> - <network verbose name>" etc.
-            # But request.session would store "<token_symbol> - <network id>"
-            request.session[
-                "payment_currency_type"
-            ] = token_verbose_name_to_token_network_id(
-                form.cleaned_data["currency_type"]
+    def payment_is_valid_session(self, request: HttpRequest) -> bool:
+        return True
+
+    def execute_payment(self, request: HttpRequest, payment):
+        # Redirect directly to the payment confirm page where our React UI loads.
+        # This skips the default Pretix flow (thanks page → pay/change → pay/confirm).
+        order = payment.order
+        org = order.event.organizer.slug
+        evt = order.event.slug
+        return f'/{org}/{evt}/order/{order.code}/{order.secret}/pay/{payment.pk}/confirm'
+
+    def payment_pending_render(self, request: HttpRequest, payment) -> str:
+        tpl = get_template('pretix_eth/pending.html')
+        info = payment.info_data or {}
+        tx = info.get('tx_hash')
+        chain_id = info.get('chain_id')
+        explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
+        return tpl.render({
+            'tx_hash': tx,
+            'explorer_url': f'{explorer}{tx}' if tx else None,
+        })
+
+    def payment_control_render(self, request: HttpRequest, payment) -> str:
+        tpl = get_template('pretix_eth/control.html')
+        info = payment.info_data or {}
+        # Fall back to the X402CompletedOrder row if the OrderPayment.info_data
+        # is missing fields (e.g. historical rows created before we started
+        # mirroring amount/token_symbol/block_number into info_data).
+        chain_id = info.get('chain_id')
+        token_symbol = info.get('token_symbol')
+        amount_raw = info.get('amount')
+        payer = info.get('payer')
+        block_number = info.get('block_number')
+        tx_hash = info.get('tx_hash')
+        if not all([chain_id, token_symbol, amount_raw, payer]):
+            fallback = self._x402_fallback(payment)
+            if fallback:
+                chain_id = chain_id or fallback.get('chain_id')
+                token_symbol = token_symbol or fallback.get('token_symbol')
+                amount_raw = amount_raw or fallback.get('amount')
+                payer = payer or fallback.get('payer')
+                tx_hash = tx_hash or fallback.get('tx_hash')
+
+        # Format the amount. Three cases:
+        #   1. We have a raw integer and a token symbol → divide by decimals.
+        #   2. No raw value but it's a stablecoin → fall back to payment.amount
+        #      (the Pretix OrderPayment amount, stored in event currency), since
+        #      USDC/USDT0 are 1:1 with USD. This covers legacy rows that never
+        #      had crypto_amount populated.
+        #   3. No raw value and not a stable (or unknown token) → omit the row.
+        amount_display = _format_crypto_amount(amount_raw, token_symbol)
+        if amount_display is None and token_symbol in ('USDC', 'USDT0'):
+            try:
+                amount_display = str(payment.amount)
+            except Exception:
+                pass
+
+        explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
+        return tpl.render({
+            'tx_hash': tx_hash,
+            'chain_id': chain_id,
+            'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
+            'token_symbol': token_symbol,
+            'payer': payer,
+            'amount': amount_display,
+            'block_number': block_number,
+            'explorer_url': f'{explorer}{tx_hash}' if tx_hash else None,
+        })
+
+    @staticmethod
+    def _x402_fallback(payment) -> dict:
+        """Look up the matching X402CompletedOrder row (keyed on the Pretix
+        order code) so historical OrderPayment rows with thin info_data still
+        render usefully. Returns an empty dict when there's no match."""
+        try:
+            from pretix_eth.models import X402CompletedOrder
+            from django_scopes import scopes_disabled
+            with scopes_disabled():
+                row = X402CompletedOrder.objects.filter(
+                    event=payment.order.event, pretix_order_code=payment.order.code,
+                ).first()
+            if not row:
+                return {}
+            return {
+                'chain_id': row.chain_id,
+                'token_symbol': row.token_symbol,
+                'amount': row.crypto_amount,
+                'payer': row.payer,
+                'tx_hash': row.tx_hash,
+            }
+        except Exception as e:
+            log.warning('[x402 render] fallback lookup failed for payment %s: %s', payment.pk, e)
+            return {}
+
+    def matching_id(self, payment):
+        return (payment.info_data or {}).get('tx_hash')
+
+    def api_payment_details(self, payment) -> dict:
+        """Populate the `details` field of payments in Pretix's REST API.
+        Without this override, the base class returns `{}` and clients of the
+        Pretix REST API (e.g. devcon's order-confirmation page) can't see any
+        of the on-chain payment data we stored on `info_data`.
+        Falls back to the X402CompletedOrder row for missing fields, same as
+        the control-panel renderer."""
+        info = payment.info_data or {}
+        chain_id = info.get('chain_id')
+        token_symbol = info.get('token_symbol')
+        amount = info.get('amount')
+        payer = info.get('payer')
+        tx_hash = info.get('tx_hash')
+        if not all([chain_id, token_symbol, amount, payer, tx_hash]):
+            fallback = self._x402_fallback(payment)
+            if fallback:
+                chain_id = chain_id or fallback.get('chain_id')
+                token_symbol = token_symbol or fallback.get('token_symbol')
+                amount = amount or fallback.get('amount')
+                payer = payer or fallback.get('payer')
+                tx_hash = tx_hash or fallback.get('tx_hash')
+        return {
+            'tx_hash': tx_hash,
+            'chain_id': chain_id,
+            'token_symbol': token_symbol,
+            'token_address': info.get('token_address'),
+            'amount': amount,
+            'payer': payer,
+            'payment_reference': info.get('payment_reference'),
+            'block_number': info.get('block_number'),
+        }
+
+    def order_pending_mail_render(self, order, payment) -> str:
+        """Insert a crypto-payment recap into Pretix's order confirmation mail
+        (the `{payment_info}` placeholder in the email template). Matches the
+        reference pretix-x402-payment plugin's shape, formatted via our helpers
+        so amounts display in human-readable decimals."""
+        info = payment.info_data or {}
+        chain_id = info.get('chain_id')
+        token_symbol = info.get('token_symbol')
+        amount_raw = info.get('amount')
+        payer = info.get('payer')
+        tx_hash = info.get('tx_hash')
+        # Fall back to the X402CompletedOrder row for any field missing on
+        # OrderPayment.info_data (same defensive read used by the control panel
+        # renderer — covers historical rows and wc_inject rows that didn't
+        # mirror every field).
+        if not all([chain_id, token_symbol, amount_raw, payer, tx_hash]):
+            fallback = self._x402_fallback(payment)
+            if fallback:
+                chain_id = chain_id or fallback.get('chain_id')
+                token_symbol = token_symbol or fallback.get('token_symbol')
+                amount_raw = amount_raw or fallback.get('amount')
+                payer = payer or fallback.get('payer')
+                tx_hash = tx_hash or fallback.get('tx_hash')
+        if not any([chain_id, token_symbol, amount_raw, tx_hash]):
+            return ''
+        # Stablecoins are 1:1 USD — fall back to payment.amount if we never
+        # recorded crypto_amount (historical rows), same logic as the control
+        # panel renderer.
+        amount_display = _format_crypto_amount(amount_raw, token_symbol)
+        if amount_display is None and token_symbol in ('USDC', 'USDT0'):
+            try:
+                amount_display = str(payment.amount)
+            except Exception:
+                pass
+        # Build the recap directly — the `{payment_info}` placeholder in the
+        # order-paid email is processed through `markdown_compile_email`, which
+        # collapses single newlines. Using `\n\n` (paragraph break) between
+        # fields is what makes them render as separate lines in both the HTML
+        # and plain-text email versions.
+        explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
+        chain_name = CHAIN_METADATA.get(chain_id, {}).get('name')
+        tx_url = f'{explorer}{tx_hash}' if tx_hash and explorer else None
+
+        lines: list = []
+        if amount_display:
+            lines.append(
+                f'Amount: {amount_display} {token_symbol}' if token_symbol
+                else f'Amount: {amount_display}'
             )
-            self._update_session_payment_amount(request, cart["total"])
-            return True
+        if chain_name:
+            lines.append(f'Network: {chain_name}')
+        if payer:
+            lines.append(f'Payer: {payer}')
+        if tx_url:
+            lines.append(f'Transaction: {tx_url}')
+        elif tx_hash:
+            lines.append(f'Transaction: {tx_hash}')
+        return '\n\n'.join(lines)
 
+    def refund_control_render(self, request: HttpRequest, refund) -> str:
+        """Render the refund details section on the Pretix order page. The
+        refund's `info` JSON carries the on-chain tx hash + chain id we wrote
+        in `record_pretix_refund`; surface them with an explorer link."""
+        import json
+        try:
+            info = json.loads(refund.info or '{}') if isinstance(refund.info, str) else (refund.info_data or {})
+        except (ValueError, TypeError):
+            info = {}
+        tx_hash = info.get('refund_tx_hash')
+        chain_id = info.get('chain_id')
+        explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
+        tpl = get_template('pretix_eth/refund.html')
+        return tpl.render({
+            'tx_hash': tx_hash,
+            'chain_id': chain_id,
+            'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
+            'explorer_url': f'{explorer}{tx_hash}' if tx_hash and explorer else None,
+        })
+
+    def payment_refund_supported(self, payment):
         return False
 
-    def payment_prepare(self, request: HttpRequest, payment: OrderPayment):
-        form = self.payment_form(request)
-
-        if form.is_valid():
-            # currency_type = "<token_symbol> - <network verbose name>" etc.
-            # But request.session would store "<token_symbol> - <network id>"
-            request.session[
-                "payment_currency_type"
-            ] = token_verbose_name_to_token_network_id(
-                form.cleaned_data["currency_type"]
-            )
-            self._update_session_payment_amount(request, payment.amount)
-            return True
-
+    def payment_partial_refund_supported(self, payment):
         return False
-
-    def payment_is_valid_session(self, request):
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
-        return all(
-            (
-                "payment_currency_type" in request.session,
-                "payment_time" in request.session,
-                "payment_amount" in request.session,
-            )
-        )
-
-    def _payment_is_valid_info(self, payment: OrderPayment) -> bool:
-        # Note: payment_currency_type check already done in token_verbose_name_to_token_network_id()
-        return all(
-            (
-                "currency_type" in payment.info_data,
-                "time" in payment.info_data,
-                "amount" in payment.info_data,
-            )
-        )
-
-    def execute_payment(self, request: HttpRequest, payment: OrderPayment):
-        payment.info_data = {
-            "currency_type": request.session["payment_currency_type"],
-            "time": request.session["payment_time"],
-            "amount": request.session["payment_amount"],
-        }
-        payment.save(update_fields=["info"])
-
-    def _update_session_payment_amount(self, request: HttpRequest, total):
-        token: IToken = all_token_and_network_ids_to_tokens[
-            request.session["payment_currency_type"]
-        ]
-        final_price = token.get_ticket_price_in_token(
-            total, self.get_token_rates_from_admin_settings()
-        )
-
-        request.session["payment_amount"] = final_price
-        request.session["payment_time"] = int(time.time())
-
-    def payment_pending_render(self, request: HttpRequest, payment: OrderPayment):
-        template = get_template("pretix_eth/pending.html")
-
-        payment_is_valid = self._payment_is_valid_info(payment)
-        ctx = {
-            "payment_is_valid": payment_is_valid,
-            "order": payment.order,
-        }
-
-        if not payment_is_valid:
-            return template.render(ctx)
-
-        wallet_address = WalletAddress.objects.get_for_order_payment(
-            payment
-        ).hex_address
-        currency_type = payment.info_data["currency_type"]
-        payment_amount = payment.info_data["amount"]
-        amount_in_ether_or_token = from_wei(payment_amount, "ether")
-
-        # Get payment instructions based on the network type:
-        token: IToken = all_token_and_network_ids_to_tokens[currency_type]
-        instructions = token.payment_instructions(
-            wallet_address, payment_amount, amount_in_ether_or_token
-        )
-
-        ctx.update(instructions)
-        ctx["network_name"] = token.NETWORK_VERBOSE_NAME
-
-        return template.render(ctx)
-
-    def payment_control_render(self, request: HttpRequest, payment: OrderPayment):
-        template = get_template("pretix_eth/control.html")
-
-        wallet_address = WalletAddress.objects.filter(order_payment=payment).first()
-        hex_wallet_address = wallet_address.hex_address if wallet_address else ""
-
-        ctx = {"payment_info": payment.info_data, "wallet_address": hex_wallet_address}
-
-        return template.render(ctx)
-
-    abort_pending_allowed = True
-
-    def payment_refund_supported(self, payment: OrderPayment):
-        return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
-
-    def payment_partial_refund_supported(self, payment: OrderPayment):
-        return self.payment_refund_supported(payment)
-
-    def execute_refund(self, refund: OrderRefund):
-        if refund.payment is None:
-            raise Exception("Invariant: No payment associated with refund")
-
-        wallet_queryset = WalletAddress.objects.filter(order_payment=refund.payment)
-
-        if wallet_queryset.count() != 1:
-            raise Exception(
-                "Invariant: There is not assigned wallet address to this payment"
-            )
-
-        refund.info_data = {
-            "currency_type": refund.payment.info_data["currency_type"],
-            "amount": refund.payment.info_data["amount"],
-            "wallet_address": wallet_queryset.first().hex_address,
-        }
-
-        refund.save(update_fields=["info"])
