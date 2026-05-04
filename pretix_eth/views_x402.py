@@ -404,7 +404,7 @@ def get_ticket_purchase_info(event):
     """
     from pretix.base.models import Item, Quota
     with scopes_disabled():
-        items = Item.objects.filter(event=event, active=True).select_related('category')
+        items = Item.objects.filter(event=event, active=True).select_related('category').prefetch_related('addons')
         tickets = []
         for item in items:
             # Check availability via quotas
@@ -417,6 +417,13 @@ def get_ticket_purchase_info(event):
                     'name': str(var.value),
                     'price': str(var.default_price or item.default_price),
                 })
+            # Categories whose addons are free when bought as children of this ticket
+            # (Pretix `ItemAddOn.price_included=True`). Surfaced so the purchase
+            # endpoint's addon-pricing loop can zero-out matching items without
+            # re-querying the DB per addon.
+            price_included_categories = [
+                a.addon_category_id for a in item.addons.all() if a.price_included
+            ]
             tickets.append({
                 'id': item.pk,
                 'name': str(item.name),
@@ -424,6 +431,8 @@ def get_ticket_purchase_info(event):
                 'available': available,
                 'isAdmission': item.admission,
                 'requireVoucher': item.require_voucher,
+                'category': item.category_id,
+                'priceIncludedCategories': price_included_categories,
                 'variations': variations,
             })
     return {
@@ -538,6 +547,14 @@ def purchase(request):
             'price': str(price), 'variationId': resolved_var_id,
         })
 
+    # Union of addon categories that are free when bought as children of any
+    # ticket in the order (Pretix `ItemAddOn.price_included`). An addon whose
+    # category is in this set is charged $0 regardless of its standalone price.
+    free_addon_categories = set()
+    for t in order_tickets:
+        for cat_id in t['item'].get('priceIncludedCategories') or []:
+            free_addon_categories.add(cat_id)
+
     # Addons (with variation pricing)
     order_addons = []
     for req in body.get('addons') or []:
@@ -552,6 +569,8 @@ def purchase(request):
             addon_price, resolved_var_id = _resolve_variation_price(item, req.get('variationId'))
         except ValueError as e:
             return JsonResponse({'success': False, 'error': str(e)}, status=400)
+        if item.get('category') in free_addon_categories:
+            addon_price = Decimal('0.00')
         subtotal += addon_price * qty
         order_addons.append({
             'item': item, 'quantity': qty,

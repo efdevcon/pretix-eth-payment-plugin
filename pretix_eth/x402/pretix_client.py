@@ -191,6 +191,19 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
             else:
                 price = item.default_price
 
+            # Pretix's `ItemAddOn.price_included` flag means: when this addon is
+            # bought as a child of the parent ticket, the addon is free regardless
+            # of its standalone default_price. Native Pretix checkout enforces this
+            # automatically; we must enforce it here too because we instantiate
+            # OrderPosition directly. Without this, a "free with ticket" scarf
+            # would be charged at its $X default_price.
+            if first_ticket_position is not None and item.category_id is not None:
+                addon_link = first_ticket_position.item.addons.filter(
+                    addon_category=item.category_id,
+                ).first()
+                if addon_link and addon_link.price_included:
+                    price = Decimal('0.00')
+
             qty = int(addon.get('quantity', 1))
             for _ in range(qty):
                 OrderPosition.objects.create(
