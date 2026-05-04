@@ -116,7 +116,7 @@ setup(
     description='Ethereum payment provider plugin for Pretix ticket sales with WalletConnect',
     long_description=long_description,
     long_description_content_type='text/markdown',
-    url='https://github.com/daimo-eth/pretix-eth-payment-plugin',
+    url='https://github.com/efdevcon/pretix-eth-payment-plugin',
     author='Pretix Ethereum Plugin Developers',
     author_email='pretix-eth-payment-plugin@ethereum.org',
     license='Apache Software License',

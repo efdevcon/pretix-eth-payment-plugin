@@ -77,7 +77,7 @@ USDC/USDT0 transfers stay strict — stables don't drift, and the EIP-3009 typed
 ### 1. Install
 
 ```bash
-pip install -e 'git+https://github.com/efdevcon/pretix-eth-payment-plugin-daimo.git@wallet-connect-x402#egg=pretix-eth-payment-plugin'
+pip install -e 'git+https://github.com/efdevcon/pretix-eth-payment-plugin.git@main#egg=pretix-eth-payment-plugin'
 python -m pretix migrate pretix_eth
 ```
 
@@ -144,8 +144,8 @@ These are documented, non-blocking items for a future iteration:
 Requires Python 3.10+ and Node 20+.
 
 ```bash
-git clone https://github.com/efdevcon/pretix-eth-payment-plugin-daimo.git
-cd pretix-eth-payment-plugin-daimo
+git clone https://github.com/efdevcon/pretix-eth-payment-plugin.git
+cd pretix-eth-payment-plugin
 pip install -e '.[dev]'
 
 # Build frontend (WalletConnect checkout UI)
