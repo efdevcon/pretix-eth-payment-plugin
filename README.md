@@ -49,6 +49,11 @@ Same as WalletConnect flow but with an additional `ethPayerSignature` at verify 
 
 USDC/USDT0 transfers stay strict — stables don't drift, and the EIP-3009 typed-data signature commits to an exact value.
 
+### Safe wallet support
+
+- **Custom FE (devcon-next, x402 path):** supported, including multi-sig (e.g. 2/3). The FE bridges through Safe Transaction Service / Messages API to recover the on-chain hash for ETH and the assembled ERC-1271 signature for USDC/USDT0. Considered experimental; the buyer is shown a Safe-aware notice with a 30-min keep-tab-open window.
+- **Pretix-native (wc_inject path):** Safe is **excluded** from the AppKit picker via `excludeWalletIds`. The bundle hasn't been ported yet and a Safe payer would land in a stuck state. Admin manual-verify (`/plugin/x402/admin/verify/`) remains the recovery path for any Safe payment that bypasses the gate.
+
 ## Pricing
 
 - **Stablecoins:** 1 USDC = 1 USD (direct mapping)
@@ -100,6 +105,8 @@ All settings are configurable via the Pretix admin UI (Settings > Payment). No e
 | Token toggles (×3) | No | Enable/disable individual tokens (USDC, USDT0, ETH) |
 | Quote TTL | No | Default 600s (10 min) |
 | Min confirmations | No | Default 1 |
+| Support email | No | Buyer-facing "Need help?" mailto in the checkout UI; empty hides it |
+| Frontend order URL template | No | Overrides the `{url}` placeholder in transactional emails. Use `{code}` and `{secret}` substitutions, e.g. `https://devcon.org/en/tickets/store/order/{code}/{secret}/` |
 
 ### 3. Environment overrides (optional)
 
