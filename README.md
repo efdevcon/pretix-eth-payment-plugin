@@ -52,10 +52,12 @@ USDC/USDT0 transfers stay strict — stables don't drift, and the EIP-3009 typed
 ## Pricing
 
 - **Stablecoins:** 1 USDC = 1 USD (direct mapping)
-- **ETH:** Dual-oracle (Coinbase + Binance). If sources diverge >5%, ETH is temporarily disabled with a user-visible notice
-- **POL:** Dual-oracle (Coinbase + Binance), same divergence logic
-- **Vouchers:** Supported — set/subtract/percent price modes, per-item targeting
-- **Crypto discount:** Configurable percentage off (stacks with vouchers)
+- **ETH:** 4 oracles — Coinbase + **Binance.US** + Kraken + Bitstamp. Quorum logic: largest cluster of ≥2 prices agreeing within 5% wins; rest are dropped. Tolerates one or two oracles being unreachable.
+- **POL:** 3 oracles — Coinbase + Binance.US + CoinGecko, same quorum.
+- **Cache:** Successful quotes cached for 30s (Django cache backend). Failures aren't cached, so a transient outage retries immediately.
+- **Vouchers:** Supported — set/subtract/percent price modes, per-item targeting.
+- **Crypto discount:** Configurable percentage off, stacks with vouchers. Surfaces on the Pretix order as a negative `OrderFee(fee_type='payment')` row for both the WC-native and x402 paths.
+- **Addon `price_included`:** Honored on the x402 path — addons whose parent ticket's `ItemAddOn.price_included=True` are charged $0 regardless of standalone price.
 
 ## Security
 
@@ -67,7 +69,7 @@ USDC/USDT0 transfers stay strict — stables don't drift, and the EIP-3009 typed
 - **Relayer binding:** Before sponsoring gas, the plugin verifies `authorization.to == configured recipient`, `authorization.value >= expected amount`, `authorization.from == intendedPayer`, and `validBefore > now` — an attacker with a valid token cannot redirect funds or underpay
 - Transaction hash is single-use (prevents cross-order replay)
 - Chain, token contract, sender, recipient, and amount all verified on-chain
-- Rate limiting on purchase and verify endpoints
+- Rate limiting on purchase and verify endpoints — verify caps at 120/5min per `paymentReference` and 60/min per IP (sized to fit ~4 minutes of FE 2s polling per payment without false positives)
 - Atomic claim + reserve prevents double-spend race conditions
 - **Tx hash dedup is case-insensitive at read** (`tx_hash__iexact`) and lowercased at write — a mixed-case retry of an already-paid hash is rejected, and the unique-constraint race window between concurrent verifies can't be defeated by case twiddling
 - **Admin manual verify** (`/plugin/x402/admin/verify/`) intentionally bypasses the off-chain `ethPayerSignature` check for stuck-payment recovery — payer-binding falls back to the on-chain `tx.from == intended_payer` enforcement inside `verify_native_eth`. The endpoint is auth-gated by the Pretix API token and intended for operator-only use; the bypass is logged at WARNING for audit. Buyer-facing `/plugin/x402/verify/` keeps the signature requirement.
