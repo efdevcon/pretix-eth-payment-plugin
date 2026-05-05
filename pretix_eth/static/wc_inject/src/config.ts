@@ -45,6 +45,17 @@ const FEATURED_WALLET_IDS = [
   'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96', // MetaMask
 ]
 
+// Wallets explicitly hidden from the AppKit picker. Safes are excluded here
+// because the wc_inject flow doesn't bridge through Safe Tx Service / Safe
+// Messages API to recover the on-chain hash for multisigs (the devcon-next
+// FE does, but this legacy bundle hasn't been upgraded). A buyer who paid
+// with a Safe would see the tx confirm on-chain but the page never
+// recover — leaving the order stuck. Hide the option until that path is
+// implemented; admin manual-verify remains the recovery channel.
+const EXCLUDED_WALLET_IDS = [
+  '225affb176778569276e484e1b92637ad061b01e13a048b35a9d280c3b58970f', // Safe
+]
+
 export function initAppKit(projectId: string) {
   const wagmiAdapter = new WagmiAdapter({
     projectId,
@@ -67,6 +78,7 @@ export function initAppKit(projectId: string) {
       socials: [],
     },
     featuredWalletIds: FEATURED_WALLET_IDS,
+    excludeWalletIds: EXCLUDED_WALLET_IDS,
   })
 
   return { wagmiAdapter, appKit, open: () => appKit.open() }
