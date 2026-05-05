@@ -155,6 +155,17 @@ class WalletConnectPayment(BasePaymentProvider):
             ),
             required=False,
         )
+        base['frontend_order_url_template'] = forms.CharField(
+            label=_('Frontend order URL template (overrides {url} in emails)'),
+            help_text=_(
+                'When set, the {url} placeholder in transactional emails (order placed, '
+                'paid, etc.) is replaced with this template. Use {code} and {secret} as '
+                'substitution tokens. Example: '
+                'https://devcon.org/en/tickets/store/order/{code}/{secret}/  — leave '
+                'blank to keep the default Pretix self-service URL.'
+            ),
+            required=False,
+        )
         return base
 
     def calculate_fee(self, price: Decimal) -> Decimal:
