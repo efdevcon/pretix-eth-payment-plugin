@@ -55,6 +55,30 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 .wc-small { font-size: 13px; color: #666; }
 .wc-pending { padding: 16px; }
 
+/* Marigold "Need help? Contact support" pill (matches Devcon checkout's
+   .support-pill — Figma node 4254:15818). Full width inside the wc card. */
+.wc-support-pill {
+  width: 100%;
+  background: #fff0e6;
+  padding: 8px 16px;
+  border-radius: 8px;
+  margin-top: 16px;
+  box-sizing: border-box;
+}
+.wc-support-pill p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 20px;
+  color: #160b2b;
+  text-align: center;
+}
+.wc-support-pill a {
+  color: #7235ed;
+  text-decoration: underline;
+}
+.wc-support-pill a strong { font-weight: 700; }
+.wc-support-pill a:hover { text-decoration: none; }
+
 .wc-wallet-header {
   display: flex;
   justify-content: space-between;

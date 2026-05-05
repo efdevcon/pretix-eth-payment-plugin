@@ -839,11 +839,14 @@ export function CheckoutStep({
         const subject = `Payment help for order ${config.orderCode}`
         const mailtoHref = `mailto:${config.supportEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n'))}`
         return (
-          <p className="wc-small" style={{ marginTop: 16, textAlign: 'center', color: '#666' }}>
-            Need help?{' '}
-            <a href={mailtoHref}>Contact support</a>
-            {' '}— we&apos;ve pre-filled the details we know.
-          </p>
+          <div className="wc-support-pill">
+            <p>
+              Need help?{' '}
+              <a href={mailtoHref}>
+                <strong>Contact support</strong>
+              </a>
+            </p>
+          </div>
         )
       })()}
     </div>
