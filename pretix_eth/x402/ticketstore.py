@@ -245,10 +245,18 @@ def fail_refund(*, event, payment_reference: str, error: str) -> bool:
 # Rate limiting (Task 16)
 # ---------------------------------------------------------------------------
 
-RATE_LIMIT_REF_WINDOW = timedelta(hours=1)
-RATE_LIMIT_REF_MAX = 10
+# Per-payment-reference verify budget. The FE polls verify at ~2s intervals
+# while waiting for the broadcast tx to mine + reach min_confirmations. A
+# Mainnet relayer tx routinely takes 20-40 polls to settle (slow propagation,
+# 12s block time, 1+ confirmations). Old limit was 10/hour and tripped on the
+# first slow USDC-mainnet payment, leaving Retry stuck at 429 for a full hour.
+# 120/5min gives ample headroom (~4 minutes of continuous 2s polling) AND
+# unsticks any user within 5 minutes if it does trip.
+RATE_LIMIT_REF_WINDOW = timedelta(minutes=5)
+RATE_LIMIT_REF_MAX = 120
+# IP cap is the abuse gate. Stays tight.
 RATE_LIMIT_IP_WINDOW = timedelta(minutes=1)
-RATE_LIMIT_IP_MAX = 30
+RATE_LIMIT_IP_MAX = 60
 RATE_LIMIT_PURCHASE_WINDOW = timedelta(minutes=1)
 RATE_LIMIT_PURCHASE_MAX = 5
 RATE_LIMIT_CLEANUP_AGE = timedelta(hours=2)

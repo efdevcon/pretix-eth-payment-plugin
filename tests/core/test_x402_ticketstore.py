@@ -218,19 +218,35 @@ def test_finalize_refund(event):
 
 @pytest.mark.django_db
 def test_verify_rate_limit_enforced():
-    # Per-ref limit: 10/hour, no 2 within 10s
-    for _ in range(10):
-        allowed = check_verify_rate_limit(payment_reference='refA', client_ip='1.2.3.4')
+    # Per-ref limit (see RATE_LIMIT_REF_MAX): allow up to N attempts in the
+    # window, block N+1. Use distinct IPs per call so we exercise the per-ref
+    # cap, not the per-IP cap (which is intentionally tighter).
+    from pretix_eth.x402.ticketstore import RATE_LIMIT_REF_MAX
+    for i in range(RATE_LIMIT_REF_MAX):
+        allowed = check_verify_rate_limit(payment_reference='refA', client_ip=f'10.0.0.{i % 250}')
         assert allowed
-    # 11th should be blocked
-    assert check_verify_rate_limit(payment_reference='refA', client_ip='1.2.3.4') is False
+    assert check_verify_rate_limit(payment_reference='refA', client_ip='10.99.99.99') is False
 
 
 @pytest.mark.django_db
 def test_verify_rate_limit_independent_per_ref():
-    for _ in range(10):
-        assert check_verify_rate_limit(payment_reference='refB', client_ip='1.2.3.4')
-    assert check_verify_rate_limit(payment_reference='refC', client_ip='1.2.3.4')
+    from pretix_eth.x402.ticketstore import RATE_LIMIT_REF_MAX
+    # Same IP-distribution trick — focus this test on per-ref independence.
+    for i in range(RATE_LIMIT_REF_MAX):
+        assert check_verify_rate_limit(payment_reference='refB', client_ip=f'10.1.0.{i % 250}')
+    # A fresh ref + fresh IP succeeds.
+    assert check_verify_rate_limit(payment_reference='refC', client_ip='9.9.9.9')
+
+
+@pytest.mark.django_db
+def test_verify_rate_limit_per_ip_cap():
+    # Independent of ref: hammer from one IP across many refs and the per-IP
+    # cap (RATE_LIMIT_IP_MAX) trips first.
+    from pretix_eth.x402.ticketstore import RATE_LIMIT_IP_MAX
+    ip = '7.7.7.7'
+    for i in range(RATE_LIMIT_IP_MAX):
+        assert check_verify_rate_limit(payment_reference=f'ref-ip-{i}', client_ip=ip)
+    assert check_verify_rate_limit(payment_reference='ref-ip-final', client_ip=ip) is False
 
 
 @pytest.mark.django_db

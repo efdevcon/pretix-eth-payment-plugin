@@ -21,7 +21,10 @@ ETH_PRICE_CACHE_KEY = 'pretix_eth:price:eth'
 POL_PRICE_CACHE_KEY = 'pretix_eth:price:pol'
 
 COINBASE_URL = 'https://api.coinbase.com/v2/prices/ETH-USD/spot'
-BINANCE_URL = 'https://api.binance.com/api/v3/ticker/price?symbol=ETHUSDT'
+# api.binance.us instead of api.binance.com — the .com endpoint returns HTTP 451
+# from US-hosted prod, while api.binance.us responds globally with the same
+# response shape. No geo-aware config needed.
+BINANCE_URL = 'https://api.binance.us/api/v3/ticker/price?symbol=ETHUSDT'
 KRAKEN_ETH_URL = 'https://api.kraken.com/0/public/Ticker?pair=ETHUSD'
 BITSTAMP_ETH_URL = 'https://www.bitstamp.net/api/v2/ticker/ethusd/'
 MAX_DIVERGENCE_PCT = 5.0
@@ -200,7 +203,7 @@ def build_quote(*, order_code: str, order_total_usd: Decimal,
 # ---------------------------------------------------------------------------
 
 COINBASE_POL_URL = 'https://api.coinbase.com/v2/prices/POL-USD/spot'
-BINANCE_POL_URL = 'https://api.binance.com/api/v3/ticker/price?symbol=POLUSDT'
+BINANCE_POL_URL = 'https://api.binance.us/api/v3/ticker/price?symbol=POLUSDT'
 # Kraken doesn't list POL/USD spot. CoinGecko's free public endpoint returns
 # (rebranded MATIC=) POL under the `polygon-ecosystem-token` id.
 COINGECKO_POL_URL = (
