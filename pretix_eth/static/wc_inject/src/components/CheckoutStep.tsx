@@ -281,14 +281,31 @@ async function discoverTxByNonce(opts: {
   payer: `0x${string}`
   expectedNonce: number
   signal: { aborted: boolean }
+  /** Block number captured immediately BEFORE the wallet was asked to sign.
+   *  Used as the lower bound for the block walk so we don't miss txs that
+   *  mined while the user was still confirming in their wallet. Without this
+   *  we'd anchor to discovery-start instead, which on fast chains (Base,
+   *  Arbitrum) can already be 15–25 blocks past the broadcast — far enough
+   *  that a `head - 5` lookback never finds the tx. */
+  preSendBlock?: bigint
 }): Promise<`0x${string}` | undefined> {
-  const { wagmiConfig, chainId, payer, expectedNonce, signal } = opts
+  const { wagmiConfig, chainId, payer, expectedNonce, signal, preSendBlock } = opts
   // eslint-disable-next-line no-console
-  console.info('[wc_inject] discoverTxByNonce starting', { chainId, payer, expectedNonce })
+  console.info('[wc_inject] discoverTxByNonce starting', { chainId, payer, expectedNonce, preSendBlock: preSendBlock?.toString() ?? null })
   const startBlock = await getBlockNumber(wagmiConfig, { chainId }).catch(e => { console.info('[wc_inject] getBlockNumber(start) failed', e); return null })
   // eslint-disable-next-line no-console
   console.info('[wc_inject] discoverTxByNonce startBlock', { chainId, startBlock: startBlock?.toString() ?? null })
-  let walkFrom = startBlock != null ? startBlock - 5n : null
+  // Anchor the walk to whichever is OLDER: the pre-send block (authoritative
+  // when present) or `startBlock - 50` (defensive fallback for fast chains
+  // when we couldn't capture the pre-send head). 50-block buffer covers ~100s
+  // on Base / 12s on Arbitrum / 10min on mainnet — plenty for a wallet UI
+  // delay even on the slowest path.
+  let walkFrom: bigint | null = null
+  if (preSendBlock != null) {
+    walkFrom = preSendBlock - 1n
+  } else if (startBlock != null) {
+    walkFrom = startBlock - 50n
+  }
   while (!signal.aborted) {
     await new Promise(r => setTimeout(r, 3000))
     if (signal.aborted) return undefined
@@ -513,6 +530,18 @@ export function CheckoutStep({
   }): Promise<`0x${string}`> {
     expectedTxRef.current = { payer: args.payer, chainId: args.chainId, expectedNonce: args.expectedNonce }
 
+    // Snapshot the chain head BEFORE asking the wallet to sign. The block
+    // walk in discoverTxByNonce uses this as the lower bound — without it,
+    // the anchor defaults to discovery-start (post-grace), missing any tx
+    // that mined while the user was still confirming. On fast chains (Base,
+    // Arbitrum) the gap is easily 15–25 blocks and discovery silently fails.
+    let preSendBlock: bigint | undefined
+    try {
+      preSendBlock = await getBlockNumber(wagmiConfig, { chainId: args.chainId })
+    } catch {
+      preSendBlock = undefined
+    }
+
     const startedAt = Date.now()
     let resolved = false
     let resolveOuter!: (h: `0x${string}`) => void
@@ -591,6 +620,7 @@ export function CheckoutStep({
             payer: args.payer,
             expectedNonce: args.expectedNonce!,
             signal: discoverySignal,
+            preSendBlock,
           })
           if (found) {
             finishFromRecovery(found, 'discovery')
