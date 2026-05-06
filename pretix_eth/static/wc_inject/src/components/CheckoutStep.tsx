@@ -290,11 +290,7 @@ async function discoverTxByNonce(opts: {
   preSendBlock?: bigint
 }): Promise<`0x${string}` | undefined> {
   const { wagmiConfig, chainId, payer, expectedNonce, signal, preSendBlock } = opts
-  // eslint-disable-next-line no-console
-  console.info('[wc_inject] discoverTxByNonce starting', { chainId, payer, expectedNonce, preSendBlock: preSendBlock?.toString() ?? null })
-  const startBlock = await getBlockNumber(wagmiConfig, { chainId }).catch(e => { console.info('[wc_inject] getBlockNumber(start) failed', e); return null })
-  // eslint-disable-next-line no-console
-  console.info('[wc_inject] discoverTxByNonce startBlock', { chainId, startBlock: startBlock?.toString() ?? null })
+  const startBlock = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
   // Anchor the walk to whichever is OLDER: the pre-send block (authoritative
   // when present) or `startBlock - 50` (defensive fallback for fast chains
   // when we couldn't capture the pre-send head). 50-block buffer covers ~100s
@@ -314,21 +310,15 @@ async function discoverTxByNonce(opts: {
       latestNonce = await getTransactionCount(wagmiConfig, {
         address: payer, blockTag: 'latest', chainId,
       })
-    } catch (e) {
-      // eslint-disable-next-line no-console
-      console.info('[wc_inject] getTransactionCount failed', { chainId, error: e })
+    } catch {
       continue
     }
-    // eslint-disable-next-line no-console
-    console.info('[wc_inject] nonce poll', { chainId, latestNonce, expectedNonce, advanced: latestNonce > expectedNonce })
     if (latestNonce <= expectedNonce) continue
 
     const head = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
     if (head == null) continue
     const fromBlock = walkFrom ?? head - 25n
     walkFrom = head + 1n
-    // eslint-disable-next-line no-console
-    console.info('[wc_inject] walking blocks', { chainId, fromBlock: fromBlock.toString(), head: head.toString() })
     for (let bn = fromBlock; bn <= head; bn++) {
       if (signal.aborted) return undefined
       let txs: Array<{ from: string; nonce: number; hash: string }> = []
@@ -337,21 +327,13 @@ async function discoverTxByNonce(opts: {
           blockNumber: bn, includeTransactions: true, chainId,
         })
         txs = (block?.transactions as Array<{ from: string; nonce: number; hash: string }>) ?? []
-      } catch (e) {
-        // eslint-disable-next-line no-console
-        console.info('[wc_inject] getBlock failed', { chainId, blockNumber: bn.toString(), error: e })
+      } catch {
         continue
       }
-      // eslint-disable-next-line no-console
-      console.info('[wc_inject] block scanned', { chainId, blockNumber: bn.toString(), txCount: txs.length })
       const match = txs.find(
         t => t?.from?.toLowerCase() === payer.toLowerCase() && Number(t?.nonce) === expectedNonce
       )
-      if (match?.hash) {
-        // eslint-disable-next-line no-console
-        console.info('[wc_inject] match found', { chainId, blockNumber: bn.toString(), hash: match.hash })
-        return match.hash as `0x${string}`
-      }
+      if (match?.hash) return match.hash as `0x${string}`
     }
   }
   return undefined
@@ -938,8 +920,10 @@ export function CheckoutStep({
 
       <h3 style={{ marginTop: 0 }}>Select payment method</h3>
 
-      {/* DEBUG — REMOVE AFTER TESTING. Forces the recovery wrapper into a
-          specific path so we can validate each behaviour without rebuilding. */}
+      {/* DEBUG — uncomment to re-test the tx-hash recovery paths without
+          rebuilding new code. Forces the recovery wrapper into a specific
+          path. The supporting state (simulateMode), wrapper branches, and
+          .wc-debug-* CSS are left in place so this is a one-block re-enable.
       <div className="wc-debug-panel">
         <div className="wc-debug-label">DEBUG · simulate tx-hash recovery</div>
         <div className="wc-debug-options">
@@ -962,6 +946,7 @@ export function CheckoutStep({
           ))}
         </div>
       </div>
+      */}
 
       {!ethAvailable && ethDisabledReason && (
         <div className="wc-notice">
