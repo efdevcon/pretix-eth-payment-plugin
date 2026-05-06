@@ -7,6 +7,8 @@ import {
   useSendTransaction,
   useConfig,
 } from 'wagmi'
+import { useWalletInfo } from '@reown/appkit/react'
+import { classifyConnection, walletLocationPhrase } from '../walletConnection'
 import {
   waitForTransactionReceipt,
   getTransaction,
@@ -302,7 +304,10 @@ export function CheckoutStep({
   // (X/N)" instead of an opaque spinner during the verify poll.
   const [confirmProgress, setConfirmProgress] = useState<{ current: number; required: number } | null>(null)
 
-  const { address, chainId: walletChainId } = useAccount()
+  const { address, chainId: walletChainId, connector } = useAccount()
+  const { walletInfo } = useWalletInfo()
+  const connectionKind = classifyConnection(connector)
+  const connectedWalletName = walletInfo?.name || connector?.name
   const { signMessageAsync } = useSignMessage()
   const { switchChainAsync } = useSwitchChain()
   const { writeContractAsync } = useWriteContract()
@@ -452,10 +457,37 @@ export function CheckoutStep({
       const q: Quote = await qr.json()
       setQuote(q)
 
-      // Step 4: Switch chain if needed
+      // Step 4: Switch chain if needed.
+      //
+      // Some WalletConnect wallets (Trust Wallet, Bitget Mobile) only show
+      // the FIRST chain in the handshake UI, so the buyer's session ends
+      // up scoped to Ethereum only. When we ask to switch to another
+      // chain the wallet returns DISAPPROVED_CHAINS / 5100 (or just no-
+      // ops) and `switchChainAsync` throws. The downstream
+      // `sendTransactionAsync({ chainId })` / `writeContractAsync({
+      // chainId })` will also throw with a chain-mismatch error so the
+      // wrong-chain payment can never go through — but the buyer sees a
+      // raw "user rejected request" message and has no idea what's
+      // going on. Catch the switch error specifically and surface a
+      // remediation: disconnect, reconnect, approve all networks during
+      // the handshake.
       if (walletChainId !== q.chain_id) {
         setStatus('switching')
-        await switchChainAsync({ chainId: q.chain_id })
+        try {
+          await switchChainAsync({ chainId: q.chain_id })
+        } catch (switchErr) {
+          const isWc = connectionKind === 'walletConnect'
+          // `Quote` carries chain_id only, not the human name — pull the
+          // friendly name off the user's picked option (same payload that
+          // built the quote, present in the same scope) and fall back to
+          // the chain id if the option somehow isn't available.
+          const chainName = picked?.chain_name ?? `chain ${q.chain_id}`
+          throw new Error(
+            isWc
+              ? `Your wallet refused to switch to ${chainName}. This usually means the WalletConnect session was approved for Ethereum only. Disconnect (button at the top), reconnect, and approve all networks listed in your wallet's prompt — then retry the payment.`
+              : `Couldn't switch your wallet to ${chainName}. Please switch manually in your wallet and try again.`,
+          )
+        }
       }
 
       // Step 5: Send tx
@@ -530,11 +562,15 @@ export function CheckoutStep({
           console.info('[wc_inject] tx replaced/sped-up:', txHash, '→', minedHash)
         }
         if (result.cancelled) {
-          throw new Error('Transaction was cancelled in your wallet — please retry.')
+          throw new Error(`Transaction was cancelled ${walletLocationPhrase(connectionKind, connectedWalletName)} — please retry.`)
         }
       } catch (e) {
         const msg = (e as Error).message ?? ''
-        if (msg.includes('cancelled in your wallet')) throw e
+        // Match the cancellation prefix produced just above (the suffix is
+        // wallet-specific now — "in MetaMask", "in Rainbow on your phone",
+        // etc. — so the old `includes('cancelled in your wallet')` check
+        // would silently miss it).
+        if (msg.startsWith('Transaction was cancelled')) throw e
         // Otherwise: indexer lag / network blip — fall through; pollVerify's
         // retry loop will pick it up. We keep `minedHash = txHash` since we
         // weren't able to detect a replacement.
@@ -566,14 +602,15 @@ export function CheckoutStep({
     return `Pay: ${formatBalance(raw.toString(), decimals)} ${picked.symbol} on ${picked.chain_name}`
   }
 
+  const where = walletLocationPhrase(connectionKind, connectedWalletName)
   const buttonLabel = (() => {
     switch (status) {
       case 'idle': return idlePayLabel()
       case 'challenge': return 'Preparing\u2026'
-      case 'signing-challenge': return 'Sign message in wallet\u2026'
+      case 'signing-challenge': return `Sign message ${where}\u2026`
       case 'quoting': return 'Creating quote\u2026'
       case 'switching': return 'Switching chain\u2026'
-      case 'signing-tx': return 'Confirm payment in wallet\u2026'
+      case 'signing-tx': return `Confirm payment ${where}\u2026`
       case 'verifying':
         // Once the backend has reported `confirmations`, surface the
         // progress fraction so users see motion instead of a stalled spinner

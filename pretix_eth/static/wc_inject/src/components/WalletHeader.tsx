@@ -1,18 +1,71 @@
-import { useAccount, useDisconnect } from 'wagmi'
+import { useState } from 'react'
+import { useAccount, useDisconnect, useEnsName } from 'wagmi'
+import { mainnet } from 'viem/chains'
+import { useWalletInfo } from '@reown/appkit/react'
+import { classifyConnection, connectionTypeLabel } from '../walletConnection'
 
 export function WalletHeader({ disabled = false }: { disabled?: boolean }) {
-  const { address } = useAccount()
+  const { address, connector } = useAccount()
+  const { walletInfo } = useWalletInfo()
   const { disconnect } = useDisconnect()
+  // Some wallets (Bitget chronically, but it's a generic problem with
+  // self-hosted icon CDNs) return an `icon` URL that 4xxs or times out;
+  // without a fallback the user sees the browser's broken-image glyph.
+  // Track the failed URL so we can hide the <img> on subsequent renders.
+  const [iconLoadFailedFor, setIconLoadFailedFor] = useState<string | null>(null)
+  // Reverse-resolve the connected address to an ENS name on mainnet.
+  // Pinned to chainId=1 regardless of which chain the user is paying on
+  // because `.eth` reverse records only live on mainnet. Wagmi caches the
+  // result via React Query, so this fires once per address.
+  const { data: ensName } = useEnsName({
+    address,
+    chainId: mainnet.id,
+    query: { enabled: Boolean(address) },
+  })
 
   if (!address) return null
 
   const short = `${address.slice(0, 6)}...${address.slice(-4)}`
+  const displayName = ensName || short
+  // Reown's `useWalletInfo` returns the actual peer wallet over a
+  // WalletConnect session (e.g. "Rainbow", "MetaMask Mobile") rather than
+  // the generic "WalletConnect" connector name. For injected connections
+  // it mirrors the extension's announced metadata. May be undefined for a
+  // brief window right after a restored session reconnects — fall back to
+  // the connector's own name in that case.
+  const walletName = walletInfo?.name || connector?.name
+  const walletIcon = walletInfo?.icon
+  const kind = classifyConnection(connector)
+  const typeLabel = connectionTypeLabel(kind)
 
   return (
     <div className="wc-wallet-header">
-      <span className="wc-small">
-        Connected: <code>{short}</code>
-      </span>
+      <div className="wc-wallet-header-info">
+        {walletIcon && iconLoadFailedFor !== walletIcon && (
+          <img
+            src={walletIcon}
+            alt={walletName ?? 'wallet'}
+            className="wc-wallet-header-icon"
+            onError={() => setIconLoadFailedFor(walletIcon)}
+          />
+        )}
+        <div className="wc-wallet-header-meta">
+          {walletName && <span className="wc-wallet-header-name">{walletName}</span>}
+          <span className="wc-small">
+            {/* No "Connected:" prefix — the wallet's own icon to the left
+                already conveys the connected state, and the pill below it
+                says HOW the wallet is reached. */}
+            <code title={address}>{displayName}</code>
+            {/* Colored pill that calls out the connection mode at a glance
+                — signals "look at your browser" (injected) vs "look at
+                your phone" (WC) vs "Safe app" (multisig). data-kind drives
+                the tint via CSS in styles.css. */}
+            <span className="wc-wallet-header-type" data-kind={kind}>
+              {typeLabel}
+            </span>
+          </span>
+        </div>
+      </div>
       <button
         className="wc-link-button"
         onClick={() => disconnect()}

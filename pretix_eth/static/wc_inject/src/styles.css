@@ -87,6 +87,65 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   margin-bottom: 12px;
   border-bottom: 1px solid #eee;
 }
+.wc-wallet-header-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.wc-wallet-header-icon {
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+.wc-wallet-header-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  line-height: 1.25;
+}
+.wc-wallet-header-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111;
+}
+/* Connection-type pill — colored chip per connection mode so a returning
+   user can spot at a glance whether the next signature popup is in their
+   browser, on their phone, in Coinbase Wallet, or queued through Safe.
+   Mistaking a stale WC session for an injected one is the #1 source of
+   "I clicked sign and nothing happened" tickets; the color cue defuses it. */
+.wc-wallet-header-type {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.1px;
+  background: rgba(0, 0, 0, 0.06);
+  color: #555;
+}
+.wc-wallet-header-type[data-kind='injected'] {
+  background: #dbeafe;  /* slate/blue — "look at your browser" */
+  color: #1d4ed8;
+}
+.wc-wallet-header-type[data-kind='walletConnect'] {
+  background: #fef3c7;  /* amber — "look at your phone" */
+  color: #92400e;
+}
+.wc-wallet-header-type[data-kind='coinbaseWallet'] {
+  background: #dbeafe;  /* Coinbase brand blue */
+  color: #1d4ed8;
+}
+.wc-wallet-header-type[data-kind='safe'] {
+  background: #f3e8ff;  /* Safe brand purple */
+  color: #7c3aed;
+}
+/* `.wc-pre-sign-hint` was removed — the Pay button label already swaps to
+   the status string ("Sign message in Rainbow on your phone…") during a
+   flow, so a separate banner just duplicated the same text. */
 
 .wc-link-button {
   background: none;
