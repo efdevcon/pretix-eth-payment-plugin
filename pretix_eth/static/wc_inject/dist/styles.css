@@ -86,6 +86,20 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   display: flex;
   gap: 8px;
   align-items: stretch;
+  flex-wrap: wrap;
+}
+
+/* Primary action — sized to match the input height and float to the right
+   on wide rows; falls under the input on narrow viewports so the label
+   stays readable. */
+.wc-recovery-submit {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+@media (max-width: 480px) {
+  .wc-recovery-submit {
+    flex: 1 1 100%;
+  }
 }
 
 .wc-recovery-input {

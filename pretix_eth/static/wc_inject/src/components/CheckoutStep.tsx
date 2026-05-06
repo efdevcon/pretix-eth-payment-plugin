@@ -1132,11 +1132,11 @@ export function CheckoutStep({
             />
             <button
               type="button"
-              className="btn btn-default"
+              className="btn btn-primary wc-recovery-submit"
               onClick={submitManualHash}
               disabled={manualHashSubmitting || !manualHashInput.trim()}
             >
-              {manualHashSubmitting ? 'Verifying…' : 'Verify hash'}
+              {manualHashSubmitting ? 'Verifying payment…' : 'Verify payment'}
             </button>
           </div>
           {manualHashError && <div className="wc-recovery-error">{manualHashError}</div>}
