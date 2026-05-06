@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   useAccount,
   useSignMessage,
@@ -263,6 +263,65 @@ async function waitForReceiptOrReplacement(opts: {
   return { hash: winner, cancelled }
 }
 
+/**
+ * Standalone nonce-discovery: walks blocks looking for any tx mined from
+ * `payer` at `expectedNonce`. Used as a tx-hash recovery path for wallets
+ * that broadcast successfully but fail to return the hash via WC (Binance
+ * Wallet macOS being the canonical example). Since we capture the nonce
+ * BEFORE asking the wallet to sign, any matching mined tx is unambiguously
+ * the tx the user just authorized — works for both ETH and ERC20 transfers
+ * (same payer, same nonce, regardless of contract data).
+ *
+ * Loops forever until cancelled via `signal.aborted`. Caller is responsible
+ * for racing this against the wallet promise + a timeout.
+ */
+async function discoverTxByNonce(opts: {
+  wagmiConfig: Parameters<typeof waitForTransactionReceipt>[0]
+  chainId: number
+  payer: `0x${string}`
+  expectedNonce: number
+  signal: { aborted: boolean }
+}): Promise<`0x${string}` | undefined> {
+  const { wagmiConfig, chainId, payer, expectedNonce, signal } = opts
+  const startBlock = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
+  let walkFrom = startBlock != null ? startBlock - 5n : null
+  while (!signal.aborted) {
+    await new Promise(r => setTimeout(r, 3000))
+    if (signal.aborted) return undefined
+    let latestNonce: number
+    try {
+      latestNonce = await getTransactionCount(wagmiConfig, {
+        address: payer, blockTag: 'latest', chainId,
+      })
+    } catch {
+      continue
+    }
+    if (latestNonce <= expectedNonce) continue
+
+    const head = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
+    if (head == null) continue
+    const fromBlock = walkFrom ?? head - 25n
+    walkFrom = head + 1n
+    for (let bn = fromBlock; bn <= head; bn++) {
+      if (signal.aborted) return undefined
+      let txs: Array<{ from: string; nonce: number; hash: string }> = []
+      try {
+        const block = await getBlock(wagmiConfig, {
+          blockNumber: bn, includeTransactions: true, chainId,
+        })
+        txs = (block?.transactions as Array<{ from: string; nonce: number; hash: string }>) ?? []
+      } catch {
+        continue
+      }
+      const match = txs.find(
+        t => t?.from?.toLowerCase() === payer.toLowerCase() && Number(t?.nonce) === expectedNonce
+      )
+      if (match?.hash) return match.hash as `0x${string}`
+    }
+  }
+  return undefined
+}
+
 export function CheckoutStep({
   config,
   options,
@@ -303,6 +362,27 @@ export function CheckoutStep({
   // `confirmations_required` fields. Used to render "Confirming on-chain
   // (X/N)" instead of an opaque spinner during the verify poll.
   const [confirmProgress, setConfirmProgress] = useState<{ current: number; required: number } | null>(null)
+
+  // Hash-recovery escape hatch. Some wallets (Binance Wallet macOS;
+  // intermittently Bitget Mobile / TokenPocket) broadcast the tx but never
+  // return the hash via WC, leaving sendTransactionAsync hanging forever.
+  // The recovery wrapper races wallet vs nonce-discovery vs manual paste.
+  const [recoveryStatus, setRecoveryStatus] = useState<null | 'discovery' | 'manual'>(null)
+  const [manualHashInput, setManualHashInput] = useState('')
+  const [manualHashError, setManualHashError] = useState<string | null>(null)
+  const [manualHashSubmitting, setManualHashSubmitting] = useState(false)
+  const manualHashResolverRef = useRef<((hash: `0x${string}`) => void) | null>(null)
+  // Captured at recovery start so submitManualHash can validate the pasted
+  // hash against the right payer + expected nonce before accepting it.
+  const expectedTxRef = useRef<{ payer: string; chainId: number; expectedNonce: number | undefined } | null>(null)
+
+  // ── DEBUG: tx-hash recovery simulation ──
+  // TEMPORARY — REMOVE AFTER TESTING. Lets us force the recovery wrapper
+  // into one of three modes without touching the code each time:
+  //   normal: wallet returns hash → WALLET path wins
+  //   no-hash: wallet hash is discarded → DISCOVERY path should win
+  //   no-hash-no-discovery: discovery also stubbed → MANUAL path is the only way
+  const [simulateMode, setSimulateMode] = useState<'normal' | 'no-hash' | 'no-hash-no-discovery'>('normal')
 
   const { address, chainId: walletChainId, connector } = useAccount()
   const { walletInfo } = useWalletInfo()
@@ -396,6 +476,174 @@ export function CheckoutStep({
     }
     setConfirmProgress(null)
     throw new Error('Verification timed out. Try submitting the transaction hash manually below.')
+  }
+
+  // ── Send-with-recovery ──
+  // Wraps the wallet's send call (sendTransactionAsync for ETH,
+  // writeContractAsync for ERC20) so wallets that broadcast but fail to
+  // return the hash via WC don't strand the UI. Three paths race:
+  //   1. Wallet → returns hash via WC/injected (the happy path)
+  //   2. Nonce-discovery → after 20s grace, walks blocks looking for any
+  //      mined tx from `payer` at `expectedNonce`. Up to 60s total.
+  //   3. Manual hash entry → after the auto window expires, an input
+  //      surfaces so the buyer can paste the hash from their wallet.
+  async function sendWithRecovery(args: {
+    walletSend: () => Promise<string>
+    payer: `0x${string}`
+    chainId: number
+    expectedNonce: number | undefined
+  }): Promise<`0x${string}`> {
+    expectedTxRef.current = { payer: args.payer, chainId: args.chainId, expectedNonce: args.expectedNonce }
+
+    const startedAt = Date.now()
+    let resolved = false
+    let resolveOuter!: (h: `0x${string}`) => void
+    let rejectOuter!: (e: unknown) => void
+    const result = new Promise<`0x${string}`>((res, rej) => {
+      resolveOuter = res
+      rejectOuter = rej
+    })
+    const discoverySignal = { aborted: false }
+
+    const cleanup = () => {
+      manualHashResolverRef.current = null
+      setRecoveryStatus(null)
+      discoverySignal.aborted = true
+    }
+    const finishFromWallet = (h: `0x${string}`) => {
+      if (resolved) return
+      resolved = true
+      // eslint-disable-next-line no-console
+      console.info('[wc_inject] tx-hash recovery: WALLET path won', { hash: h, elapsedMs: Date.now() - startedAt })
+      cleanup()
+      resolveOuter(h)
+    }
+    const finishFromRecovery = (h: `0x${string}`, source: 'discovery' | 'manual') => {
+      if (resolved) return
+      resolved = true
+      // eslint-disable-next-line no-console
+      console.info(`[wc_inject] tx-hash recovery: ${source.toUpperCase()} path won`, { hash: h, elapsedMs: Date.now() - startedAt })
+      cleanup()
+      resolveOuter(h)
+    }
+    const fail = (e: unknown) => {
+      if (resolved) return
+      resolved = true
+      // eslint-disable-next-line no-console
+      console.info('[wc_inject] tx-hash recovery: WALLET path FAILED', { error: e, elapsedMs: Date.now() - startedAt })
+      cleanup()
+      rejectOuter(e)
+    }
+    manualHashResolverRef.current = (h) => finishFromRecovery(h, 'manual')
+
+    // Path 1: the wallet. If simulating a no-hash bug, broadcast goes through
+    // (the wallet still signs and broadcasts) but we discard the returned hash
+    // so the wrapper has to fall back to discovery / manual entry.
+    const simulating = simulateMode !== 'normal'
+    args.walletSend()
+      .then(h => {
+        if (simulating) {
+          // eslint-disable-next-line no-console
+          console.warn('[SIMULATE] discarding wallet hash so recovery has to take over:', h)
+          return
+        }
+        finishFromWallet(h as `0x${string}`)
+      })
+      .catch(e => fail(e))
+
+    // Path 2 + 3: discovery (after grace) + manual fallback (after total)
+    const GRACE_MS = 20_000
+    const TOTAL_MS = 60_000
+
+    // Discovery only meaningful when we know the broadcast nonce. Without it
+    // we'd be guessing — surface the manual path immediately on timeout.
+    // Skipped entirely when simulating "no discovery" so we can test the
+    // manual-entry path without waiting for real chain data to fail.
+    const stubDiscovery = simulateMode === 'no-hash-no-discovery'
+    if (args.expectedNonce !== undefined && !stubDiscovery) {
+      setTimeout(async () => {
+        if (resolved) return
+        // eslint-disable-next-line no-console
+        console.info('[wc_inject] tx-hash recovery: discovery polling started', { graceMs: GRACE_MS, totalMs: TOTAL_MS, expectedNonce: args.expectedNonce })
+        setRecoveryStatus('discovery')
+        try {
+          const found = await discoverTxByNonce({
+            wagmiConfig,
+            chainId: args.chainId,
+            payer: args.payer,
+            expectedNonce: args.expectedNonce!,
+            signal: discoverySignal,
+          })
+          if (found) {
+            finishFromRecovery(found, 'discovery')
+            return
+          }
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.info('[wc_inject] tx-hash recovery: discovery error', err)
+        }
+      }, GRACE_MS)
+    } else if (stubDiscovery) {
+      setTimeout(() => {
+        if (resolved) return
+        // eslint-disable-next-line no-console
+        console.warn('[SIMULATE] discovery stubbed — manual entry will surface at TOTAL_MS')
+        setRecoveryStatus('discovery')
+      }, GRACE_MS)
+    }
+
+    setTimeout(() => {
+      if (resolved) return
+      // eslint-disable-next-line no-console
+      console.info('[wc_inject] tx-hash recovery: auto window exhausted, surfacing manual hash entry')
+      // Stop the discovery walker too — manual entry is the buyer's call now.
+      discoverySignal.aborted = true
+      setRecoveryStatus('manual')
+    }, TOTAL_MS)
+
+    return result
+  }
+
+  // ── Manual-hash submit ──
+  // Validates the pasted hash on-chain (from=payer, nonce=expectedNonce
+  // when available) before accepting and resolving the recovery promise.
+  async function submitManualHash() {
+    const raw = manualHashInput.trim()
+    setManualHashError(null)
+    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) {
+      setManualHashError('That doesn’t look like a transaction hash. It should be 0x followed by 64 hex characters.')
+      return
+    }
+    if (!expectedTxRef.current || !manualHashResolverRef.current) {
+      setManualHashError('No payment is currently waiting for a hash.')
+      return
+    }
+    const expected = expectedTxRef.current
+    setManualHashSubmitting(true)
+    try {
+      const tx = await getTransaction(wagmiConfig, { hash: raw as `0x${string}`, chainId: expected.chainId })
+      if (!tx) {
+        setManualHashError('Transaction not found on chain. Make sure you pasted the correct hash and that it has been broadcast.')
+        return
+      }
+      if ((tx.from ?? '').toLowerCase() !== expected.payer.toLowerCase()) {
+        setManualHashError('That transaction was sent from a different wallet than the one connected here.')
+        return
+      }
+      if (expected.expectedNonce !== undefined && Number(tx.nonce) !== expected.expectedNonce) {
+        setManualHashError('That transaction’s nonce does not match the order. Make sure you pasted the hash for THIS payment, not a previous one.')
+        return
+      }
+      manualHashResolverRef.current(raw as `0x${string}`)
+      setManualHashInput('')
+    } catch (e) {
+      setManualHashError(
+        (e instanceof Error && e.message) ||
+        'Could not look up the transaction. Please try again in a moment.'
+      )
+    } finally {
+      setManualHashSubmitting(false)
+    }
   }
 
   async function handlePay() {
@@ -510,23 +758,34 @@ export function CheckoutStep({
         // discovery path. Don't block the broadcast on a transient RPC error.
       }
 
-      let txHash: string
-      if (q.symbol === 'ETH') {
-        txHash = await sendTransactionAsync({
-          to: q.receive_address as `0x${string}`,
-          value: BigInt(q.amount_raw),
-          chainId: q.chain_id,
-        })
-      } else {
-        if (!q.token_address) throw new Error('token_address missing')
-        txHash = await writeContractAsync({
-          address: q.token_address as `0x${string}`,
-          abi: erc20Abi,
-          functionName: 'transfer',
-          args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
-          chainId: q.chain_id,
-        })
-      }
+      // Route the wallet send through the recovery wrapper so wallets that
+      // broadcast but never return the hash via WC (Binance Wallet macOS,
+      // etc.) don't strand the UI in "Confirm payment in wallet…" forever.
+      // The wrapper races the wallet's promise vs nonce-based discovery vs
+      // a manual-hash escape hatch.
+      const walletSend = q.symbol === 'ETH'
+        ? () => sendTransactionAsync({
+            to: q.receive_address as `0x${string}`,
+            value: BigInt(q.amount_raw),
+            chainId: q.chain_id,
+          })
+        : (() => {
+            if (!q.token_address) throw new Error('token_address missing')
+            const tokenAddress = q.token_address as `0x${string}`
+            return () => writeContractAsync({
+              address: tokenAddress,
+              abi: erc20Abi,
+              functionName: 'transfer',
+              args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
+              chainId: q.chain_id,
+            })
+          })()
+      const txHash: string = await sendWithRecovery({
+        walletSend,
+        payer: address as `0x${string}`,
+        chainId: q.chain_id,
+        expectedNonce,
+      })
 
       // Step 6: wait for the tx to actually be mined before telling the
       // backend to verify. `sendTransactionAsync` resolves on broadcast, not
@@ -630,6 +889,31 @@ export function CheckoutStep({
       <WalletHeader disabled={busy} />
 
       <h3 style={{ marginTop: 0 }}>Select payment method</h3>
+
+      {/* DEBUG — REMOVE AFTER TESTING. Forces the recovery wrapper into a
+          specific path so we can validate each behaviour without rebuilding. */}
+      <div className="wc-debug-panel">
+        <div className="wc-debug-label">DEBUG · simulate tx-hash recovery</div>
+        <div className="wc-debug-options">
+          {([
+            ['normal', 'Normal (wallet returns hash)'],
+            ['no-hash', 'No hash → discovery should win'],
+            ['no-hash-no-discovery', 'No hash + no discovery → manual entry'],
+          ] as Array<['normal' | 'no-hash' | 'no-hash-no-discovery', string]>).map(([value, label]) => (
+            <label key={value} className="wc-debug-option">
+              <input
+                type="radio"
+                name="wc-debug-simulate"
+                value={value}
+                checked={simulateMode === value}
+                onChange={() => setSimulateMode(value)}
+                disabled={busy}
+              />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      </div>
 
       {!ethAvailable && ethDisabledReason && (
         <div className="wc-notice">
@@ -780,6 +1064,50 @@ export function CheckoutStep({
         >
           {buttonLabel}
         </button>
+      )}
+
+      {/* Status banner for the recovery flow. Sits between the Pay button
+          and the error area so the buyer sees it the moment discovery
+          starts polling, and again when the manual entry surfaces. */}
+      {recoveryStatus === 'discovery' && (
+        <div className="wc-recovery-banner">
+          Looking for your transaction on chain — please do not close this window…
+        </div>
+      )}
+
+      {/* Manual hash escape hatch — appears after the auto window expires
+          without finding the tx via nonce-discovery. Buyer pastes the hash
+          from their wallet's history; we validate it on-chain (correct
+          payer + nonce) before accepting. */}
+      {recoveryStatus === 'manual' && (
+        <div className="wc-recovery-prompt">
+          <div className="wc-recovery-message">
+            We can’t tell whether your wallet sent the transaction. If your
+            wallet shows a successful payment, paste the transaction hash
+            here so we can verify it.
+          </div>
+          <div className="wc-recovery-row">
+            <input
+              type="text"
+              value={manualHashInput}
+              onChange={(e) => setManualHashInput(e.target.value)}
+              placeholder="0x…"
+              disabled={manualHashSubmitting}
+              spellCheck={false}
+              autoComplete="off"
+              className="wc-recovery-input"
+            />
+            <button
+              type="button"
+              className="btn btn-default"
+              onClick={submitManualHash}
+              disabled={manualHashSubmitting || !manualHashInput.trim()}
+            >
+              {manualHashSubmitting ? 'Verifying…' : 'Verify hash'}
+            </button>
+          </div>
+          {manualHashError && <div className="wc-recovery-error">{manualHashError}</div>}
+        </div>
       )}
 
       {error && <div className="wc-error">{error}</div>}
