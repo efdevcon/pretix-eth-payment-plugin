@@ -34,6 +34,50 @@ class QuotaExceededError(Exception):
         )
 
 
+class VoucherUnavailableError(Exception):
+    """Raised when a voucher fails revalidation at order-create time —
+    expired between purchase and verify, or `redeemed >= max_usages` because
+    another buyer's order claimed the last slot. The purchase endpoint runs
+    `check_voucher(..., lock=False)` as a pre-payment fail-fast; the
+    create_pretix_order path runs `check_voucher(..., lock=True)` inside the
+    atomic block to actually serialize concurrent redemption."""
+    def __init__(self, code: str, reason: str):
+        self.code = code
+        self.reason = reason
+        super().__init__(f"voucher '{code}' unavailable: {reason}")
+
+
+def check_voucher(event, voucher_code, *, lock: bool):
+    """Resolve and revalidate a voucher. Returns the Voucher instance, or
+    None when no code was provided. Raises VoucherUnavailableError if the
+    voucher doesn't exist, has expired, or has been fully redeemed.
+
+    `lock=True` takes a row-level lock (`SELECT ... FOR UPDATE`) for the
+    surrounding transaction so concurrent x402 (and native Pretix) orders
+    can't both pass a `redeemed < max_usages` check and double-redeem a
+    voucher with `max_usages=1`. `lock=False` is for fail-fast at purchase
+    time — it gives a snapshot answer without holding any lock.
+
+    Note: `Voucher.redeemed` is maintained by Pretix via signals on
+    OrderPosition save, so by the time we re-read it inside the locked
+    transaction it reflects every prior committed redemption.
+    """
+    if not voucher_code:
+        return None
+    from pretix.base.models import Voucher
+    qs = Voucher.objects.filter(event=event, code__iexact=voucher_code)
+    if lock:
+        qs = qs.select_for_update()
+    voucher = qs.first()
+    if voucher is None:
+        raise VoucherUnavailableError(voucher_code, 'not found')
+    if voucher.valid_until and timezone.now() > voucher.valid_until:
+        raise VoucherUnavailableError(voucher_code, 'expired')
+    if voucher.max_usages and (voucher.redeemed or 0) >= voucher.max_usages:
+        raise VoucherUnavailableError(voucher_code, 'fully redeemed')
+    return voucher
+
+
 def check_quotas(event, items_with_qty, *, lock: bool):
     """Verify there's enough availability in every relevant Quota to satisfy
     `items_with_qty`. When `lock=True`, the rows are locked for the duration
@@ -96,15 +140,10 @@ def _check_and_lock_quotas(event, items_with_qty):
     check_quotas(event, items_with_qty, lock=True)
 
 
-def _resolve_voucher(event, code: str):
-    """Look up a Voucher by code. Returns None if not found."""
-    if not code:
-        return None
-    try:
-        from pretix.base.models import Voucher
-        return Voucher.objects.get(event=event, code__iexact=code)
-    except Exception:
-        return None
+# `_resolve_voucher` was removed — it returned a Voucher without checking
+# expiration or `max_usages`, and didn't take a row lock. `check_voucher`
+# (above) is the replacement: it raises VoucherUnavailableError on stale or
+# exhausted codes and supports `lock=True` for race-tight revalidation.
 
 
 def _build_answer_value(question, raw_answer):
@@ -239,8 +278,14 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
         company = attendee.get('company') or None
         country = attendee.get('country') or None
 
+        # Lock-and-revalidate the voucher inside the atomic block. Holding the
+        # `SELECT ... FOR UPDATE` lock for the rest of the transaction
+        # serializes concurrent redemptions so two buyers using the same
+        # `max_usages=1` voucher can't both succeed. Raises
+        # VoucherUnavailableError if expired or exhausted; the verify endpoint
+        # surfaces that as a 409 with a distinctive category.
         voucher_code = order_data.get('voucher')
-        voucher = _resolve_voucher(event, voucher_code) if voucher_code else None
+        voucher = check_voucher(event, voucher_code, lock=True)
 
         answers_input = order_data.get('answers', [])
 

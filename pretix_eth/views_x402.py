@@ -26,7 +26,9 @@ from pretix_eth.x402.balances import fetch_balances_for_wallet
 from pretix_eth.x402.config import resolve_relayer_pk
 from pretix_eth.x402.nonce import generate_nonce_bytes32
 from pretix_eth.x402.pretix_client import (
-    create_pretix_order, confirm_x402_payment, QuotaExceededError, check_quotas,
+    create_pretix_order, confirm_x402_payment,
+    QuotaExceededError, check_quotas,
+    VoucherUnavailableError, check_voucher,
 )
 from pretix_eth.x402.gas import GasConditionError
 from pretix_eth.x402.relayer import (
@@ -347,33 +349,34 @@ def payment_options(request: HttpRequest):
 # Voucher validation + discount
 # ---------------------------------------------------------------------------
 
+# NOTE: `validate_voucher` was the legacy snapshot check used at purchase
+# time before the voucher race fix. It's been superseded by
+# `pretix_eth.x402.pretix_client.check_voucher`, which shares one code path
+# between the pre-purchase fail-fast (lock=False) and the create-time
+# revalidation (lock=True, inside the atomic block). Don't re-import this.
+# Left as a thin wrapper for any external caller that still depends on the
+# dict shape; new code should use `check_voucher` directly.
 def validate_voucher(event, code: str) -> dict:
-    """Validate a voucher code via Pretix ORM. Returns dict with
-    {valid, code, priceMode, value, itemId, maxUsages, redeemed, error?}."""
     invalid = lambda err: {
         'valid': False, 'code': code, 'priceMode': 'none', 'value': '0',
         'itemId': None, 'maxUsages': 0, 'redeemed': 0, 'error': err,
     }
     try:
-        from pretix.base.models import Voucher
         with scopes_disabled():
-            try:
-                v = Voucher.objects.get(event=event, code__iexact=code)
-            except Voucher.DoesNotExist:
-                return invalid('Voucher code not found')
-            if v.valid_until and timezone.now() > v.valid_until:
-                return invalid('Voucher has expired')
-            if v.max_usages and v.redeemed >= v.max_usages:
-                return invalid('Voucher has been fully redeemed')
-            return {
-                'valid': True,
-                'code': v.code,
-                'priceMode': v.price_mode or 'none',
-                'value': str(v.value or '0'),
-                'itemId': v.item_id,
-                'maxUsages': v.max_usages or 0,
-                'redeemed': v.redeemed or 0,
-            }
+            v = check_voucher(event, code, lock=False)
+        if v is None:
+            return invalid('Voucher code not found')
+        return {
+            'valid': True,
+            'code': v.code,
+            'priceMode': v.price_mode or 'none',
+            'value': str(v.value or '0'),
+            'itemId': v.item_id,
+            'maxUsages': v.max_usages or 0,
+            'redeemed': v.redeemed or 0,
+        }
+    except VoucherUnavailableError as e:
+        return invalid(f'Voucher {e.reason}')
     except Exception as e:
         return invalid(f'Failed to validate voucher: {e}')
 
@@ -438,6 +441,13 @@ def get_ticket_purchase_info(event):
                 {'categoryId': a.addon_category_id, 'maxCount': int(a.max_count or 0)}
                 for a in item.addons.all() if a.price_included
             ]
+            # Every category this ticket allows as an addon (regardless of
+            # `price_included`). The purchase endpoint rejects addon lines whose
+            # category isn't in the union of these across the cart's tickets,
+            # so a buyer can't attach an arbitrary item as an addon to bypass
+            # `require_voucher`, structural constraints, or required questions
+            # tied to admission items.
+            allowed_addon_categories = [a.addon_category_id for a in item.addons.all()]
             tickets.append({
                 'id': item.pk,
                 'name': str(item.name),
@@ -448,6 +458,7 @@ def get_ticket_purchase_info(event):
                 'category': item.category_id,
                 'priceIncludedCategories': price_included_categories,
                 'freeAddonGrants': free_addon_grants,
+                'allowedAddonCategories': allowed_addon_categories,
                 'variations': variations,
             })
     return {
@@ -484,16 +495,33 @@ def purchase(request):
             'success': False, 'error': f'missing fields: {missing}',
         }, status=400)
 
-    # Validate voucher (optional)
+    # Validate voucher (optional). `check_voucher(lock=False)` is the same
+    # snapshot check as the legacy `validate_voucher` but uses the helper
+    # that's also called inside create_pretix_order (with lock=True) to do
+    # the race-tight revalidation. Keeping a single code path means a voucher
+    # that fails revalidation at create time would also fail this pre-check
+    # under the same conditions.
     voucher_data = None
     voucher_code = body.get('voucher')
     if voucher_code:
-        voucher_data = validate_voucher(event, voucher_code)
-        if not voucher_data['valid']:
+        try:
+            with scopes_disabled():
+                voucher_obj = check_voucher(event, voucher_code, lock=False)
+        except VoucherUnavailableError as e:
             return JsonResponse({
                 'success': False,
-                'error': voucher_data.get('error', 'Invalid voucher'),
+                'error': f"voucher '{e.code}' {e.reason}",
             }, status=400)
+        if voucher_obj is not None:
+            voucher_data = {
+                'valid': True,
+                'code': voucher_obj.code,
+                'priceMode': voucher_obj.price_mode or 'none',
+                'value': str(voucher_obj.value or '0'),
+                'itemId': voucher_obj.item_id,
+                'maxUsages': voucher_obj.max_usages or 0,
+                'redeemed': voucher_obj.redeemed or 0,
+            }
 
     # Fetch ticket info + calculate total
     ticket_info = get_ticket_purchase_info(event)
@@ -534,6 +562,17 @@ def purchase(request):
             f"variation {vid} is not a valid active variation for item {item['id']}"
         )
 
+    # `require_voucher` gate: an item with this flag can ONLY be sold via a
+    # voucher whose item-scope is either unset (None) or matches the item.
+    # Pretix's native checkout enforces this; the plugin's catalog endpoint
+    # surfaces `requireVoucher` to the FE but never enforced it server-side,
+    # so a direct API call could buy a voucher-gated ticket without one.
+    def _voucher_satisfies_item(item):
+        if not voucher_data or not voucher_data.get('valid'):
+            return False
+        scoped_to = voucher_data.get('itemId')
+        return scoped_to is None or scoped_to == item['id']
+
     # Tickets (with variation pricing)
     for req in body['tickets']:
         item = items_by_id.get(req['itemId'])
@@ -541,6 +580,11 @@ def purchase(request):
             return JsonResponse({
                 'success': False,
                 'error': f'ticket {req["itemId"]} unavailable',
+            }, status=400)
+        if item.get('requireVoucher') and not _voucher_satisfies_item(item):
+            return JsonResponse({
+                'success': False,
+                'error': f"ticket '{item['name']}' requires a valid voucher",
             }, status=400)
         try:
             qty = _parse_qty(req.get('quantity', 1))
@@ -578,6 +622,18 @@ def purchase(request):
                     free_units_remaining_by_cat.get(cid, 0) + mc * t['quantity']
                 )
 
+    # Union of addon categories allowed by at least one ticket in the cart.
+    # Anything submitted as an addon whose category isn't in this set is
+    # rejected — without this check a buyer could attach an arbitrary active
+    # item (including admission-class items, voucher-gated items, or
+    # high-priced items) as an "addon" of a $5 ticket to bypass structural
+    # constraints the operator put on the regular sale path.
+    allowed_addon_categories = set()
+    for t in order_tickets:
+        for cid in (t['item'].get('allowedAddonCategories') or []):
+            if cid is not None:
+                allowed_addon_categories.add(cid)
+
     # Addons (with variation pricing)
     order_addons = []
     for req in body.get('addons') or []:
@@ -587,13 +643,23 @@ def purchase(request):
                 'success': False,
                 'error': f'addon {req["itemId"]} unavailable',
             }, status=400)
+        cat_id = item.get('category')
+        if cat_id is None or cat_id not in allowed_addon_categories:
+            return JsonResponse({
+                'success': False,
+                'error': f"item '{item['name']}' is not allowed as an addon for this cart",
+            }, status=400)
+        if item.get('requireVoucher') and not _voucher_satisfies_item(item):
+            return JsonResponse({
+                'success': False,
+                'error': f"addon '{item['name']}' requires a valid voucher",
+            }, status=400)
         try:
             qty = _parse_qty(req.get('quantity', 1))
             addon_price, resolved_var_id = _resolve_variation_price(item, req.get('variationId'))
         except ValueError as e:
             return JsonResponse({'success': False, 'error': str(e)}, status=400)
 
-        cat_id = item.get('category')
         free_qty = 0
         if cat_id and free_units_remaining_by_cat.get(cat_id, 0) > 0:
             free_qty = min(qty, free_units_remaining_by_cat[cat_id])
@@ -669,6 +735,20 @@ def purchase(request):
     discount_pct = Decimal(str(provider.settings.get('crypto_discount_percent', default='0')))
     crypto_discount = ((subtotal - voucher_discount) * discount_pct / Decimal('100')).quantize(Decimal('0.01'))
     total = subtotal - voucher_discount - crypto_discount
+
+    # Final-total guard: even though the subtotal-based check above ensures
+    # the cart has at least one ticket with a positive list price, vouchers
+    # and crypto_discount can still bring `total` to zero or below (e.g. a
+    # 100%-`set` voucher applied to every line). Free orders shouldn't go
+    # through the x402 path — there's no on-chain payment to verify, and the
+    # verify endpoint expects `total_usd > 0`. Pretix has a native free-order
+    # flow for this; reject here so it's not silently turned into a free
+    # ticket via the crypto path.
+    if total <= Decimal('0'):
+        return JsonResponse({
+            'success': False,
+            'error': 'order total is zero or negative after discounts; free orders are not supported via crypto',
+        }, status=400)
 
     # Build payment reference + pending order
     payment_reference = f'x402_{secrets.token_hex(16)}'
@@ -1174,6 +1254,32 @@ def _x402_verify_and_finalize(
                 'error': f'sold out after payment: {e.item_name}',
                 'details': str(e),
                 'category': 'quota_exceeded',
+            }, status=409)
+        except VoucherUnavailableError as e:
+            # Voucher expired or was fully redeemed (by another buyer's order
+            # that committed first) between the purchase quote and verify.
+            # Same recovery shape as QuotaExceededError: payment landed but
+            # the order can't be created at the quoted price; ops needs to
+            # manually refund.
+            ticketstore.remove_completed_reservation(event=event, payment_reference=payment_reference)
+            ticketstore.store_pending_order(
+                event=claimed.event, payment_reference=claimed.payment_reference,
+                order_data=claimed.order_data, total_usd=claimed.total_usd,
+                expires_at=claimed.expires_at, intended_payer=claimed.intended_payer,
+                expected_eth_amount_wei_by_chain=claimed.expected_eth_amount_wei_by_chain,
+                expected_chain_id=claimed.expected_chain_id,
+                metadata=claimed.metadata,
+            )
+            log.error(
+                'x402 order creation failed: voucher unavailable — payment %s landed but '
+                'voucher %s %s; manual refund required',
+                payment_reference, e.code, e.reason,
+            )
+            return JsonResponse({
+                'success': False,
+                'error': f"voucher {e.reason} after payment: '{e.code}'",
+                'details': str(e),
+                'category': 'voucher_unavailable',
             }, status=409)
         except Exception as e:
             ticketstore.remove_completed_reservation(event=event, payment_reference=payment_reference)
