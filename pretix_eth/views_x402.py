@@ -502,6 +502,7 @@ def purchase(request):
     # that fails revalidation at create time would also fail this pre-check
     # under the same conditions.
     voucher_data = None
+    voucher_obj = None  # raised to outer scope so the qty-multiplier check below can read max_usages/redeemed
     voucher_code = body.get('voucher')
     if voucher_code:
         try:
@@ -605,6 +606,33 @@ def purchase(request):
             'item': item, 'quantity': qty,
             'price': str(price), 'variationId': resolved_var_id,
         })
+
+    # Voucher quantity-multiplier guard: a single voucher attached to qty=N
+    # positions of its target item (or any item, if unscoped) gets redeemed
+    # N times in one order. The pre-existing `check_voucher` only verifies
+    # max_usages/redeemed at the moment of validation, not against the
+    # number of cart positions about to receive the discount — so a buyer
+    # could submit `tickets: [{itemId, quantity: 10}]` with a max_usages=1
+    # voucher and apply the discount across all 10 positions. Reject early
+    # so the buyer doesn't pay-then-fail at create_pretix_order. The
+    # create_pretix_order path runs the same check inside its lock, which
+    # is the race-tight enforcement.
+    if voucher_obj is not None and voucher_obj.max_usages:
+        voucher_uses_in_cart = sum(
+            t['quantity']
+            for t in order_tickets
+            if voucher_obj.item_id is None or voucher_obj.item_id == t['item']['id']
+        )
+        if voucher_uses_in_cart > 0:
+            remaining = voucher_obj.max_usages - (voucher_obj.redeemed or 0)
+            if voucher_uses_in_cart > remaining:
+                return JsonResponse({
+                    'success': False,
+                    'error': (
+                        f"voucher '{voucher_code}' has {max(0, remaining)} use(s) remaining; "
+                        f"cart would consume {voucher_uses_in_cart}"
+                    ),
+                }, status=400)
 
     # Free-unit budget per addon category, summed across the cart's tickets.
     # Each ticket with a `price_included=True` ItemAddOn grants `max_count`

@@ -287,6 +287,28 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
         voucher_code = order_data.get('voucher')
         voucher = check_voucher(event, voucher_code, lock=True)
 
+        # Quantity-multiplier guard: a single voucher attached to qty=N
+        # positions of its target item gets redeemed N times by Pretix's
+        # post-save signals when this transaction commits. Without this
+        # check, a buyer could submit `tickets:[{itemId, quantity:10}]` with
+        # a max_usages=1 voucher and have the discount apply to all 10
+        # positions. The lock acquired by check_voucher() above is held for
+        # the rest of this transaction, so concurrent orders can't slip in
+        # between us reading `redeemed` and finishing the writes.
+        if voucher is not None and voucher.max_usages:
+            voucher_uses_in_cart = sum(
+                int(t.get('quantity', 1))
+                for t in (order_data.get('tickets', []) or [])
+                if voucher.item_id is None or voucher.item_id == int(t.get('itemId') or t.get('item'))
+            )
+            if voucher_uses_in_cart > 0:
+                remaining = voucher.max_usages - (voucher.redeemed or 0)
+                if voucher_uses_in_cart > remaining:
+                    raise VoucherUnavailableError(
+                        voucher_code,
+                        f'cart needs {voucher_uses_in_cart} use(s), only {max(0, remaining)} remaining',
+                    )
+
         answers_input = order_data.get('answers', [])
 
         # Track the first ticket position so addons can link to it
