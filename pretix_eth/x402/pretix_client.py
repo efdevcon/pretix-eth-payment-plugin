@@ -11,6 +11,7 @@ Supports the same fields as the devcon implementation:
 - custom per-position price (e.g., voucher-discounted)
 """
 import logging
+from collections import defaultdict
 from decimal import Decimal
 from typing import Optional
 from django.db import transaction
@@ -18,6 +19,81 @@ from django.utils import timezone
 from django_scopes import scopes_disabled
 
 log = logging.getLogger(__name__)
+
+
+class QuotaExceededError(Exception):
+    """Raised by `_check_and_lock_quotas` when the order would oversell a
+    Pretix Quota. Surfaced to the verify endpoint so it can roll back the
+    payment claim and return a distinctive error to the buyer."""
+    def __init__(self, item_name: str, requested: int, available: int):
+        self.item_name = item_name
+        self.requested = requested
+        self.available = available
+        super().__init__(
+            f'quota exceeded for {item_name}: requested {requested}, available {available}'
+        )
+
+
+def check_quotas(event, items_with_qty, *, lock: bool):
+    """Verify there's enough availability in every relevant Quota to satisfy
+    `items_with_qty`. When `lock=True`, the rows are locked for the duration
+    of the surrounding transaction (`SELECT ... FOR UPDATE`) so concurrent
+    x402 create_pretix_order calls (and native Pretix checkout, which uses
+    the same Quota rows) can't oversell. Locks are taken in deterministic PK
+    order to prevent deadlocks across overlapping quota sets.
+
+    `lock=False` is for pre-payment fail-fast: it gives a snapshot answer
+    without holding any lock — useful at the `purchase` endpoint so a buyer
+    requesting more than the remaining stock doesn't get a payment quote in
+    the first place. The lock-based call inside `create_pretix_order` is the
+    real race-tight enforcement.
+
+    items_with_qty: iterable of (Item, ItemVariation | None, qty: int).
+    Raises QuotaExceededError on the first quota that can't satisfy the request.
+    Quotas with `size=None` (unlimited) are skipped.
+    """
+    from pretix.base.models import Quota
+
+    requested_per_quota = defaultdict(int)
+    item_name_per_quota = {}
+    for item, variation, qty in items_with_qty:
+        if qty <= 0:
+            continue
+        qs = variation.quotas.all() if variation is not None else item.quotas.all()
+        for q in qs:
+            requested_per_quota[q.pk] += qty
+            item_name_per_quota.setdefault(q.pk, str(item.name))
+
+    if not requested_per_quota:
+        return
+
+    sorted_pks = sorted(requested_per_quota.keys())
+    base_qs = Quota.objects.filter(pk__in=sorted_pks)
+    if lock:
+        base_qs = base_qs.select_for_update()
+    quotas = list(base_qs)
+
+    for quota in quotas:
+        # `count_waitinglist=False` matches the catalog-fetch check at
+        # views_x402.get_ticket_purchase_info; we don't reserve units for
+        # waiting-list buyers from the x402 path.
+        state, remaining = quota.availability(count_waitinglist=False)
+        # `remaining` is None when the quota is unlimited (`Quota.size is None`).
+        if remaining is None:
+            continue
+        requested = requested_per_quota[quota.pk]
+        if remaining < requested:
+            raise QuotaExceededError(
+                item_name=item_name_per_quota.get(quota.pk, 'item'),
+                requested=requested,
+                available=max(0, remaining),
+            )
+
+
+def _check_and_lock_quotas(event, items_with_qty):
+    """Race-tight quota check used inside `create_pretix_order`'s atomic block.
+    Thin wrapper over `check_quotas` with `lock=True`."""
+    check_quotas(event, items_with_qty, lock=True)
 
 
 def _resolve_voucher(event, code: str):
@@ -110,6 +186,34 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
     # atomic block — otherwise its transaction-ledger bookkeeping warns
     # ("... however you are not doing it inside a database transaction!").
     with scopes_disabled(), transaction.atomic():
+        # Resolve every (Item, variation, qty) triple in the order up front so
+        # we can lock the relevant Quota rows BEFORE any OrderPosition is
+        # written. Without this lock+check, two concurrent x402 orders for the
+        # last unit can both succeed (each `OrderPosition.objects.create` is a
+        # blind insert that doesn't decrement quota), and the catalog
+        # `available` flag computed at page-load is a stale snapshot. Fixed
+        # ordering of locks (by Quota PK in the helper) prevents deadlocks.
+        items_with_qty = []
+        for ticket in order_data.get('tickets', []) or []:
+            item_id = int(ticket.get('itemId') or ticket.get('item'))
+            item = Item.objects.get(event=event, pk=item_id)
+            variation_id = ticket.get('variationId') or ticket.get('variation')
+            variation = (
+                ItemVariation.objects.filter(item=item, pk=int(variation_id)).first()
+                if variation_id else None
+            )
+            items_with_qty.append((item, variation, int(ticket.get('quantity', 1))))
+        for addon in order_data.get('addons', []) or []:
+            item_id = int(addon.get('itemId') or addon.get('item'))
+            item = Item.objects.get(event=event, pk=item_id)
+            variation_id = addon.get('variationId') or addon.get('variation')
+            variation = (
+                ItemVariation.objects.filter(item=item, pk=int(variation_id)).first()
+                if variation_id else None
+            )
+            items_with_qty.append((item, variation, int(addon.get('quantity', 1))))
+        _check_and_lock_quotas(event, items_with_qty)
+
         sc = event.organizer.sales_channels.get(identifier='web')
         order = Order.objects.create(
             event=event,

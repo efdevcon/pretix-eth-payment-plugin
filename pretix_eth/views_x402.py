@@ -25,7 +25,9 @@ from pretix_eth.x402.auth import require_pretix_token
 from pretix_eth.x402.balances import fetch_balances_for_wallet
 from pretix_eth.x402.config import resolve_relayer_pk
 from pretix_eth.x402.nonce import generate_nonce_bytes32
-from pretix_eth.x402.pretix_client import create_pretix_order, confirm_x402_payment
+from pretix_eth.x402.pretix_client import (
+    create_pretix_order, confirm_x402_payment, QuotaExceededError, check_quotas,
+)
 from pretix_eth.x402.gas import GasConditionError
 from pretix_eth.x402.relayer import (
     execute_transfer_with_authorization,
@@ -421,8 +423,20 @@ def get_ticket_purchase_info(event):
             # (Pretix `ItemAddOn.price_included=True`). Surfaced so the purchase
             # endpoint's addon-pricing loop can zero-out matching items without
             # re-querying the DB per addon.
+            #
+            # `freeAddonGrants` carries the per-ticket cap (`ItemAddOn.max_count`)
+            # alongside the category, so the purchase endpoint can mirror Pretix's
+            # native rule: only the first N units in a `price_included` category
+            # are free per parent ticket; excess is charged at full price. Without
+            # the cap the addon-pricing loop would zero out *every* unit and let
+            # an attacker stack quantities (or duplicate addon lines) to mint
+            # free swag. `priceIncludedCategories` is kept for back-compat.
             price_included_categories = [
                 a.addon_category_id for a in item.addons.all() if a.price_included
+            ]
+            free_addon_grants = [
+                {'categoryId': a.addon_category_id, 'maxCount': int(a.max_count or 0)}
+                for a in item.addons.all() if a.price_included
             ]
             tickets.append({
                 'id': item.pk,
@@ -433,6 +447,7 @@ def get_ticket_purchase_info(event):
                 'requireVoucher': item.require_voucher,
                 'category': item.category_id,
                 'priceIncludedCategories': price_included_categories,
+                'freeAddonGrants': free_addon_grants,
                 'variations': variations,
             })
     return {
@@ -547,13 +562,21 @@ def purchase(request):
             'price': str(price), 'variationId': resolved_var_id,
         })
 
-    # Union of addon categories that are free when bought as children of any
-    # ticket in the order (Pretix `ItemAddOn.price_included`). An addon whose
-    # category is in this set is charged $0 regardless of its standalone price.
-    free_addon_categories = set()
+    # Free-unit budget per addon category, summed across the cart's tickets.
+    # Each ticket with a `price_included=True` ItemAddOn grants `max_count`
+    # free units in that category; total budget is `Σ (max_count × ticket_qty)`.
+    # Addon units beyond the budget are charged at their normal price (mirrors
+    # Pretix's native checkout). Without this cap a buyer could request a huge
+    # quantity (or duplicate addon lines) and get every unit free.
+    free_units_remaining_by_cat = {}
     for t in order_tickets:
-        for cat_id in t['item'].get('priceIncludedCategories') or []:
-            free_addon_categories.add(cat_id)
+        for grant in t['item'].get('freeAddonGrants') or []:
+            cid = grant.get('categoryId')
+            mc = int(grant.get('maxCount') or 0)
+            if cid and mc > 0:
+                free_units_remaining_by_cat[cid] = (
+                    free_units_remaining_by_cat.get(cid, 0) + mc * t['quantity']
+                )
 
     # Addons (with variation pricing)
     order_addons = []
@@ -569,13 +592,29 @@ def purchase(request):
             addon_price, resolved_var_id = _resolve_variation_price(item, req.get('variationId'))
         except ValueError as e:
             return JsonResponse({'success': False, 'error': str(e)}, status=400)
-        if item.get('category') in free_addon_categories:
-            addon_price = Decimal('0.00')
-        subtotal += addon_price * qty
-        order_addons.append({
-            'item': item, 'quantity': qty,
-            'price': str(addon_price), 'variationId': resolved_var_id,
-        })
+
+        cat_id = item.get('category')
+        free_qty = 0
+        if cat_id and free_units_remaining_by_cat.get(cat_id, 0) > 0:
+            free_qty = min(qty, free_units_remaining_by_cat[cat_id])
+            free_units_remaining_by_cat[cat_id] -= free_qty
+        paid_qty = qty - free_qty
+
+        subtotal += addon_price * paid_qty  # free_qty contributes 0
+
+        # Split the addon into free + paid lines so create_pretix_order writes
+        # OrderPositions with the correct per-unit price. Same item/variation,
+        # different price.
+        if free_qty > 0:
+            order_addons.append({
+                'item': item, 'quantity': free_qty,
+                'price': '0.00', 'variationId': resolved_var_id,
+            })
+        if paid_qty > 0:
+            order_addons.append({
+                'item': item, 'quantity': paid_qty,
+                'price': str(addon_price), 'variationId': resolved_var_id,
+            })
 
     # Defense-in-depth: if tickets list is empty OR subtotal is non-positive, reject.
     # The _parse_qty check above should catch this at the per-line level, but
@@ -585,6 +624,47 @@ def purchase(request):
             'success': False,
             'error': 'order must contain at least one ticket with a positive total',
         }, status=400)
+
+    # Pre-purchase quota check (no lock): fail-fast if the order can't fit
+    # within the remaining stock at the moment the buyer hit Checkout. Saves
+    # the buyer from paying for a sold-out item only to have create_pretix_order
+    # reject it after the on-chain tx settles. The catalog-fetch `available`
+    # flag is just a state boolean and doesn't account for the requested
+    # *quantity*, so a buyer asking for 50 of an item with 5 left would still
+    # pass without this check. The lock-based recheck inside create_pretix_order
+    # is what actually prevents oversell under concurrency — this is just an
+    # early-exit optimization for the common case.
+    from pretix.base.models import Item as _ItemORM, ItemVariation as _ItemVariationORM
+    quota_check_items = []
+    with scopes_disabled():
+        for t in order_tickets:
+            try:
+                item_orm = _ItemORM.objects.get(event=event, pk=t['item']['id'])
+            except _ItemORM.DoesNotExist:
+                continue
+            var_orm = (
+                _ItemVariationORM.objects.filter(item=item_orm, pk=int(t['variationId'])).first()
+                if t.get('variationId') else None
+            )
+            quota_check_items.append((item_orm, var_orm, t['quantity']))
+        for a in order_addons:
+            try:
+                item_orm = _ItemORM.objects.get(event=event, pk=a['item']['id'])
+            except _ItemORM.DoesNotExist:
+                continue
+            var_orm = (
+                _ItemVariationORM.objects.filter(item=item_orm, pk=int(a['variationId'])).first()
+                if a.get('variationId') else None
+            )
+            quota_check_items.append((item_orm, var_orm, a['quantity']))
+        try:
+            check_quotas(event, quota_check_items, lock=False)
+        except QuotaExceededError as e:
+            return JsonResponse({
+                'success': False,
+                'error': f'sold out: {e.item_name}',
+                'details': str(e),
+            }, status=409)
 
     discount_pct = Decimal(str(provider.settings.get('crypto_discount_percent', default='0')))
     crypto_discount = ((subtotal - voucher_discount) * discount_pct / Decimal('100')).quantize(Decimal('0.01'))
@@ -1068,6 +1148,33 @@ def _x402_verify_and_finalize(
                 event=event, order_data=claimed.order_data,
                 total_usd=str(claimed.total_usd),
             )
+        except QuotaExceededError as e:
+            # Buyer's payment landed on-chain but stock ran out between the
+            # purchase quote and verify (race with another buyer / native
+            # checkout). The payment IS valid; it just can't be redeemed for
+            # the requested item. Roll back the reservation, restore the
+            # pending order so admin tools can find it, and surface a 409 with
+            # a distinctive message so ops can refund the payer manually.
+            ticketstore.remove_completed_reservation(event=event, payment_reference=payment_reference)
+            ticketstore.store_pending_order(
+                event=claimed.event, payment_reference=claimed.payment_reference,
+                order_data=claimed.order_data, total_usd=claimed.total_usd,
+                expires_at=claimed.expires_at, intended_payer=claimed.intended_payer,
+                expected_eth_amount_wei_by_chain=claimed.expected_eth_amount_wei_by_chain,
+                expected_chain_id=claimed.expected_chain_id,
+                metadata=claimed.metadata,
+            )
+            log.error(
+                'x402 order creation failed: quota exceeded — payment %s landed but %s sold out '
+                '(requested %s, available %s); manual refund required',
+                payment_reference, e.item_name, e.requested, e.available,
+            )
+            return JsonResponse({
+                'success': False,
+                'error': f'sold out after payment: {e.item_name}',
+                'details': str(e),
+                'category': 'quota_exceeded',
+            }, status=409)
         except Exception as e:
             ticketstore.remove_completed_reservation(event=event, payment_reference=payment_reference)
             ticketstore.store_pending_order(
