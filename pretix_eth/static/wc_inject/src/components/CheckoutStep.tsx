@@ -283,7 +283,11 @@ async function discoverTxByNonce(opts: {
   signal: { aborted: boolean }
 }): Promise<`0x${string}` | undefined> {
   const { wagmiConfig, chainId, payer, expectedNonce, signal } = opts
-  const startBlock = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
+  // eslint-disable-next-line no-console
+  console.info('[wc_inject] discoverTxByNonce starting', { chainId, payer, expectedNonce })
+  const startBlock = await getBlockNumber(wagmiConfig, { chainId }).catch(e => { console.info('[wc_inject] getBlockNumber(start) failed', e); return null })
+  // eslint-disable-next-line no-console
+  console.info('[wc_inject] discoverTxByNonce startBlock', { chainId, startBlock: startBlock?.toString() ?? null })
   let walkFrom = startBlock != null ? startBlock - 5n : null
   while (!signal.aborted) {
     await new Promise(r => setTimeout(r, 3000))
@@ -293,15 +297,21 @@ async function discoverTxByNonce(opts: {
       latestNonce = await getTransactionCount(wagmiConfig, {
         address: payer, blockTag: 'latest', chainId,
       })
-    } catch {
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.info('[wc_inject] getTransactionCount failed', { chainId, error: e })
       continue
     }
+    // eslint-disable-next-line no-console
+    console.info('[wc_inject] nonce poll', { chainId, latestNonce, expectedNonce, advanced: latestNonce > expectedNonce })
     if (latestNonce <= expectedNonce) continue
 
     const head = await getBlockNumber(wagmiConfig, { chainId }).catch(() => null)
     if (head == null) continue
     const fromBlock = walkFrom ?? head - 25n
     walkFrom = head + 1n
+    // eslint-disable-next-line no-console
+    console.info('[wc_inject] walking blocks', { chainId, fromBlock: fromBlock.toString(), head: head.toString() })
     for (let bn = fromBlock; bn <= head; bn++) {
       if (signal.aborted) return undefined
       let txs: Array<{ from: string; nonce: number; hash: string }> = []
@@ -310,13 +320,21 @@ async function discoverTxByNonce(opts: {
           blockNumber: bn, includeTransactions: true, chainId,
         })
         txs = (block?.transactions as Array<{ from: string; nonce: number; hash: string }>) ?? []
-      } catch {
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.info('[wc_inject] getBlock failed', { chainId, blockNumber: bn.toString(), error: e })
         continue
       }
+      // eslint-disable-next-line no-console
+      console.info('[wc_inject] block scanned', { chainId, blockNumber: bn.toString(), txCount: txs.length })
       const match = txs.find(
         t => t?.from?.toLowerCase() === payer.toLowerCase() && Number(t?.nonce) === expectedNonce
       )
-      if (match?.hash) return match.hash as `0x${string}`
+      if (match?.hash) {
+        // eslint-disable-next-line no-console
+        console.info('[wc_inject] match found', { chainId, blockNumber: bn.toString(), hash: match.hash })
+        return match.hash as `0x${string}`
+      }
     }
   }
   return undefined
