@@ -21,7 +21,7 @@ from pretix_eth.pricing import fetch_eth_price_usd, usd_to_token_raw
 from pretix_eth.rpc import get_rpc_url
 from pretix_eth.verification import verify_erc20_transfer, verify_native_eth
 from pretix_eth.x402 import ticketstore
-from pretix_eth.x402.auth import require_pretix_token
+from pretix_eth.x402.auth import require_pretix_token, get_client_ip
 from pretix_eth.x402.balances import fetch_balances_for_wallet
 from pretix_eth.x402.config import resolve_relayer_pk
 from pretix_eth.x402.nonce import generate_nonce_bytes32
@@ -482,8 +482,7 @@ def purchase(request):
     provider = _get_provider(event)
 
     # Rate limit
-    client_ip = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip() \
-        or request.META.get('REMOTE_ADDR', 'unknown')
+    client_ip = get_client_ip(request)
     if not ticketstore.check_purchase_rate_limit(client_ip=client_ip):
         return JsonResponse({'success': False, 'error': 'rate limit exceeded'}, status=429)
 
@@ -1373,8 +1372,7 @@ def verify(request):
 
     # Rate limit (per payment_reference + client IP). Applies only to the
     # buyer-facing endpoint; admin manual-verify is auth-gated and skips it.
-    client_ip = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip() \
-        or request.META.get('REMOTE_ADDR', 'unknown')
+    client_ip = get_client_ip(request)
     with scopes_disabled():
         if not ticketstore.check_verify_rate_limit(
             payment_reference=body['payment_reference'], client_ip=client_ip,

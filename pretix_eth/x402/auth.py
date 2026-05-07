@@ -48,3 +48,42 @@ def noop_auth(view_func):
         monkeypatch.setattr('pretix_eth.views_x402.require_pretix_token', noop_auth)
     """
     return view_func
+
+
+def get_client_ip(request) -> str:
+    """Return the buyer's IP, honoring `X-Forwarded-For` only when the request
+    actually arrived through a trusted proxy.
+
+    The unsafe pattern (read XFF unconditionally) is a classic rate-limit
+    bypass — any client can spoof a unique XFF on every request and walk
+    around per-IP throttles. We pin XFF processing to a configured proxy
+    allowlist: if the socket peer (`REMOTE_ADDR`) matches one of the IPs in
+    the trusted-proxy list, we trust the leftmost XFF entry as the real
+    client; otherwise we ignore XFF entirely and use the socket peer.
+
+    Two ways to configure (either is fine; both are merged):
+
+        # Django settings (pretix_settings.py / a config bridge)
+        PRETIX_ETH_TRUSTED_PROXIES = ['10.0.0.5', '172.16.0.10']
+
+        # Environment (Docker / systemd / Pretix Hosted)
+        export PRETIX_ETH_TRUSTED_PROXIES="10.0.0.5,172.16.0.10"
+
+    Leave both empty to always use the socket peer — correct for deployments
+    behind a single trusted reverse proxy that strips XFF, or for any setup
+    where the proxy IP isn't stable enough to allowlist.
+    """
+    import os
+    from django.conf import settings as django_settings
+    socket_ip = request.META.get('REMOTE_ADDR', '') or 'unknown'
+    trusted = list(getattr(django_settings, 'PRETIX_ETH_TRUSTED_PROXIES', None) or [])
+    env_trusted = os.environ.get('PRETIX_ETH_TRUSTED_PROXIES', '')
+    if env_trusted:
+        trusted.extend(p.strip() for p in env_trusted.split(',') if p.strip())
+    if socket_ip in trusted:
+        xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
+        if xff:
+            first = xff.split(',')[0].strip()
+            if first:
+                return first
+    return socket_ip

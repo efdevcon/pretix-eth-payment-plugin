@@ -31,6 +31,7 @@ from pretix_eth.pricing import build_quote, fetch_eth_price_usd
 from pretix_eth.payment import WalletConnectPayment
 from pretix_eth.rpc import get_rpc_url
 from pretix_eth.verification import verify_erc20_transfer, verify_native_eth
+from pretix_eth.x402.auth import get_client_ip
 
 log = logging.getLogger(__name__)
 
@@ -442,8 +443,7 @@ def verify(request):
     if missing:
         return _verify_bad(f'missing fields: {missing}')
 
-    client_ip = (request.META.get('HTTP_X_FORWARDED_FOR') or '').split(',')[0].strip() \
-        or request.META.get('REMOTE_ADDR', 'unknown')
+    client_ip = get_client_ip(request)
     if not _check_rate_limit(body['quote_id'], client_ip):
         return _verify_bad('rate limit exceeded', status=429, quote_id=body.get('quote_id'), ip=client_ip)
 
