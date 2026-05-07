@@ -77,12 +77,20 @@ def get_client_ip(request) -> str:
     log = logging.getLogger('pretix_eth.client_ip')
     socket_ip = request.META.get('REMOTE_ADDR', '') or 'unknown'
     has_token = getattr(request, '_pretix_team', None) is not None
+    # Custom header set by `pluginFetch` so we can carry the buyer IP through
+    # Cloudflare (which overwrites the standard `X-Forwarded-For`). Read this
+    # FIRST for token-authenticated traffic — it's the only header that
+    # actually survives an end-to-end Netlify → CF → pretix chain.
+    pretix_buyer_ip = request.META.get('HTTP_X_PRETIX_BUYER_IP', '').strip()
     xff_raw = request.META.get('HTTP_X_FORWARDED_FOR', '')
     xff_first = xff_raw.split(',')[0].strip() if xff_raw else ''
 
     # Truthy = decorator validated a TeamAPIToken; this caller is one of
     # our trusted backends. None / missing = unauthenticated buyer call.
-    if has_token and xff_first:
+    if has_token and pretix_buyer_ip:
+        resolved = pretix_buyer_ip
+        path = 'token+pretix_buyer_ip'
+    elif has_token and xff_first:
         resolved = xff_first
         path = 'token+xff'
     else:
@@ -95,10 +103,11 @@ def get_client_ip(request) -> str:
     # understood. Cheap (one log line per rate-limited endpoint hit) but
     # noisy; not intended to ship to production long-term.
     log.info(
-        'get_client_ip resolved=%s path=%s socket=%s xff=%s xff_first=%s '
-        'x_real_ip=%s cf_connecting_ip=%s nf_client_connection_ip=%s '
-        'has_token=%s url=%s',
-        resolved, path, socket_ip, xff_raw or '-', xff_first or '-',
+        'get_client_ip resolved=%s path=%s socket=%s pretix_buyer_ip=%s '
+        'xff=%s xff_first=%s x_real_ip=%s cf_connecting_ip=%s '
+        'nf_client_connection_ip=%s has_token=%s url=%s',
+        resolved, path, socket_ip, pretix_buyer_ip or '-',
+        xff_raw or '-', xff_first or '-',
         request.META.get('HTTP_X_REAL_IP', '-'),
         request.META.get('HTTP_CF_CONNECTING_IP', '-'),
         request.META.get('HTTP_X_NF_CLIENT_CONNECTION_IP', '-'),
