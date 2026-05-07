@@ -90,6 +90,19 @@ class WalletConnectPayment(BasePaymentProvider):
     @property
     def settings_form_fields(self):
         base = OrderedDict(list(super().settings_form_fields.items()))
+        base['x402_enabled'] = forms.BooleanField(
+            label=_('Enable x402 (gasless USDC checkout)'),
+            help_text=_(
+                'Allow buyers to pay via the x402 flow on this event. '
+                'Leave OFF unless the x402 protocol-level controls (relayer '
+                'funding, facilitator API key, agent endpoints) have all been '
+                'configured for this event. When OFF, the legacy WalletConnect '
+                'flow remains available; existing x402 orders can still be '
+                'viewed and refunded from the admin panel.'
+            ),
+            required=False,
+            initial=False,
+        )
         base['receive_address'] = forms.CharField(
             label=_('Receive wallet address (EIP-55)'),
             max_length=42, min_length=42, required=True,

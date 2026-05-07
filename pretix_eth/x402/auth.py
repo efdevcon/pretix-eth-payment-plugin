@@ -5,33 +5,126 @@ devcon-next already uses for order management. No extra shared secret needed.
 
 In tests: either create a TeamAPIToken fixture, or monkeypatch this decorator.
 """
+import json
 from functools import wraps
 from django.http import JsonResponse
 
 
+def _resolve_event_from_request(request):
+    """Best-effort lookup of the (organizer, event) the request targets.
+
+    Reads `?organizer=…&event=…` from the URL and falls back to top-level
+    JSON body fields. Returns the Event or None. Used by the auth decorators
+    to enforce that the authenticated team has access to the URL's event,
+    closing the V1/V1.b cross-tenant authorization holes.
+    """
+    org_slug = request.GET.get('organizer') or ''
+    event_slug = request.GET.get('event') or ''
+    if not (org_slug and event_slug):
+        try:
+            body = json.loads(request.body or b'{}')
+            if isinstance(body, dict):
+                org_slug = org_slug or body.get('organizer', '') or ''
+                event_slug = event_slug or body.get('event', '') or ''
+        except json.JSONDecodeError:
+            pass
+    if not (org_slug and event_slug):
+        return None
+    try:
+        from pretix.base.models import Event
+        from django_scopes import scopes_disabled
+        with scopes_disabled():
+            return Event.objects.filter(
+                slug=event_slug, organizer__slug=org_slug,
+            ).select_related('organizer').first()
+    except Exception:
+        return None
+
+
+def _validate_token(request):
+    """Internal: parse Authorization header, validate against TeamAPIToken,
+    set `request._pretix_team`. Returns (None, None) on success or
+    (status_code, error_message) on failure."""
+    auth = request.META.get('HTTP_AUTHORIZATION', '')
+    if not auth:
+        return 401, 'authorization required'
+    if not auth.startswith('Token '):
+        return 401, 'invalid auth header format'
+    token_str = auth[6:].strip()
+    if not token_str:
+        return 401, 'empty token'
+    try:
+        from pretix.base.models import TeamAPIToken
+        token = TeamAPIToken.objects.select_related('team').get(token=token_str, active=True)
+        request._pretix_team = token.team
+    except Exception:
+        return 401, 'invalid or inactive API token'
+    return None, None
+
+
 def require_pretix_token(view_func):
     """Validate the request's Authorization header against Pretix's TeamAPIToken table.
-    Accepts `Authorization: Token <token>`. Returns 401 for missing/invalid tokens."""
+    Accepts `Authorization: Token <token>`. Returns 401 for missing/invalid tokens.
+
+    V1 hardening: also enforces that the authenticated team has access to
+    the (organizer, event) the request targets. If the request includes
+    organizer+event in either the query string or JSON body and the resolved
+    Event is owned by a different organizer than the token's team, returns
+    403 — preventing a token from one organizer being used to operate on
+    another organizer's events.
+    """
     @wraps(view_func)
     def wrapper(request, *args, **kwargs):
-        auth = request.META.get('HTTP_AUTHORIZATION', '')
-        if not auth:
-            return JsonResponse({'success': False, 'error': 'authorization required'}, status=401)
-        if not auth.startswith('Token '):
-            return JsonResponse({'success': False, 'error': 'invalid auth header format'}, status=401)
-        token_str = auth[6:].strip()
-        if not token_str:
-            return JsonResponse({'success': False, 'error': 'empty token'}, status=401)
-        try:
-            from pretix.base.models import TeamAPIToken
-            token = TeamAPIToken.objects.select_related('team').get(token=token_str, active=True)
-            # Verify token's team belongs to the correct organizer (prevents cross-org access)
-            team = token.team
-            request._pretix_team = team
-        except Exception:
-            return JsonResponse({'success': False, 'error': 'invalid or inactive API token'}, status=401)
+        status, err = _validate_token(request)
+        if status is not None:
+            return JsonResponse({'success': False, 'error': err}, status=status)
+        # V1 cross-tenant check: when the request names a specific event,
+        # confirm the token's team is in that event's organizer.
+        event = _resolve_event_from_request(request)
+        if event is not None and not check_team_event_access(request, event):
+            return JsonResponse(
+                {'success': False, 'error': 'forbidden — token does not cover this organizer'},
+                status=403,
+            )
         return view_func(request, *args, **kwargs)
     return wrapper
+
+
+def require_pretix_admin_token(perm):
+    """Stricter variant of `require_pretix_token` for admin endpoints.
+
+    On top of the basic token + cross-tenant check, requires the
+    authenticated team to have a specific Pretix permission flag enabled
+    (e.g. `can_view_orders`, `can_change_orders`). This closes V1.b — a
+    legitimate buyer-facing token that happens to be in the same organizer
+    can't be used to call `/admin/refund/` if its team only has
+    view-level permissions.
+
+    Use as `@require_pretix_admin_token('can_change_orders')` etc.
+    """
+    def decorator(view_func):
+        @wraps(view_func)
+        def wrapper(request, *args, **kwargs):
+            status, err = _validate_token(request)
+            if status is not None:
+                return JsonResponse({'success': False, 'error': err}, status=status)
+            event = _resolve_event_from_request(request)
+            if event is not None and not check_team_event_access(request, event):
+                return JsonResponse(
+                    {'success': False, 'error': 'forbidden — token does not cover this organizer'},
+                    status=403,
+                )
+            team = getattr(request, '_pretix_team', None)
+            # team is always set if _validate_token succeeded; the getattr
+            # is defensive in case a test monkeypatches the validator.
+            if team is None or not getattr(team, perm, False):
+                return JsonResponse(
+                    {'success': False, 'error': f'forbidden — token lacks {perm}'},
+                    status=403,
+                )
+            return view_func(request, *args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def check_team_event_access(request, event) -> bool:

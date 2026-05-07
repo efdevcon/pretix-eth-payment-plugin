@@ -328,17 +328,21 @@ def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) 
             return True
     except Exception as e:
         log.debug('eth_payer_signature: ECDSA recovery skipped (%s)', e)
-    # If recovery succeeded but to a *different* address, that's diagnostic
-    # gold — Frame's "MetaMask compatibility" mode and some 7702 setups can
-    # produce signatures that recover to an unrelated key. Surface it instead
-    # of silently falling through to ERC-1271 (which then reports the
-    # confusing "no contract code on this chain" error).
+    # If recovery succeeded but to a *different* address, REJECT outright —
+    # don't fall through to ERC-1271. Falling through was the V19 attack
+    # vector: an attacker submits `payer=victim-smart-wallet-addr` plus a
+    # signature that recovers to their own EOA, and a permissive 1271
+    # validator returns MAGIC for it, granting access. By rejecting here we
+    # close that path; legitimate smart-wallet signatures that aren't
+    # 65-byte ECDSA blobs (Safe multisig, CSW WebAuthn, etc.) recover to
+    # nothing or throw, so they reach the ERC-1271 path below as before.
     if recovered and not _addr_eq(recovered, payer):
         log.warning(
             'eth_payer_signature: ECDSA recovered %s but expected payer=%s '
-            '(falling through to ERC-1271)',
+            '— rejecting (V19 hardening)',
             recovered, payer,
         )
+        return False
 
     # Normalize sig bytes
     try:
@@ -398,6 +402,21 @@ def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) 
     # hash bound to the wallet's domain separator instead of the raw EIP-191
     # hash. Detect the prefix so we know to attempt the chain-bound retry.
     is_7702 = code[:3] == EIP7702_PREFIX
+
+    # V19 hardening: refuse permissive ERC-1271 contracts that return MAGIC
+    # for an all-zero signature. A handful of (mis)deployed "validators" do
+    # this — they're effectively always-true and would treat any caller as
+    # authorized. Probe with a 65-byte zero signature (most common shape;
+    # legitimate validators all reject it) and bail before trusting this
+    # contract's word on anything.
+    zero_sig_probe = _try_erc1271(w3, payer_cs, msg_hash, b'\x00' * 65)
+    if zero_sig_probe == ERC1271_MAGIC:
+        log.warning(
+            'eth_payer_signature: payer %s validates zero-sig — refusing '
+            'permissive ERC-1271 contract (V19 hardening)',
+            payer,
+        )
+        return False
 
     # Try plain EIP-191 hash first. This is what CSW (and most smart accounts)
     # accept directly — they internally compute their own chain-bound hash and

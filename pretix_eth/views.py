@@ -21,7 +21,7 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import to_checksum_address
 
-from pretix.base.models import Order
+from pretix.base.models import Event, Order
 from pretix_eth.chains import (
     SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA,
     is_supported,
@@ -43,6 +43,51 @@ def _check_rate_limit(quote_id: str, ip: str) -> bool:
     key = f'wc_verify_rl:{quote_id}:{ip}'
     count = cache.get(key, 0)
     if count >= RATE_LIMIT_PER_MIN:
+        return False
+    cache.set(key, count + 1, timeout=60)
+    return True
+
+
+def _check_buyer_order_access(request, event):
+    """Validate `order_code` + `order_secret` (query-string for GET, body for
+    POST) against an Order on this event. Returns the Order on success, or a
+    JsonResponse with the appropriate 401/404 to short-circuit the view.
+
+    Buyer-facing WC endpoints (`payment_options`, `wallet_balances`) used to
+    have no auth at all — the wc_inject bundle running in the buyer's browser
+    has no Pretix API token and the endpoints were public. That's strictly
+    worse than the equivalent x402 endpoints, which require a TeamAPIToken
+    (server-side only). The bundle DOES have the order's `code` and `secret`
+    (Pretix's checkout template injects them as `WCConfig`), so we use those
+    as the buyer credential — same protection level Pretix's own session-
+    based AJAX endpoints use, with no new infrastructure.
+
+    Symmetric 404 on missing order vs. wrong secret to prevent code-only
+    enumeration; constant-time secret compare (`hmac.compare_digest`) to
+    avoid the byte-by-byte timing leak of `==`."""
+    from hmac import compare_digest
+    order_code = (request.GET.get('order_code') or '').strip()
+    order_secret = (request.GET.get('order_secret') or '').strip()
+    if not (order_code and order_secret):
+        body = _read_body(request)
+        order_code = order_code or (body.get('order_code') or '').strip()
+        order_secret = order_secret or (body.get('order_secret') or '').strip()
+    if not (order_code and order_secret):
+        return None, JsonResponse({'error': 'order_code and order_secret are required'}, status=401)
+    with scopes_disabled():
+        order = Order.objects.filter(code=order_code, event=event).first()
+    if order is None or not compare_digest(order.secret, order_secret):
+        return None, JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
+    return order, None
+
+
+def _wc_buyer_rate_limit(client_ip: str, kind: str) -> bool:
+    """Per-IP rate limit (30/min) for buyer-facing WC endpoints. `kind` keys
+    a separate bucket per endpoint so a chatty payment-options call doesn't
+    starve wallet-balances (and vice versa). Returns False when exhausted."""
+    key = f'wc_buyer_rl:{kind}:{client_ip}'
+    count = cache.get(key, 0)
+    if count >= 30:
         return False
     cache.set(key, count + 1, timeout=60)
     return True
@@ -83,9 +128,30 @@ def _get_provider_for_event(request: HttpRequest):
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
 def payment_options(request):
-    provider = _get_provider_for_event(request)
-    if provider is None:
-        return JsonResponse({'error': 'event not found'}, status=404)
+    # Buyer auth + per-IP rate limit. Both endpoints used to be unauthenticated
+    # and unrate-limited (strictly worse than V33). The wc_inject bundle has
+    # `orderCode` + `orderSecret` injected into WCConfig by Pretix's checkout
+    # template, so it can pass them as query params. Plugin validates and
+    # gates per-IP at 30/min.
+    client_ip = get_client_ip(request)
+    if not _wc_buyer_rate_limit(client_ip, 'payment_options'):
+        return JsonResponse({'error': 'rate limit exceeded'}, status=429)
+
+    org_slug = (request.GET.get('organizer') or '').strip()
+    ev_slug = (request.GET.get('event') or '').strip()
+    if not (org_slug and ev_slug):
+        return JsonResponse({'error': 'organizer and event are required'}, status=400)
+    with scopes_disabled():
+        try:
+            event = Event.objects.get(slug=ev_slug, organizer__slug=org_slug)
+        except Event.DoesNotExist:
+            return JsonResponse({'error': 'event not found'}, status=404)
+
+    _, err = _check_buyer_order_access(request, event)
+    if err is not None:
+        return err
+
+    provider = WalletConnectPayment(event)
 
     # Read per-chain and per-token boolean settings (default: all enabled)
     enabled_chains = [
@@ -164,9 +230,25 @@ def wallet_balances(request):
     and just skip the balance badge."""
     from pretix_eth.x402.balances import fetch_balances_for_wallet
 
-    provider = _get_provider_for_event(request)
-    if provider is None:
-        return JsonResponse({'error': 'event not found'}, status=404)
+    client_ip = get_client_ip(request)
+    if not _wc_buyer_rate_limit(client_ip, 'wallet_balances'):
+        return JsonResponse({'error': 'rate limit exceeded'}, status=429)
+
+    org_slug = (request.GET.get('organizer') or '').strip()
+    ev_slug = (request.GET.get('event') or '').strip()
+    if not (org_slug and ev_slug):
+        return JsonResponse({'error': 'organizer and event are required'}, status=400)
+    with scopes_disabled():
+        try:
+            event = Event.objects.get(slug=ev_slug, organizer__slug=org_slug)
+        except Event.DoesNotExist:
+            return JsonResponse({'error': 'event not found'}, status=404)
+
+    _, err = _check_buyer_order_access(request, event)
+    if err is not None:
+        return err
+
+    provider = WalletConnectPayment(event)
 
     wallet = (request.GET.get('wallet') or '').strip()
     if not _is_address(wallet):
@@ -349,26 +431,32 @@ def create_quote(request):
             # wallet was on at signing time — the `replaySafeHash` wrapper
             # pulls chainId from `block.chainid`, so a signature made on
             # chain X validates ONLY when isValidSignature is called on
-            # chain X. We try, in order:
-            #   1. `signing_chain_id` (wallet's chain at sign time) — best guess
-            #   2. the payment chain (common case when user didn't switch chains)
-            #   3. every other supported chain (covers users whose wallet is
-            #      on a chain other than the payment chain)
-            # A single success anywhere proves signature validity.
+            # chain X.
+            #
+            # V11 hardening: we used to enumerate the full SUPPORTED_CHAINS
+            # list as a "try each chain until something validates" fallback.
+            # That's an attack-surface multiplier — every extra chain is
+            # another chance for an unrelated contract at the same address
+            # on a different chain to coincidentally validate the signature.
+            # We now only try the two chains the buyer explicitly said
+            # matter:
+            #   1. `signing_chain_id` (wallet's chain at sign time, if sent)
+            #   2. the settlement chain (`chain_id`)
+            # If the smart wallet legitimately signed on neither, the buyer
+            # has to switch to the settlement chain and re-sign — same
+            # ergonomic cost as for any other multi-chain wallet, with the
+            # broad cross-chain replay vector closed.
             signing_chain_id = body.get('signing_chain_id')
-            fallback_chain_ids: list = []
+            check_chain_ids: list = []
             if signing_chain_id is not None:
                 try:
-                    fallback_chain_ids.append(int(signing_chain_id))
+                    check_chain_ids.append(int(signing_chain_id))
                 except (TypeError, ValueError):
                     pass
-            if chain_id not in fallback_chain_ids:
-                fallback_chain_ids.append(chain_id)
-            for supported in SUPPORTED_CHAINS:
-                if supported not in fallback_chain_ids:
-                    fallback_chain_ids.append(supported)
+            if chain_id not in check_chain_ids:
+                check_chain_ids.append(chain_id)
             sig_ok = False
-            for cid in fallback_chain_ids:
+            for cid in check_chain_ids:
                 try:
                     w3_for_sig = _get_web3(cid, settings_key)
                     if verify_eth_payer_signature(
@@ -382,7 +470,7 @@ def create_quote(request):
                 return JsonResponse({
                     'error': (
                         'signature does not validate against payer_address '
-                        '(checked chain(s): ' + ','.join(str(c) for c in fallback_chain_ids) + ')'
+                        '(checked chain(s): ' + ','.join(str(c) for c in check_chain_ids) + ')'
                     ),
                 }, status=400)
             payer = to_checksum_address(claimed_payer)

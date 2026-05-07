@@ -85,6 +85,29 @@ def _get_provider(event):
     return WalletConnectPayment(event)
 
 
+def _x402_enabled_or_404(event):
+    """Per-event admin gate for the buyer-facing x402 endpoints.
+
+    Returns None if the event has explicitly opted into x402, or a
+    JsonResponse 404 if not. Caller pattern:
+
+        if (resp := _x402_enabled_or_404(event)) is not None:
+            return resp
+
+    The admin endpoints in views_admin.py intentionally bypass this gate —
+    operators still need to view, refund, and manually verify existing x402
+    orders even on events that have since toggled x402 off.
+    """
+    provider = _get_provider(event)
+    enabled = provider.settings.get('x402_enabled', as_type=bool, default=False)
+    if not enabled:
+        return JsonResponse(
+            {'success': False, 'error': 'x402 flow not enabled for this event'},
+            status=404,
+        )
+    return None
+
+
 def _addr_eq(a: str, b: str) -> bool:
     return (a or '').lower() == (b or '').lower()
 
@@ -189,7 +212,8 @@ def payment_options(request: HttpRequest):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'error': 'event not found'}, status=404)
-    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
+    if (resp := _x402_enabled_or_404(event)) is not None:
+        return resp
 
     payment_ref = body.get('payment_reference') or body.get('paymentReference')
     wallet = body.get('wallet_address') or body.get('walletAddress')
@@ -476,8 +500,8 @@ def purchase(request):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
-    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
-    # (see docs/superpowers/plans/2026-04-15-x402-consolidation.md Appendix A)
+    if (resp := _x402_enabled_or_404(event)) is not None:
+        return resp
 
     provider = _get_provider(event)
 
@@ -899,8 +923,8 @@ def prepare_authorization(request):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
-    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
-    # (see docs/superpowers/plans/2026-04-15-x402-consolidation.md Appendix A)
+    if (resp := _x402_enabled_or_404(event)) is not None:
+        return resp
 
     required = ('payment_reference', 'from', 'chain_id', 'symbol')
     missing = [k for k in required if not body.get(k)]
@@ -969,8 +993,8 @@ def execute_transfer(request):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
-    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
-    # (see docs/superpowers/plans/2026-04-15-x402-consolidation.md Appendix A)
+    if (resp := _x402_enabled_or_404(event)) is not None:
+        return resp
 
     required = ('payment_reference', 'authorization', 'chain_id', 'symbol')
     missing = [k for k in required if body.get(k) is None]
@@ -1353,8 +1377,8 @@ def verify(request):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
-    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
-    # (see docs/superpowers/plans/2026-04-15-x402-consolidation.md Appendix A)
+    if (resp := _x402_enabled_or_404(event)) is not None:
+        return resp
 
     required = ('payment_reference', 'tx_hash', 'payer', 'chain_id', 'symbol')
     missing = [k for k in required if not body.get(k)]

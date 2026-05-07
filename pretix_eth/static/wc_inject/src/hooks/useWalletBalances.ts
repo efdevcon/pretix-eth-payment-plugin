@@ -37,6 +37,9 @@ export function useWalletBalances(config: WCConfig, wallet: string | undefined) 
       url.searchParams.set('organizer', organizer)
       url.searchParams.set('event', event)
       url.searchParams.set('wallet', wallet!)
+      // Buyer auth — see usePaymentOptions for details. WCConfig has both.
+      url.searchParams.set('order_code', config.orderCode)
+      url.searchParams.set('order_secret', config.orderSecret)
       const r = await fetch(url.toString(), { credentials: 'same-origin' })
       if (!r.ok) {
         throw new Error(`wallet-balances HTTP ${r.status}`)

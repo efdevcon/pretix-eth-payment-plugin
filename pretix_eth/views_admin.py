@@ -13,7 +13,7 @@ from django_scopes import scopes_disabled
 from pretix_eth.models import (
     WCPaymentAttempt, X402CompletedOrder, X402PendingOrder,
 )
-from pretix_eth.x402.auth import require_pretix_token
+from pretix_eth.x402.auth import require_pretix_admin_token
 from pretix_eth.x402 import ticketstore
 
 log = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ def _serialize_pending(o: X402PendingOrder) -> dict:
 
 @csrf_exempt
 @require_http_methods(['GET'])
-@require_pretix_token
+@require_pretix_admin_token('can_view_orders')
 def admin_orders(request: HttpRequest):
     org = request.GET.get('organizer', '')
     event_slug = request.GET.get('event', '')
@@ -243,7 +243,7 @@ def admin_orders(request: HttpRequest):
 
 @csrf_exempt
 @require_http_methods(['GET'])
-@require_pretix_token
+@require_pretix_admin_token('can_view_orders')
 def admin_stats(request: HttpRequest):
     org = request.GET.get('organizer', '')
     event_slug = request.GET.get('event', '')
@@ -272,7 +272,7 @@ def admin_stats(request: HttpRequest):
 
 @csrf_exempt
 @require_http_methods(['POST'])
-@require_pretix_token
+@require_pretix_admin_token('can_change_orders')
 def admin_refund(request: HttpRequest):
     action = request.GET.get('action', '')
     body = _read_body(request)
@@ -357,7 +357,7 @@ _TX_HASH_RE = re.compile(r'^0x[a-fA-F0-9]{64}$')
 
 @csrf_exempt
 @require_http_methods(['POST'])
-@require_pretix_token
+@require_pretix_admin_token('can_change_orders')
 def admin_verify(request: HttpRequest):
     body = _read_body(request)
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
