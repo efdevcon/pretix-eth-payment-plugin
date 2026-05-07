@@ -225,6 +225,15 @@ class WalletConnectPayment(BasePaymentProvider):
                 # mailto in the wc UI so the buyer doesn't have to retype it.
                 'buyer_email': order.email or '',
                 'support_email': self.settings.get('support_email', default='') or '',
+                # Same template used for the email `{url}` placeholder
+                # (see signals.register_url_override). When set, the
+                # wc_inject SuccessStep redirects to the FE order page
+                # instead of Pretix's native one — so the post-payment
+                # destination matches what we send in the confirmation
+                # email. Empty = fall back to Pretix's order page.
+                'frontend_order_url_template': (
+                    self.settings.get('frontend_order_url_template', default='') or ''
+                ),
                 # Cache-buster for the bundle + stylesheet. Pretix serves /static/
                 # with a long max-age header; without a version query string,
                 # mobile browsers (and service workers) serve stale copies of

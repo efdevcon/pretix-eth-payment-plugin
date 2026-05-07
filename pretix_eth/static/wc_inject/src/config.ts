@@ -23,6 +23,12 @@ export interface WCConfig {
   /** Optional support email set in the plugin admin. Shown in a fallback
    *  contact block if the buyer's payment gets stuck; empty string hides it. */
   supportEmail?: string
+  /** Optional FE-domain URL template (same setting that overrides the email
+   *  `{url}` placeholder). When set, SuccessStep redirects to the FE order
+   *  page instead of Pretix's native one — keeps the post-payment landing
+   *  consistent with the confirmation email. Supports `{code}` and
+   *  `{secret}` substitution. Empty string = fall back to Pretix's order. */
+  frontendOrderUrlTemplate?: string
 }
 
 export function readConfig(): WCConfig {
