@@ -73,13 +73,35 @@ def get_client_ip(request) -> str:
     `X-Forwarded-For: <buyer-ip>` to every plugin call, so this works
     end-to-end with no new config on either side.
     """
+    import logging
+    log = logging.getLogger('pretix_eth.client_ip')
     socket_ip = request.META.get('REMOTE_ADDR', '') or 'unknown'
+    has_token = getattr(request, '_pretix_team', None) is not None
+    xff_raw = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    xff_first = xff_raw.split(',')[0].strip() if xff_raw else ''
+
     # Truthy = decorator validated a TeamAPIToken; this caller is one of
     # our trusted backends. None / missing = unauthenticated buyer call.
-    if getattr(request, '_pretix_team', None) is not None:
-        xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
-        if xff:
-            first = xff.split(',')[0].strip()
-            if first:
-                return first
-    return socket_ip
+    if has_token and xff_first:
+        resolved = xff_first
+        path = 'token+xff'
+    else:
+        resolved = socket_ip
+        path = 'socket'
+
+    # DIAGNOSTIC — INFO-level log of every IP-resolution decision, with
+    # all the headers a typical reverse-proxy chain might set. Revert to a
+    # quieter level once the deployment's IP-forwarding behaviour is
+    # understood. Cheap (one log line per rate-limited endpoint hit) but
+    # noisy; not intended to ship to production long-term.
+    log.info(
+        'get_client_ip resolved=%s path=%s socket=%s xff=%s xff_first=%s '
+        'x_real_ip=%s cf_connecting_ip=%s nf_client_connection_ip=%s '
+        'has_token=%s url=%s',
+        resolved, path, socket_ip, xff_raw or '-', xff_first or '-',
+        request.META.get('HTTP_X_REAL_IP', '-'),
+        request.META.get('HTTP_CF_CONNECTING_IP', '-'),
+        request.META.get('HTTP_X_NF_CLIENT_CONNECTION_IP', '-'),
+        has_token, request.path,
+    )
+    return resolved
