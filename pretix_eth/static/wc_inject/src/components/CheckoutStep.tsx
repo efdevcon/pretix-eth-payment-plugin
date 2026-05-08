@@ -1026,9 +1026,27 @@ export function CheckoutStep({
                         sufficient = null
                       }
                     }
-                    const balanceDisplay = balanceEntry
-                      ? `${formatBalance(balanceEntry.balance, balanceEntry.decimals)} ${opt.symbol}`
-                      : null
+                    // Balance line mirrors the x402 storefront format:
+                    //   "Balance: 0.00332616 ETH / $7.63"
+                    // ETH USD is computed off `ethPriceUsd` from payment-options;
+                    // stablecoins (USDC/USDT/USDT0/DAI) are 1:1 with USD so the
+                    // formatted balance IS the dollar figure.
+                    let balanceDisplay: string | null = null
+                    if (balanceEntry) {
+                      const formatted = formatBalance(balanceEntry.balance, balanceEntry.decimals)
+                      let usd: string | null = null
+                      if (opt.symbol === 'ETH' && ethPriceUsd) {
+                        const eth = Number(balanceEntry.balance) / 10 ** balanceEntry.decimals
+                        usd = (eth * ethPriceUsd).toFixed(2)
+                      } else if (opt.symbol !== 'ETH') {
+                        // Stablecoin — formatted balance = USD value (1:1).
+                        const numeric = Number(formatted.replace(/,/g, ''))
+                        if (Number.isFinite(numeric)) usd = numeric.toFixed(2)
+                      }
+                      balanceDisplay = usd != null
+                        ? `Balance: ${formatted} ${opt.symbol} / $${usd}`
+                        : `Balance: ${formatted} ${opt.symbol}`
+                    }
                     const insufficient = sufficient === false
                     return (
                       <button
