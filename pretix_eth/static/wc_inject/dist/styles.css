@@ -320,6 +320,30 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 .wc-asset-chip--active { border-color: #0066cc; background: #f0f7ff; color: #0066cc; }
 .wc-asset-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Narrow screens (≤480px): the asset row holds up to 5 chips
+   (USDC, USDT0, USDT, DAI, ETH). At desktop sizing each chip is ~85px wide
+   and the row wraps onto a second line on a 320px viewport. Tighten padding,
+   font, icon, and gap so all 5 fit on one line down to ~320px. */
+@media (max-width: 480px) {
+  .wc-asset-chips {
+    gap: 6px;
+    flex-wrap: nowrap;
+  }
+  .wc-asset-chip {
+    padding: 6px 10px;
+    font-size: 13px;
+    gap: 4px;
+    /* Allow the chip to absorb remaining space if needed; min-width:0 lets
+       flex shrinking actually work on text-bearing children. */
+    min-width: 0;
+    flex: 0 1 auto;
+  }
+  .wc-asset-chip .wc-asset-icon {
+    width: 14px;
+    height: 14px;
+  }
+}
+
 .wc-network-selection {
   margin-bottom: 16px;
 }
@@ -399,6 +423,34 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 
 .wc-network-row-balance--low {
   color: #c44;
+}
+
+/* Narrow screens (≤480px): the balance line is now ~28 chars
+   ("Balance: 0.00332616 ETH / $7.63") instead of the old ~16 ("0.00332616 ETH").
+   Let the network row wrap so the balance stacks under the chain name + icon
+   instead of overflowing or pushing the check off-row. The check stays on
+   the first row aligned right, balance flows onto the second row indented
+   under the chain name (icon width 24px + gap 10px = 34px). */
+@media (max-width: 480px) {
+  .wc-network-row {
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  /* Push the right side (balance + check) onto a full-width second row only
+     when the balance itself would otherwise overflow. The check follows the
+     balance — it's inline-flex inside `wc-network-row-right`. Indent matches
+     the chain name's left edge (past the icon) for visual alignment. */
+  .wc-network-row-right {
+    flex: 1 1 100%;
+    justify-content: flex-end;
+    padding-left: 34px;
+  }
+  .wc-network-row-balance {
+    white-space: normal;
+    word-break: break-word;
+    font-size: 12px;
+    text-align: right;
+  }
 }
 
 .wc-asset-icon {
