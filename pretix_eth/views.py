@@ -39,10 +39,12 @@ log = logging.getLogger(__name__)
 RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_RATE_LIMIT_PER_MIN', '10'))
 # V52: primary per-IP-per-event cap. Attacker-controlled `quote_id` was
 # rotating to bypass the per-quote bucket and burn merchant RPC quota; the
-# IP-only cap forecloses that path. Defaults to 60/min — generous enough for
-# legitimate buyers retrying through a flaky session, low enough to bound
-# RPC spend.
-WC_VERIFY_IP_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_IP_RATE_LIMIT_PER_MIN', '60'))
+# IP-only cap forecloses that path. Default 20/min — a real buyer retrying
+# through a flaky wallet session burns ~1-3 verifies (initial + manual hash
+# fallback), so 20 leaves an order-of-magnitude headroom. Bumped down from
+# 60/min after V52 verification showed the looser cap let a 12-quote
+# rotation walk through unbounded.
+WC_VERIFY_IP_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_IP_RATE_LIMIT_PER_MIN', '20'))
 
 
 def _check_rate_limit(quote_id: str, ip: str) -> bool:
