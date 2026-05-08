@@ -89,6 +89,12 @@ def verify_erc20_transfer(*, w3, chain_id: int, tx_hash: str,
         value = int(data_hex, 16) if data_hex else 0
         if value < expected_amount:
             return VerificationResult(False, error=f'amount too low: {value} < {expected_amount}')
+        # V49: reject overpay too. ERC-20 quotes are signed against an exact
+        # amount (USDC/USDT have no slippage); a transfer that moved more
+        # tokens than the quote requires is some other transfer accidentally
+        # matched, not the buyer's authorization for this order.
+        if value > expected_amount:
+            return VerificationResult(False, error=f'amount mismatch: {value} != {expected_amount}')
         return VerificationResult(True, block_number=block)
 
     return VerificationResult(False, error='no matching transfer found in tx')

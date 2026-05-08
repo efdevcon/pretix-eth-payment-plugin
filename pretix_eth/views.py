@@ -12,6 +12,7 @@ from typing import Optional
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse, HttpRequest
+from django.utils.timezone import now as tz_now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 from django_scopes import scopes_disabled
@@ -36,6 +37,12 @@ from pretix_eth.x402.auth import get_client_ip
 log = logging.getLogger(__name__)
 
 RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_RATE_LIMIT_PER_MIN', '10'))
+# V52: primary per-IP-per-event cap. Attacker-controlled `quote_id` was
+# rotating to bypass the per-quote bucket and burn merchant RPC quota; the
+# IP-only cap forecloses that path. Defaults to 60/min — generous enough for
+# legitimate buyers retrying through a flaky session, low enough to bound
+# RPC spend.
+WC_VERIFY_IP_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_IP_RATE_LIMIT_PER_MIN', '60'))
 
 
 def _check_rate_limit(quote_id: str, ip: str) -> bool:
@@ -43,6 +50,20 @@ def _check_rate_limit(quote_id: str, ip: str) -> bool:
     key = f'wc_verify_rl:{quote_id}:{ip}'
     count = cache.get(key, 0)
     if count >= RATE_LIMIT_PER_MIN:
+        return False
+    cache.set(key, count + 1, timeout=60)
+    return True
+
+
+def _check_wc_verify_ip_rate_limit(organizer: str, event: str, ip: str) -> bool:
+    """V52: primary per-IP-per-event cap, checked BEFORE quote lookup or any
+    RPC work. Attackers can rotate valid quote_ids to bypass `_check_rate_limit`
+    (which keys on quote_id+ip), but the IP-keyed cap doesn't budge under
+    that pattern and bounds RPC spend regardless of how many pending quotes
+    the same IP has minted."""
+    key = f'wc_verify_ip:{organizer}:{event}:{ip}'
+    count = cache.get(key, 0)
+    if count >= WC_VERIFY_IP_RATE_LIMIT_PER_MIN:
         return False
     cache.set(key, count + 1, timeout=60)
     return True
@@ -91,6 +112,31 @@ def _wc_buyer_rate_limit(client_ip: str, kind: str) -> bool:
         return False
     cache.set(key, count + 1, timeout=60)
     return True
+
+
+def _wc_config_or_403(event, *, chain_id=None, symbol=None):
+    """V46: enforce the WC provider's enabled state + per-chain / per-token
+    toggles on every raw `/plugin/wc/*` endpoint. Pre-fix code only consulted
+    these settings in `payment_options` (the UI feed) — the create-quote /
+    challenge / verify endpoints accepted any chain/token regardless. So an
+    operator who flipped `payment_walletconnect__enabled=False` (or per-chain
+    / per-token disable flags) still saw quotes mint and orders settle for
+    those disabled rails.
+
+    Returns `(provider, None)` on success, `(None, JsonResponse)` on
+    rejection so callers can `if err: return err`."""
+    provider = WalletConnectPayment(event)
+    if not provider.settings.get('_enabled', as_type=bool, default=False):
+        return None, JsonResponse({'error': 'walletconnect disabled'}, status=404)
+    if chain_id is not None:
+        v = str(provider.settings.get(f'chain_{chain_id}', default='True')).lower()
+        if v not in ('true', '1', 'yes'):
+            return None, JsonResponse({'error': 'chain disabled'}, status=400)
+    if symbol is not None:
+        v = str(provider.settings.get(f'token_{symbol}', default='True')).lower()
+        if v not in ('true', '1', 'yes'):
+            return None, JsonResponse({'error': 'token disabled'}, status=400)
+    return provider, None
 
 
 def _read_body(request) -> dict:
@@ -151,7 +197,9 @@ def payment_options(request):
     if err is not None:
         return err
 
-    provider = WalletConnectPayment(event)
+    provider, err = _wc_config_or_403(event)
+    if err is not None:
+        return err
 
     # Read per-chain and per-token boolean settings (default: all enabled)
     enabled_chains = [
@@ -248,7 +296,9 @@ def wallet_balances(request):
     if err is not None:
         return err
 
-    provider = WalletConnectPayment(event)
+    provider, err = _wc_config_or_403(event)
+    if err is not None:
+        return err
 
     wallet = (request.GET.get('wallet') or '').strip()
     if not _is_address(wallet):
@@ -286,6 +336,7 @@ CHALLENGE_TTL = 600  # 10 min
 def challenge(request):
     """Issue a signed-message challenge that the user's wallet must sign,
     proving ownership of the address that will pay."""
+    from hmac import compare_digest
     body = _read_body(request)
 
     required = ('order_code', 'order_secret', 'organizer', 'event')
@@ -295,16 +346,21 @@ def challenge(request):
 
     with scopes_disabled():
         try:
-            order = Order.objects.get(
-                code=body['order_code'],
-                event__slug=body['event'],
-                event__organizer__slug=body['organizer'],
-            )
-        except Order.DoesNotExist:
-            return JsonResponse({'error': 'order not found'}, status=404)
+            event = Event.objects.get(slug=body['event'], organizer__slug=body['organizer'])
+        except Event.DoesNotExist:
+            return JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
 
-        if order.secret != body['order_secret']:
-            return JsonResponse({'error': 'invalid secret'}, status=403)
+        # V46: bail if WC is disabled for this event before doing anything else.
+        _, err = _wc_config_or_403(event)
+        if err is not None:
+            return err
+
+        # V48: symmetric 404 for missing order vs. wrong secret + constant-time
+        # secret compare. Pre-fix code returned 404 (missing) vs 403 (wrong secret),
+        # which let any caller walk the order-code namespace.
+        order = Order.objects.filter(code=body['order_code'], event=event).first()
+        if order is None or not compare_digest(order.secret, body['order_secret']):
+            return JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
 
         if order.status != Order.STATUS_PENDING:
             return JsonResponse({'error': 'order not pending'}, status=409)
@@ -347,6 +403,7 @@ def challenge(request):
 def create_quote(request):
     """Recover the payer from a SIWE-lite signature, validate the challenge,
     build a quote, and persist it to the pending payment's info_data."""
+    from hmac import compare_digest
     body = _read_body(request)
 
     required = ('order_code', 'order_secret', 'organizer', 'event',
@@ -366,16 +423,21 @@ def create_quote(request):
 
     with scopes_disabled():
         try:
-            order = Order.objects.get(
-                code=body['order_code'],
-                event__slug=body['event'],
-                event__organizer__slug=body['organizer'],
-            )
-        except Order.DoesNotExist:
-            return JsonResponse({'error': 'order not found'}, status=404)
+            event = Event.objects.get(slug=body['event'], organizer__slug=body['organizer'])
+        except Event.DoesNotExist:
+            return JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
 
-        if order.secret != body['order_secret']:
-            return JsonResponse({'error': 'invalid secret'}, status=403)
+        # V46: enforce WC enabled + per-chain + per-token toggles before
+        # minting a quote. Pre-fix code only checked the global `is_supported`
+        # registry, not the operator's per-event opt-out flags.
+        _, err = _wc_config_or_403(event, chain_id=chain_id, symbol=symbol)
+        if err is not None:
+            return err
+
+        # V48: symmetric 404 + constant-time secret compare (mirror of challenge).
+        order = Order.objects.filter(code=body['order_code'], event=event).first()
+        if order is None or not compare_digest(order.secret, body['order_secret']):
+            return JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
 
         payment = order.payments.filter(provider='walletconnect', state='created').first()
         if payment is None:
@@ -532,23 +594,33 @@ def verify(request):
         return _verify_bad(f'missing fields: {missing}')
 
     client_ip = get_client_ip(request)
+    # V52: primary per-IP-per-event cap fires before any quote lookup. The
+    # secondary per-quote cap below catches one buyer hammering a single
+    # quote — but the per-IP one is what bounds the cost of attackers who
+    # rotate fresh quote_ids to escape the per-quote bucket.
+    if not _check_wc_verify_ip_rate_limit(body['organizer'], body['event'], client_ip):
+        return _verify_bad('rate limit exceeded (ip)', status=429, ip=client_ip)
     if not _check_rate_limit(body['quote_id'], client_ip):
         return _verify_bad('rate limit exceeded', status=429, quote_id=body.get('quote_id'), ip=client_ip)
 
     tx_hash = body['tx_hash']
     if not _TX_HASH_RE.match(tx_hash):
         return _verify_bad('invalid tx_hash format', tx_hash=tx_hash)
+    # V45: canonicalise hex case before any check or insert. WCPaymentAttempt's
+    # unique constraint is case-sensitive at the DB level; pre-fix code did an
+    # `__iexact` pre-check then inserted with caller casing, so two concurrent
+    # verifies for the same on-chain tx with different casing both passed
+    # the pre-check, both inserted, both orders went paid.
+    tx_hash = tx_hash.lower()
 
     try:
         chain_id = int(body['chain_id'])
     except (TypeError, ValueError):
         return _verify_bad('invalid chain_id', chain_id=body.get('chain_id'))
 
-    # Fail fast on one-time tx_hash check. Case-insensitive: clients normally
-    # send lowercase 0x-hex, but tooling-generated hashes (Etherscan exports,
-    # wallet UI copy) sometimes come back mixed/upper-case — the dup guard
-    # must catch all of those.
-    if WCPaymentAttempt.objects.filter(tx_hash__iexact=tx_hash, state='completed').exists():
+    # Fail fast on one-time tx_hash check. Now exact-match against the
+    # canonicalised lowercase form (see V45 note above).
+    if WCPaymentAttempt.objects.filter(tx_hash=tx_hash, state='completed').exists():
         return _verify_bad('tx already used for a completed order', tx_hash=tx_hash)
 
     with scopes_disabled():
@@ -601,6 +673,14 @@ def verify(request):
             return _verify_bad('quote expired',
                                expires_at=quote['expires_at'], now=int(time.time()))
 
+        # V46: re-check the WC config at settlement time. An operator can flip
+        # the provider/chain/token toggles off between quote creation and
+        # verify; without this re-check, in-flight quotes would still settle
+        # against now-disabled rails.
+        _, err = _wc_config_or_403(order.event, chain_id=chain_id, symbol=quote.get('symbol'))
+        if err is not None:
+            return err
+
         provider = WalletConnectPayment(order.event)
         settings_key = provider.settings.get('alchemy_api_key', default=None)
         min_conf = int(provider.settings.get('min_confirmations', default=1))
@@ -636,9 +716,45 @@ def verify(request):
                 'confirmations_required': vr.min_confirmations,
             }, status=400)
 
-        # Atomic claim: unique constraint on tx_hash prevents race
+        # V49: bind the on-chain transfer to the quote's freshness window.
+        # Without this, any prior matching transfer (e.g. a refund, a stale
+        # canceled-quote transfer, or an out-of-band send to the merchant)
+        # could be replayed once into a future quote. The plain ERC-20
+        # `Transfer` log carries no order/quote binding, so the only way to
+        # require "this transfer was made FOR this quote" is to constrain the
+        # block timestamp to the quote window.
+        try:
+            receipt_block = w3.eth.get_block(vr.block_number)
+            block_ts = int(receipt_block.timestamp)
+        except Exception as e:
+            return _verify_bad(f'failed to fetch block timestamp: {e}', tx_hash=tx_hash)
+        quote_created = int(quote.get('created_at', 0))
+        quote_expires = int(quote.get('expires_at', 0))
+        if quote_created and block_ts < quote_created:
+            return _verify_bad('tx mined before quote was issued',
+                               block_ts=block_ts, quote_created=quote_created, tx_hash=tx_hash)
+        if quote_expires and block_ts > quote_expires:
+            return _verify_bad('tx mined after quote expired',
+                               block_ts=block_ts, quote_expires=quote_expires, tx_hash=tx_hash)
+
+        # Atomic claim: unique constraint on tx_hash prevents race; the
+        # SELECT FOR UPDATE on Order + re-check of order.status closes the
+        # V51 window (mark_order_expired() flipped the order to expired
+        # while a verify was mid-flight). The dup pre-check above is racey
+        # by itself; the unique-constraint catch in `except IntegrityError`
+        # below is the actual one-time-use guarantee.
         try:
             with transaction.atomic():
+                # V51: re-fetch the order under a row lock and re-check it
+                # is still pending + still within its payment deadline.
+                order = Order.objects.select_for_update().get(pk=order.pk)
+                if order.status != Order.STATUS_PENDING:
+                    return _verify_bad('order is not in pending state',
+                                       status=410, order_status=order.status, tx_hash=tx_hash)
+                if order.expires and order.expires < tz_now():
+                    return _verify_bad('order payment deadline has elapsed',
+                                       status=410, order_expires=str(order.expires), tx_hash=tx_hash)
+
                 WCPaymentAttempt.objects.create(
                     tx_hash=tx_hash, quote_id=quote['quote_id'],
                     order_code=order.code, payer=quote['intended_payer'],
