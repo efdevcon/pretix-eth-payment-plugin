@@ -42,11 +42,15 @@ log = logging.getLogger('pretix_eth.migrations.0014')
 
 
 def _resolve_collisions(model, *, dry_run):
+    # NB: both `WCPaymentAttempt` and `X402CompletedOrder` use
+    # `payment_reference` as `primary_key=True`, not the implicit `id` —
+    # Count('id') would raise FieldError. `Count('pk')` is the portable
+    # alias Django resolves to whatever the model's actual PK is.
     collisions = (
         model.objects
         .annotate(lower_hash=Lower('tx_hash'))
         .values('lower_hash')
-        .annotate(c=Count('id'))
+        .annotate(c=Count('pk'))
         .filter(c__gt=1)
     )
     colliding_hashes = [c['lower_hash'] for c in collisions]
