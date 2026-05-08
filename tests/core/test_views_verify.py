@@ -10,6 +10,7 @@ from pretix_eth.models import WCPaymentAttempt
 @pytest.fixture
 def quoted_order(event, django_db_reset_sequences):
     """An order with a fully-built quote on its pending payment (post /create-quote)."""
+    from datetime import timedelta
     from pretix.base.models import Order
     from decimal import Decimal
     from django.utils import timezone
@@ -23,7 +24,10 @@ def quoted_order(event, django_db_reset_sequences):
             total=Decimal('50.00'),
             code='VERIFY1',
             datetime=timezone.now(),
-            expires=timezone.now(),
+            # V51: verify re-checks `order.expires` inside the atomic block.
+            # The fixture must set this to a future time so the happy-path
+            # tests don't trip the deadline-elapsed reject.
+            expires=timezone.now() + timedelta(hours=1),
             sales_channel=sc,
             locale='en',
         )
@@ -62,9 +66,15 @@ def event_configured(event):
 TRANSFER_TOPIC = '0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef'
 
 
-def _make_fake_w3(from_addr, to_addr, token, amount, block=100, head=105, status=1):
+def _make_fake_w3(from_addr, to_addr, token, amount, block=100, head=105, status=1, block_ts=None):
+    """Build a stub web3 client. `block_ts` defaults to "now" so the V49 quote
+    freshness window check (block.timestamp ∈ [quote.created_at, expires_at])
+    passes by default; tests that want to drive the V49 reject paths can pass
+    a timestamp outside that window explicitly."""
     def pad(a):
         return '0x' + '0' * 24 + a[2:].lower()
+    if block_ts is None:
+        block_ts = int(time.time()) + 1  # one tick after quoted_order.created_at
     fake = mock.MagicMock()
     fake.eth.block_number = head
     fake.eth.get_transaction_receipt.return_value = {
@@ -75,6 +85,9 @@ def _make_fake_w3(from_addr, to_addr, token, amount, block=100, head=105, status
             'data': hex(amount)[2:].rjust(64, '0'),
         }],
     }
+    fake_block = mock.MagicMock()
+    fake_block.timestamp = block_ts
+    fake.eth.get_block.return_value = fake_block
     return fake
 
 

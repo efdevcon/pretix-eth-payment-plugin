@@ -76,6 +76,8 @@ def test_challenge_returns_nonce_and_message(client, event, pending_order):
 
 @pytest.mark.django_db
 def test_challenge_rejects_wrong_secret(client, event, pending_order):
+    """V48: a wrong secret returns the same symmetric 404 as a missing order
+    so the response can't be used to enumerate which order codes exist."""
     resp = client.post(
         '/plugin/wc/challenge/',
         data=json.dumps({
@@ -86,7 +88,8 @@ def test_challenge_rejects_wrong_secret(client, event, pending_order):
         }),
         content_type='application/json',
     )
-    assert resp.status_code == 403
+    assert resp.status_code == 404
+    assert resp.json()['error'] == 'order not found or secret mismatch'
 
 
 @pytest.mark.django_db

@@ -49,6 +49,17 @@ def event(django_db_reset_sequences, organizer):
         plugins='pretix_eth',
     )
 
+    # Phase B Fix 1 / Phase C Fix 13: enable both WC and x402 by default in
+    # the test fixture. The runtime defaults are OFF (admin must explicitly
+    # opt in), but the test suite is exercising the wired-up flows; without
+    # these the WC endpoints return 404 ('walletconnect disabled') and the
+    # x402 endpoints return 404 ('x402 flow not enabled for this event'),
+    # which is correct behavior but unrelated to what each test is actually
+    # checking. Tests that specifically want to validate the disabled-path
+    # can still flip the flag back off per-test.
+    event.settings.set('payment_walletconnect__enabled', True)
+    event.settings.set('payment_walletconnect_x402_enabled', True)
+
     return event
 
 
@@ -143,12 +154,22 @@ def get_order_and_payment(django_db_reset_sequences, event, get_organizer_scope)
 @pytest.fixture
 def api_client(event, django_db_reset_sequences):
     """Django test client pre-configured with a valid Pretix API token.
-    Use this instead of `client` for x402 view tests."""
+    Use this instead of `client` for x402 view tests.
+
+    Phase B Fix 2: admin views now require explicit per-permission flags
+    (`can_view_orders` / `can_change_orders`). Modern Pretix exposes those as
+    `LegacyPermissionProperty` derived from `all_event_permissions` /
+    `limit_event_permissions`; the default test token enables
+    `all_event_permissions=True` so existing tests don't have to wire each
+    permission individually. Tests that specifically validate a
+    permission-level reject can build a narrower team manually."""
     from django_scopes import scopes_disabled
     with scopes_disabled():
         team = Team.objects.create(
             organizer=event.organizer, name='Test API Team',
             all_events=True,
+            all_event_permissions=True,
+            all_organizer_permissions=True,
         )
         from pretix.base.models import TeamAPIToken
         token_obj = TeamAPIToken.objects.create(team=team)

@@ -140,8 +140,12 @@ def test_underpayment_fails(fake_w3):
     assert r.verified is False
 
 
-def test_overpayment_accepted(fake_w3):
-    # user paid more than required — should still verify
+def test_overpayment_rejected(fake_w3):
+    """V49: ERC-20 quotes are signed against an exact amount (USDC/USDT have
+    no slippage). Overpaying mints a `Transfer` log that doesn't bind to the
+    quote — accepting it lets a fat-finger send settle a future smaller
+    quote. Pre-V49 code accepted any `value >= expected`; post-V49 code
+    requires `value == expected`."""
     token = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913'
     sender = '0x' + '1' * 40
     recipient = '0x' + '2' * 40
@@ -153,7 +157,8 @@ def test_overpayment_accepted(fake_w3):
         expected_from=sender, expected_to=recipient,
         expected_token=token, expected_amount=50_000_000, min_confirmations=1,
     )
-    assert r.verified is True
+    assert r.verified is False
+    assert 'amount mismatch' in (r.error or '')
 
 
 def test_tx_not_mined(fake_w3):
