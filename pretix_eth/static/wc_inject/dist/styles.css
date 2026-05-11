@@ -295,6 +295,35 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   letter-spacing: 0.5px;
 }
 
+/* Flex header that puts the "Network" label on the left and the
+   "Refresh balances" button on the right — mirrors the x402 storefront's
+   .network-header. The label's margin-bottom is overridden here so the
+   button sits aligned with the label baseline. */
+.wc-network-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 8px;
+}
+.wc-network-header .wc-network-label {
+  margin-bottom: 0;
+}
+
+.wc-network-refresh {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0066cc;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.wc-network-refresh:hover:not(:disabled) { opacity: 0.7; }
+.wc-network-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .wc-asset-chips {
   display: flex;
   gap: 8px;

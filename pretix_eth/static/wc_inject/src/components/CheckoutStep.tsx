@@ -1011,7 +1011,22 @@ export function CheckoutStep({
             {/* Step 2: Network selection rows */}
             {tokenFilter && networksForToken.length > 0 && (
               <div className="wc-network-selection">
-                <span className="wc-network-label">Network</span>
+                <div className="wc-network-header">
+                  <span className="wc-network-label">Network</span>
+                  {/* Mirror the x402 storefront's "Refresh balances" affordance.
+                       Wallet balances move when the buyer sends/receives between
+                       the page load and selecting a network — without a manual
+                       refresh, an insufficient row can stay greyed out for the
+                       full 60s React Query refetchInterval. */}
+                  <button
+                    type="button"
+                    className="wc-network-refresh"
+                    onClick={() => balancesQuery.refetch()}
+                    disabled={balancesQuery.isFetching || busy}
+                  >
+                    Refresh balances
+                  </button>
+                </div>
                 <div className="wc-network-list">
                   {networksForToken.map(opt => {
                     const isSelected = picked?.chain_id === opt.chain_id && picked?.symbol === opt.symbol
