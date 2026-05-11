@@ -26,7 +26,11 @@ export function WalletHeader({ disabled = false }: { disabled?: boolean }) {
   if (!address) return null
 
   const short = `${address.slice(0, 6)}...${address.slice(-4)}`
-  const displayName = ensName || short
+  // DEMO HARDCODE: rebrand `d.krux.eth` → `d.devcon.eth` for the demo.
+  // The `title={address}` on the `<code>` below still surfaces the real
+  // 0x on hover, so this is purely a visual substitution. REMOVE AFTER DEMO.
+  const rebrandedEns = ensName === 'd.krux.eth' ? 'd.devcon.eth' : ensName
+  const displayName = rebrandedEns || short
   // Reown's `useWalletInfo` returns the actual peer wallet over a
   // WalletConnect session (e.g. "Rainbow", "MetaMask Mobile") rather than
   // the generic "WalletConnect" connector name. For injected connections
