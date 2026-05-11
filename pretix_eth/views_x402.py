@@ -16,7 +16,7 @@ from django_scopes import scopes_disabled
 from web3 import Web3
 
 from pretix_eth.chains import SUPPORTED_CHAINS, get_token_contract, is_supported
-from pretix_eth.payment import WalletConnectPayment
+from pretix_eth.payment import WalletConnectPayment, _read_discount_pct
 from pretix_eth.pricing import fetch_eth_price_usd, usd_to_token_raw
 from pretix_eth.rpc import get_rpc_url
 from pretix_eth.verification import verify_erc20_transfer, verify_native_eth
@@ -783,7 +783,10 @@ def purchase(request):
                 'details': str(e),
             }, status=409)
 
-    discount_pct = Decimal(str(provider.settings.get('crypto_discount_percent', default='0')))
+    # Same normalisation helper used by `calculate_fee` — handles blank /
+    # None / empty-string settings (post-fix: form is `required=False`)
+    # uniformly as "no discount".
+    discount_pct = _read_discount_pct(provider.settings)
     crypto_discount = ((subtotal - voucher_discount) * discount_pct / Decimal('100')).quantize(Decimal('0.01'))
     total = subtotal - voucher_discount - crypto_discount
 

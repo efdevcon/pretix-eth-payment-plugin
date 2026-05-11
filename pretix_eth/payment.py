@@ -15,6 +15,29 @@ from pretix_eth.chains import SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA
 log = logging.getLogger(__name__)
 
 
+def _read_discount_pct(settings) -> Decimal:
+    """Normalise `crypto_discount_percent` to a `Decimal`. Returns Decimal('0')
+    for every representation of "disabled":
+      - missing / never-set                  → '0'
+      - explicit None (form was cleared)     → '0'
+      - empty string                         → '0'
+      - explicit "0" / "0.00" / Decimal(0)   → '0'
+      - anything that doesn't parse cleanly  → '0' (defensive)
+    Anything > 0 is returned as-is.
+
+    `provider.settings.get(..., as_type=Decimal)` mostly handles the None / empty
+    cases, but Pretix versions vary; this helper is the single chokepoint for
+    "what does the percent actually evaluate to right now" so every consumer
+    reaches the same answer."""
+    raw = settings.get('crypto_discount_percent', default=None)
+    if raw is None or raw == '':
+        return Decimal('0')
+    try:
+        return Decimal(str(raw))
+    except Exception:
+        return Decimal('0')
+
+
 def _format_crypto_amount(raw, token_symbol):
     """Convert a stored raw on-chain integer (USDC/USDT0 in 6-decimal base units,
     ETH in wei) into a human-readable decimal string. Returns None on bad input
@@ -134,7 +157,21 @@ class WalletConnectPayment(BasePaymentProvider):
         )
         base['crypto_discount_percent'] = forms.DecimalField(
             label=_('Crypto discount (% off the fiat price)'),
-            initial=0, min_value=0, max_value=50, decimal_places=2,
+            help_text=_(
+                'Percentage taken off the fiat price for buyers who pay in '
+                'crypto. Leave blank or set to 0 to disable the discount '
+                'entirely — no discount UI, no negative OrderFee, no math. '
+                'Range: 0–50%.'
+            ),
+            # required=False so operators can leave the field blank to mean
+            # "no discount". Pre-fix the field was implicitly required
+            # (Django's DecimalField default) which blocked saving the
+            # settings form when the operator wanted to disable the discount.
+            required=False,
+            initial=0,
+            min_value=0,
+            max_value=50,
+            decimal_places=2,
         )
         base['payment_recipient'] = forms.CharField(
             label=_('Merchant wallet address (EIP-55) where crypto payments are sent'),
@@ -189,8 +226,12 @@ class WalletConnectPayment(BasePaymentProvider):
         and on-chain verification) reflect it. The x402 path bypasses this:
         it computes its own discounted total and writes it to `order.total`
         directly, so there is no double-application.
+
+        With the form set to `required=False`, the underlying setting can be
+        absent, None, or an empty string when the operator disables the
+        discount. _read_discount_pct normalises all of those to Decimal('0').
         """
-        pct = self.settings.get('crypto_discount_percent', as_type=Decimal, default=Decimal('0'))
+        pct = _read_discount_pct(self.settings)
         if pct <= 0:
             return Decimal('0')
         places = dj_settings.CURRENCY_PLACES.get(self.event.currency, 2)
