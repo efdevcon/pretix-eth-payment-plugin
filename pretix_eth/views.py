@@ -46,6 +46,18 @@ RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_RATE_LIMIT_PER_MIN', '10'))
 # rotation walk through unbounded.
 WC_VERIFY_IP_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_IP_RATE_LIMIT_PER_MIN', '20'))
 
+# V53: pre-signature limits on /plugin/wc/create-quote/. The smart-wallet
+# (ERC-1271) signature path verifies via an on-chain `isValidSignature`
+# call, so bogus signatures drain merchant RPC quota. Two layers:
+#   - WC_CREATE_QUOTE_IP_RATE_LIMIT_PER_MIN — per-IP+event budget, mirrors
+#     the V52 limiter on /verify/. Default 20/min.
+#   - WC_CREATE_QUOTE_PER_CHALLENGE_BUDGET — per-(order, challenge) failure
+#     budget tracked in `payment.info_data['failed_sig_attempts']`. Once
+#     exhausted the challenge must be re-issued. Catches the case where an
+#     attacker rotates IPs against a single legitimate pending order.
+WC_CREATE_QUOTE_IP_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_CREATE_QUOTE_IP_RATE_LIMIT_PER_MIN', '20'))
+WC_CREATE_QUOTE_PER_CHALLENGE_BUDGET = int(os.environ.get('WC_CREATE_QUOTE_PER_CHALLENGE_BUDGET', '5'))
+
 
 def _check_rate_limit(quote_id: str, ip: str) -> bool:
     """Return False if caller has exceeded WC_VERIFY_RATE_LIMIT_PER_MIN for this quote+IP pair."""
@@ -66,6 +78,20 @@ def _check_wc_verify_ip_rate_limit(organizer: str, event: str, ip: str) -> bool:
     key = f'wc_verify_ip:{organizer}:{event}:{ip}'
     count = cache.get(key, 0)
     if count >= WC_VERIFY_IP_RATE_LIMIT_PER_MIN:
+        return False
+    cache.set(key, count + 1, timeout=60)
+    return True
+
+
+def _check_wc_create_quote_ip_rate_limit(organizer: str, event: str, ip: str) -> bool:
+    """V53: per-IP+event rate limit on /plugin/wc/create-quote/, checked
+    BEFORE any signature verification (ERC-1271 sig verify hits an on-chain
+    `isValidSignature` call — bogus sigs would otherwise drain RPC quota).
+    Same shape as the V52 limiter on /verify/, separate bucket so the two
+    flows don't starve each other."""
+    key = f'wc_create_quote_ip:{organizer}:{event}:{ip}'
+    count = cache.get(key, 0)
+    if count >= WC_CREATE_QUOTE_IP_RATE_LIMIT_PER_MIN:
         return False
     cache.set(key, count + 1, timeout=60)
     return True
@@ -423,6 +449,15 @@ def create_quote(request):
     if not is_supported(chain_id, symbol):
         return JsonResponse({'error': 'unsupported chain/token combination'}, status=400)
 
+    # V53: pre-signature IP rate limit. The smart-wallet (ERC-1271) verify
+    # path below makes an on-chain `isValidSignature` call per attempt — a
+    # legitimate pending order/challenge is enough ammo to drain RPC quota
+    # by submitting many bogus signatures. Cap fires before any sig work.
+    client_ip = get_client_ip(request)
+    if not _check_wc_create_quote_ip_rate_limit(body['organizer'], body['event'], client_ip):
+        log.warning('wc_create_quote rejected: ip rate limit exceeded ip=%s', client_ip)
+        return JsonResponse({'error': 'rate limit exceeded'}, status=429)
+
     with scopes_disabled():
         try:
             event = Event.objects.get(slug=body['event'], organizer__slug=body['organizer'])
@@ -455,6 +490,22 @@ def create_quote(request):
         if time.time() > expires_at:
             return JsonResponse({'error': 'challenge expired'}, status=400)
 
+        # V53: per-challenge failed-sig budget. Catches the case where an
+        # attacker rotates IPs (defeating the per-IP limiter above) against
+        # a single legitimate pending order/challenge. Once the budget is
+        # spent the buyer must request a fresh /challenge/ — which resets
+        # `failed_sig_attempts` to 0 implicitly via the new challenge's
+        # info_data overwrite.
+        failed_sigs = int(info.get('failed_sig_attempts', 0))
+        if failed_sigs >= WC_CREATE_QUOTE_PER_CHALLENGE_BUDGET:
+            log.warning(
+                'wc_create_quote rejected: per-challenge budget exhausted (%d/%d) order=%s',
+                failed_sigs, WC_CREATE_QUOTE_PER_CHALLENGE_BUDGET, order.code,
+            )
+            return JsonResponse({
+                'error': 'too many failed signature attempts for this challenge; request a new challenge',
+            }, status=429)
+
         # Two acceptable signature modes:
         #
         # 1) EOA (65 bytes): standard ECDSA. We recover the signer locally and
@@ -471,16 +522,30 @@ def create_quote(request):
         signature_hex = body['signature']
         sig_len_bytes = len(signature_hex[2:]) // 2 if signature_hex.startswith('0x') else len(signature_hex) // 2
 
+        def _record_sig_failure():
+            """V53: bump `failed_sig_attempts` on the pending payment so the
+            per-challenge budget catches IP-rotating brute-force. Save is
+            best-effort — failing to record the failure shouldn't itself
+            500 the response."""
+            try:
+                info['failed_sig_attempts'] = failed_sigs + 1
+                payment.info_data = info
+                payment.save(update_fields=['info'])
+            except Exception as e:
+                log.warning('wc_create_quote: failed to record sig failure: %s', e)
+
         if sig_len_bytes == 65 and not claimed_payer:
             # EOA path (backward-compatible with clients that don't send payer_address)
             try:
                 msg = encode_defunct(text=message)
                 recovered = Account.recover_message(msg, signature=signature_hex)
             except Exception as e:
+                _record_sig_failure()
                 return JsonResponse({'error': f'signature recovery failed: {e}'}, status=400)
             payer = to_checksum_address(recovered)
         else:
             if not claimed_payer:
+                # Shape error, not a sig failure — don't burn the budget.
                 return JsonResponse({
                     'error': (
                         'payer_address is required for smart-wallet signatures '

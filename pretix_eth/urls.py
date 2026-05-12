@@ -14,6 +14,11 @@ urlpatterns = [
     path('plugin/wc/create-quote/',    views.create_quote,     name='wc_create_quote'),
     path('plugin/wc/verify/',          views.verify,           name='wc_verify'),
 
+    # Public per-event toggle state (read-only). Storefront polls this to
+    # decide whether to call the gated endpoints — must remain reachable
+    # even when the gates are flipped OFF, so it sits at the top.
+    path('plugin/x402/settings/',              views_x402.settings,              name='x402_settings'),
+
     # x402 purchase flow
     path('plugin/x402/purchase/',              views_x402.purchase,              name='x402_purchase'),
     path('plugin/x402/payment-options/',       views_x402.payment_options,       name='x402_payment_options'),
