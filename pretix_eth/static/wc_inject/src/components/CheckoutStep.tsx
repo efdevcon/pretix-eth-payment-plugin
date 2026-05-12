@@ -15,8 +15,11 @@ import {
   getTransactionCount,
   getBlock,
   getBlockNumber,
+  getCapabilities,
+  sendCalls,
+  waitForCallsStatus,
 } from 'wagmi/actions'
-import { erc20Abi } from 'viem'
+import { erc20Abi, encodeFunctionData } from 'viem'
 import { NETWORK_LOGOS, TOKEN_LOGOS } from '../assetIcons'
 import type { WCConfig } from '../config'
 import type { PaymentOption } from '../hooks/usePaymentOptions'
@@ -359,19 +362,100 @@ export function CheckoutStep({
   const [tokenFilter, setTokenFilter] = useState<string | null>(null)
   const [picked, setPicked] = useState<PaymentOption | null>(null)
 
-  // Pre-select ETH when payment options first arrive — saves the user a click
-  // for the most common case. Falls back to leaving everything unselected if
-  // ETH isn't offered (oracle divergence, chain disabled, etc.); the user
-  // picks an asset manually then. Only fires when nothing has been picked yet
-  // so we don't clobber an explicit user choice on a re-render.
+  // Persist the buyer's pick to sessionStorage keyed by orderCode. Survives
+  // a full page reload (iOS Safari can evict the WebView while the wallet
+  // app is in foreground during signMessage; mobile Coinbase / Base
+  // Account deep-link round-trips trigger this). Stored as
+  // `{chain_id, symbol}` identity only — we re-attach to the live
+  // PaymentOption on restore so we don't carry stale server-side fields
+  // (rates, addresses) across reloads. Scoped to sessionStorage so it
+  // never leaks across orders and clears with the tab.
+  const pickStorageKey = `wc-pick:${config.orderCode}`
+
+  // Combined hydrate-or-default: try restoring from sessionStorage first,
+  // and only fall back to ETH auto-select if no saved pick matches a
+  // currently-offered option. Replaces the original auto-select effect;
+  // guard `if (tokenFilter !== null || picked !== null) return` still
+  // prevents clobbering an explicit user choice on re-render.
   useEffect(() => {
     if (tokenFilter !== null || picked !== null) return
     if (options.length === 0) return
+
+    try {
+      const raw = window.sessionStorage.getItem(pickStorageKey)
+      if (raw) {
+        const saved = JSON.parse(raw) as { chain_id?: number; symbol?: string }
+        const match = options.find(
+          o => o.chain_id === saved.chain_id && o.symbol === saved.symbol,
+        )
+        if (match) {
+          setTokenFilter(match.symbol)
+          setPicked(match)
+          return
+        }
+      }
+    } catch {
+      // Storage unavailable (Private Browsing) or malformed JSON — fall through
+    }
+
+    // Pre-select ETH when payment options first arrive — saves the user a click
+    // for the most common case. Falls back to leaving everything unselected if
+    // ETH isn't offered (oracle divergence, chain disabled, etc.); the user
+    // picks an asset manually then.
     const firstEth = options.find(o => o.symbol === 'ETH')
     if (!firstEth) return
     setTokenFilter('ETH')
     setPicked(firstEth)
-  }, [options, tokenFilter, picked])
+  }, [options, tokenFilter, picked, pickStorageKey])
+
+  // Mirror the current pick to sessionStorage on every change. Reactive
+  // useEffect catches normal state transitions; the pagehide/visibility
+  // listener below catches the case where iOS kills the WebView mid-flow
+  // before React's commit phase had a chance to fire.
+  useEffect(() => {
+    try {
+      if (picked) {
+        window.sessionStorage.setItem(
+          pickStorageKey,
+          JSON.stringify({ chain_id: picked.chain_id, symbol: picked.symbol }),
+        )
+      } else {
+        window.sessionStorage.removeItem(pickStorageKey)
+      }
+    } catch {
+      // Storage unavailable — non-fatal, just lose reload-persistence
+    }
+  }, [picked, pickStorageKey])
+
+  // Belt-and-braces flush on iOS Safari WebView eviction. When the wallet
+  // app takes foreground via Universal Link, iOS may discard the
+  // background tab under memory pressure — neither `unload` nor
+  // `beforeunload` fire reliably in that path, but `pagehide` and
+  // `visibilitychange→hidden` do (MDN: pagehide, WebKit blog 14403).
+  // Persisting synchronously here means the buyer's pick survives even
+  // if React hasn't run its commit phase yet.
+  useEffect(() => {
+    const flush = () => {
+      if (!picked) return
+      try {
+        window.sessionStorage.setItem(
+          pickStorageKey,
+          JSON.stringify({ chain_id: picked.chain_id, symbol: picked.symbol }),
+        )
+      } catch {
+        // Best-effort
+      }
+    }
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [picked, pickStorageKey])
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
@@ -735,134 +819,180 @@ export function CheckoutStep({
       const q: Quote = await qr.json()
       setQuote(q)
 
-      // Step 4: Switch chain if needed.
+      // ── Step 4: Capability probe ──
       //
-      // Some WalletConnect wallets (Trust Wallet, Bitget Mobile) only show
-      // the FIRST chain in the handshake UI, so the buyer's session ends
-      // up scoped to Ethereum only. When we ask to switch to another
-      // chain the wallet returns DISAPPROVED_CHAINS / 5100 (or just no-
-      // ops) and `switchChainAsync` throws. The downstream
-      // `sendTransactionAsync({ chainId })` / `writeContractAsync({
-      // chainId })` will also throw with a chain-mismatch error so the
-      // wrong-chain payment can never go through — but the buyer sees a
-      // raw "user rejected request" message and has no idea what's
-      // going on. Catch the switch error specifically and surface a
-      // remediation: disconnect, reconnect, approve all networks during
-      // the handshake.
-      if (walletChainId !== q.chain_id) {
-        setStatus('switching')
-        try {
-          await switchChainAsync({ chainId: q.chain_id })
-        } catch (switchErr) {
-          const isWc = connectionKind === 'walletConnect'
-          // `Quote` carries chain_id only, not the human name — pull the
-          // friendly name off the user's picked option (same payload that
-          // built the quote, present in the same scope) and fall back to
-          // the chain id if the option somehow isn't available.
-          const chainName = picked?.chain_name ?? `chain ${q.chain_id}`
-          throw new Error(
-            isWc
-              ? `Your wallet refused to switch to ${chainName}. This usually means the WalletConnect session was approved for Ethereum only. Disconnect (button at the top), reconnect, and approve all networks listed in your wallet's prompt — then retry the payment.`
-              : `Couldn't switch your wallet to ${chainName}. Please switch manually in your wallet and try again.`,
-          )
-        }
-      }
-
-      // Step 5: Send tx
-      setStatus('signing-tx')
-
-      // Capture the payer's pending-nonce BEFORE broadcast — the value the
-      // wallet is about to use. Used by waitForReceiptOrReplacement so the
-      // nonce-based fallback works even if our chain RPC never sees the
-      // original tx hash (wallet broadcast on a different RPC; user clicked
-      // "Speed Up" before viem's getTransaction could populate).
-      let expectedNonce: number | undefined
+      // EIP-5792 (`wallet_sendCalls`) is the canonical 2026 path for
+      // smart wallets and is what Base Account / Coinbase Smart Wallet
+      // recommend. Compared to the legacy `switchChain` + `sendTransaction`
+      // flow it has two material wins on the SW path:
+      //   * the `chainId` parameter routes the request to the target chain
+      //     in one prompt — no `wallet_switchEthereumChain` round-trip,
+      //     which is the root cause of the desktop ConnectorChainMismatch
+      //     bug (coinbase-wallet-sdk #1317).
+      //   * the wallet returns a call-bundle id; we poll its status via
+      //     `wallet_getCallsStatus` and get the on-chain hash back, with
+      //     no nonce-discovery race needed (sendWithRecovery exists to
+      //     paper over wallets that broadcast but don't return the hash;
+      //     5792's status RPC removes that failure mode by design).
+      //
+      // EOAs and older wallets don't implement 5792; viem's
+      // `getCapabilities` returns `atomic.status` per chain — we treat
+      // 'supported' / 'ready' as the green light to use the new path and
+      // fall back to the legacy switch-then-send flow otherwise. Both
+      // paths converge at `minedHash` → Step 7 verify.
+      let atomicSupported = false
       try {
-        expectedNonce = await getTransactionCount(wagmiConfig, {
-          address: address as `0x${string}`,
-          blockTag: 'pending',
+        const caps = await getCapabilities(wagmiConfig, {
           chainId: q.chain_id,
+          account: address as `0x${string}`,
         })
+        const status = (caps as { atomic?: { status?: string } })?.atomic?.status
+        atomicSupported = status === 'supported' || status === 'ready'
       } catch {
-        // Best-effort — without this, the helper falls back to its own
-        // discovery path. Don't block the broadcast on a transient RPC error.
+        // `wallet_getCapabilities` unsupported (older Coinbase / MetaMask
+        // builds, most WC sessions) — fall through to the legacy path.
       }
 
-      // Route the wallet send through the recovery wrapper so wallets that
-      // broadcast but never return the hash via WC (Binance Wallet macOS,
-      // etc.) don't strand the UI in "Confirm payment in wallet…" forever.
-      // The wrapper races the wallet's promise vs nonce-based discovery vs
-      // a manual-hash escape hatch.
-      const walletSend = q.symbol === 'ETH'
-        ? () => sendTransactionAsync({
-            to: q.receive_address as `0x${string}`,
-            value: BigInt(q.amount_raw),
+      let minedHash: string
+
+      if (atomicSupported) {
+        // ── 5792 path (Base Account / CB Smart Wallet / modern wallets) ──
+        setStatus('signing-tx')
+
+        // Build the single-call array. For ETH it's a plain value
+        // transfer; for ERC20 we encode the ABI directly so viem's
+        // generic `Calls` shape is happy (its writeContract overload
+        // wants a chain-typed client).
+        const callTo = q.symbol === 'ETH'
+          ? {
+              to: q.receive_address as `0x${string}`,
+              value: BigInt(q.amount_raw),
+            }
+          : (() => {
+              if (!q.token_address) throw new Error('token_address missing')
+              return {
+                to: q.token_address as `0x${string}`,
+                data: encodeFunctionData({
+                  abi: erc20Abi,
+                  functionName: 'transfer',
+                  args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
+                }),
+              }
+            })()
+
+        const { id } = await sendCalls(wagmiConfig, {
+          chainId: q.chain_id,
+          account: address as `0x${string}`,
+          calls: [callTo],
+        })
+
+        // Poll the wallet's `wallet_getCallsStatus` until the bundle is
+        // mined. Default predicate (`status >= 200`) covers both success
+        // and on-chain failure — we extract the receipt and let pollVerify
+        // surface any reverts. 90 s cap matches the legacy receipt waiter.
+        setStatus('verifying')
+        const final = await waitForCallsStatus(wagmiConfig, {
+          id,
+          timeout: 90_000,
+        })
+        const receipts = (final as { receipts?: Array<{ transactionHash?: string }> }).receipts || []
+        const hash = receipts[0]?.transactionHash
+        if (!hash) {
+          throw new Error('Wallet completed payment but did not return a transaction hash. Refresh and check your wallet history before retrying — your funds may already be on the way.')
+        }
+        minedHash = hash
+      } else {
+        // ── Legacy path (EOA wallets, older WC sessions) ──
+        //
+        // Switch chain first; if the wallet refuses we surface an
+        // actionable message ("approve all networks during handshake").
+        // Then route the send through `sendWithRecovery` so wallets that
+        // broadcast but don't return a hash via WC (Binance Wallet macOS,
+        // intermittent Bitget / TokenPocket) don't strand the UI.
+        if (walletChainId !== q.chain_id) {
+          setStatus('switching')
+          try {
+            await switchChainAsync({ chainId: q.chain_id })
+          } catch (switchErr) {
+            const isWc = connectionKind === 'walletConnect'
+            const chainName = picked?.chain_name ?? `chain ${q.chain_id}`
+            throw new Error(
+              isWc
+                ? `Your wallet refused to switch to ${chainName}. This usually means the WalletConnect session was approved for Ethereum only. Disconnect (button at the top), reconnect, and approve all networks listed in your wallet's prompt — then retry the payment.`
+                : `Couldn't switch your wallet to ${chainName}. Please switch manually in your wallet and try again.`,
+            )
+          }
+        }
+
+        setStatus('signing-tx')
+
+        // Capture the payer's pending-nonce BEFORE broadcast so the
+        // nonce-based fallback in waitForReceiptOrReplacement works
+        // even when our chain RPC never sees the original tx hash.
+        let expectedNonce: number | undefined
+        try {
+          expectedNonce = await getTransactionCount(wagmiConfig, {
+            address: address as `0x${string}`,
+            blockTag: 'pending',
             chainId: q.chain_id,
           })
-        : (() => {
-            if (!q.token_address) throw new Error('token_address missing')
-            const tokenAddress = q.token_address as `0x${string}`
-            return () => writeContractAsync({
-              address: tokenAddress,
-              abi: erc20Abi,
-              functionName: 'transfer',
-              args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
+        } catch {
+          // Best-effort — without this the helper falls back to its
+          // own discovery path. Don't block on a transient RPC error.
+        }
+
+        const walletSend = q.symbol === 'ETH'
+          ? () => sendTransactionAsync({
+              to: q.receive_address as `0x${string}`,
+              value: BigInt(q.amount_raw),
               chainId: q.chain_id,
             })
-          })()
-      const txHash: string = await sendWithRecovery({
-        walletSend,
-        payer: address as `0x${string}`,
-        chainId: q.chain_id,
-        expectedNonce,
-      })
-
-      // Step 6: wait for the tx to actually be mined before telling the
-      // backend to verify. `sendTransactionAsync` resolves on broadcast, not
-      // on inclusion — calling verify before the block is produced used to
-      // surface as `RPC error: transaction with hash ... not found`.
-      //
-      // viem's built-in replacement detection in `waitForTransactionReceipt`
-      // requires that we can resolve the original tx's `from`+`nonce` via
-      // our chain RPC. That fails when the wallet broadcast through its own
-      // RPC and ours hasn't seen the tx yet — the user clicks "Speed Up"
-      // before viem ever fetched the original, and viem then has nothing to
-      // diff against. Symptom: page hangs forever on the orphaned hash.
-      //
-      // Fix: race two strategies and take whichever resolves first.
-      //   (a) viem's onReplaced-aware `waitForTransactionReceipt`
-      //   (b) a nonce-based watcher that polls `getTransactionCount(latest)`
-      //       for the payer until it advances past the broadcast nonce, then
-      //       walks recent blocks for the actual hash at that nonce
-      // We also pre-fetch the tx info up-front (with retries) so viem's
-      // internal cache has a real chance to populate before any speed-up.
-      let minedHash = txHash
-      try {
-        const result = await waitForReceiptOrReplacement({
-          wagmiConfig,
-          chainId: q.chain_id,
-          hash: txHash as `0x${string}`,
+          : (() => {
+              if (!q.token_address) throw new Error('token_address missing')
+              const tokenAddress = q.token_address as `0x${string}`
+              return () => writeContractAsync({
+                address: tokenAddress,
+                abi: erc20Abi,
+                functionName: 'transfer',
+                args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
+                chainId: q.chain_id,
+              })
+            })()
+        const txHash: string = await sendWithRecovery({
+          walletSend,
           payer: address as `0x${string}`,
+          chainId: q.chain_id,
           expectedNonce,
         })
-        minedHash = result.hash
-        if (minedHash !== txHash) {
-          // eslint-disable-next-line no-console
-          console.info('[wc_inject] tx replaced/sped-up:', txHash, '→', minedHash)
+
+        // Wait for the tx to actually be mined before telling the backend
+        // to verify. Races viem's onReplaced-aware waitForTransactionReceipt
+        // against a nonce-based watcher so speed-ups / replacements don't
+        // strand the UI on the orphaned hash.
+        minedHash = txHash
+        try {
+          const result = await waitForReceiptOrReplacement({
+            wagmiConfig,
+            chainId: q.chain_id,
+            hash: txHash as `0x${string}`,
+            payer: address as `0x${string}`,
+            expectedNonce,
+          })
+          minedHash = result.hash
+          if (minedHash !== txHash) {
+            // eslint-disable-next-line no-console
+            console.info('[wc_inject] tx replaced/sped-up:', txHash, '→', minedHash)
+          }
+          if (result.cancelled) {
+            throw new Error(`Transaction was cancelled ${walletLocationPhrase(connectionKind, connectedWalletName)} — please retry.`)
+          }
+        } catch (e) {
+          const msg = (e as Error).message ?? ''
+          if (msg.startsWith('Transaction was cancelled')) throw e
+          // Otherwise indexer lag / network blip — pollVerify's retry
+          // loop picks it up; we keep `minedHash = txHash` since we
+          // weren't able to detect a replacement.
         }
-        if (result.cancelled) {
-          throw new Error(`Transaction was cancelled ${walletLocationPhrase(connectionKind, connectedWalletName)} — please retry.`)
-        }
-      } catch (e) {
-        const msg = (e as Error).message ?? ''
-        // Match the cancellation prefix produced just above (the suffix is
-        // wallet-specific now — "in MetaMask", "in Rainbow on your phone",
-        // etc. — so the old `includes('cancelled in your wallet')` check
-        // would silently miss it).
-        if (msg.startsWith('Transaction was cancelled')) throw e
-        // Otherwise: indexer lag / network blip — fall through; pollVerify's
-        // retry loop will pick it up. We keep `minedHash = txHash` since we
-        // weren't able to detect a replacement.
       }
 
       // Step 7: Verify
