@@ -64,6 +64,37 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   text-decoration: none;
 }
 
+/* Same intent as `.wc-cb-embed-block` but rendered post-connection in
+   CheckoutStep — amber instead of blue to read as a warning rather
+   than an informational hint. */
+.wc-cb-mobile-warning {
+  margin: 12px 0;
+  padding: 12px 14px;
+  background: #fff8e1;
+  border: 1px solid #ffca28;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #5a3a05;
+}
+.wc-cb-mobile-warning p {
+  margin: 0 0 8px;
+}
+.wc-cb-mobile-warning strong {
+  color: #1f2937;
+  font-weight: 700;
+}
+.wc-cb-mobile-warning-link {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1d4ed8;
+  text-decoration: underline;
+}
+.wc-cb-mobile-warning-link:hover {
+  text-decoration: none;
+}
+
 /* Spacing + layout for the Pay button — the visual style (colors, hover,
    disabled) comes from Pretix's own .btn-primary so we blend with the rest
    of the checkout form. */

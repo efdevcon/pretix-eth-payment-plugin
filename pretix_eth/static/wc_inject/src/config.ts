@@ -68,22 +68,6 @@ export function initAppKit(projectId: string) {
     networks: NETWORKS,
   })
 
-  // ── Mobile Coinbase / Base Account gating ──
-  // iOS Safari evicts the WebView when CB Wallet takes foreground via a
-  // Universal Link during signMessage. The Pretix checkout URL contains
-  // order_code + order_secret in the path; after eviction the URL is
-  // preserved but all React state is gone. Only environment where the
-  // flow survives mobile is *inside* the CB Wallet app's in-app browser,
-  // where signing is local (no app switching, no eviction). So on mobile
-  // Safari we hide the Coinbase entry from AppKit's picker and the
-  // CheckoutStep renders a separate "Open in Coinbase Wallet" deep-link
-  // button instead. Inside the CB embed browser this is `false` so the
-  // entry stays visible and the buyer can complete payment normally.
-  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
-  const isMobile = /iPhone|iPad|iPod|Android/i.test(ua)
-  const inCoinbaseEmbed = /Coinbase/i.test(ua)
-  const hideCoinbaseFromPicker = isMobile && !inCoinbaseEmbed
-
   const appKit = createAppKit({
     adapters: [wagmiAdapter],
     networks: NETWORKS,
@@ -101,7 +85,6 @@ export function initAppKit(projectId: string) {
     },
     featuredWalletIds: FEATURED_WALLET_IDS,
     excludeWalletIds: EXCLUDED_WALLET_IDS,
-    enableCoinbase: !hideCoinbaseFromPicker,
   })
 
   return { wagmiAdapter, appKit, open: () => appKit.open() }

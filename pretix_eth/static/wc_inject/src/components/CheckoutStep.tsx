@@ -1136,9 +1136,47 @@ export function CheckoutStep({
 
   const busy = status !== 'idle' && status !== 'error'
 
+  // Sufficiency check for the currently picked option — drives the Pay
+  // button's disabled state. Null when we can't tell yet (balances
+  // still loading or chain RPC unavailable); only `false` blocks the
+  // button so we don't grey out Pay during the first-render race.
+  const pickedSufficient: boolean | null = (() => {
+    if (!picked) return null
+    const entry = findBalance(balancesQuery.data, picked.chain_id, picked.symbol)
+    const expected = expectedRaw(picked.symbol)
+    if (!entry || expected === null) return null
+    try {
+      return BigInt(entry.balance) >= expected
+    } catch {
+      return null
+    }
+  })()
+  const pickedInsufficient = pickedSufficient === false
+
+  // Mobile-Safari CB SW warning + deep-link to the CB Wallet in-app
+  // browser (Pretix URL carries order_code/order_secret so it resumes).
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
+  const showCbMobileWarning = /iPhone|iPad|iPod|Android/i.test(ua) && !/Coinbase/i.test(ua) && connectionKind === 'coinbaseWallet'
+  const cbDappUrl = typeof window !== 'undefined'
+    ? `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(window.location.href)}`
+    : ''
+
   return (
     <div className="wc-root">
       <WalletHeader disabled={busy} />
+
+      {showCbMobileWarning && (
+        <div className="wc-cb-mobile-warning" role="status">
+          <p>
+            <strong>Heads-up:</strong> for the smoothest Coinbase / Base
+            Smart Wallet checkout on mobile, continue inside the Coinbase
+            Wallet app:
+          </p>
+          <a className="wc-cb-mobile-warning-link" href={cbDappUrl}>
+            Continue in Coinbase Wallet →
+          </a>
+        </div>
+      )}
 
       <h3 style={{ marginTop: 0 }}>Select payment method</h3>
 
@@ -1347,10 +1385,11 @@ export function CheckoutStep({
         <button
           type="button"
           className="btn btn-primary btn-lg btn-block wc-pay-btn"
-          disabled={!picked || busy}
+          disabled={!picked || busy || pickedInsufficient}
           onClick={handlePay}
+          title={pickedInsufficient ? `Insufficient ${picked?.symbol ?? 'token'} balance on ${picked?.chain_name ?? 'this network'}` : undefined}
         >
-          {buttonLabel}
+          {pickedInsufficient ? `Insufficient ${displaySymbol(picked?.symbol ?? '')} balance` : buttonLabel}
         </button>
       )}
 
