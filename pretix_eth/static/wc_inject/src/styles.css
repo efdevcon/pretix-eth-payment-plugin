@@ -36,6 +36,19 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   font-size: 14px;
 }
 
+/* Resume banner — same shape as .wc-notice but neutral blue so the
+   buyer reads it as informational ("we restored your selection") rather
+   than a warning. Sits above the picker on the post-reload mount. */
+.wc-resume-notice {
+  background: #eef4fb;
+  border-color: #b6cee8;
+  color: #1a3a5c;
+}
+.wc-resume-notice a {
+  color: #0a58a5;
+  text-decoration: underline;
+}
+
 /* Spacing + layout for the Pay button — the visual style (colors, hover,
    disabled) comes from Pretix's own .btn-primary so we blend with the rest
    of the checkout form. */

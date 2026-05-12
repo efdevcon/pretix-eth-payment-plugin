@@ -388,20 +388,82 @@ export function CheckoutStep({
 }) {
   const [tokenFilter, setTokenFilter] = useState<string | null>(null)
   const [picked, setPicked] = useState<PaymentOption | null>(null)
+  // True when `picked` was restored from sessionStorage on mount — i.e.
+  // this page load is a *resumption* of an interrupted attempt rather
+  // than a fresh visit. Used to render the banner that explains what
+  // just happened (so the buyer doesn't think Pay is broken when the
+  // page mysteriously reloaded mid-signing) and, on mobile, suggest
+  // continuing in the wallet's in-app dapp browser where iOS Safari
+  // can't evict the page.
+  const [restoredFromStorage, setRestoredFromStorage] = useState(false)
 
-  // Pre-select ETH when payment options first arrive — saves the user a click
-  // for the most common case. Falls back to leaving everything unselected if
-  // ETH isn't offered (oracle divergence, chain disabled, etc.); the user
-  // picks an asset manually then. Only fires when nothing has been picked yet
-  // so we don't clobber an explicit user choice on a re-render.
+  // Persist the buyer's pick to sessionStorage keyed by orderCode so it
+  // survives a full page reload. iOS Safari evicts background WebViews
+  // aggressively — when a mobile wallet (Coinbase / Base Smart Wallet
+  // especially) deep-links back from the wallet app after signing, the
+  // OS may have killed the tab and Safari reloads it from scratch.
+  // wagmi's connection rehydrates from localStorage automatically, but
+  // local React state (picked + tokenFilter) is gone unless we mirror it
+  // out-of-band. sessionStorage is right scope: same-tab, cleared on
+  // tab close, never leaks across orders.
+  const pickStorageKey = `wc-pick:${config.orderCode}`
+
+  // Restore the buyer's last pick on mount (post-reload). We only
+  // restore when the saved pick still matches a currently-offered
+  // option — if the option set changed between reload and restore (e.g.
+  // ETH was disabled because the oracle diverged) we drop the saved pick
+  // and fall through to the auto-select default below. The match is on
+  // (chain_id, symbol), not the full PaymentOption, so we re-attach to
+  // the *current* server-side option object rather than a stale one.
   useEffect(() => {
     if (tokenFilter !== null || picked !== null) return
     if (options.length === 0) return
+    try {
+      const raw = window.sessionStorage.getItem(pickStorageKey)
+      if (raw) {
+        const saved = JSON.parse(raw) as { chain_id?: number; symbol?: string }
+        const match = options.find(o => o.chain_id === saved.chain_id && o.symbol === saved.symbol)
+        if (match) {
+          setTokenFilter(match.symbol)
+          setPicked(match)
+          setRestoredFromStorage(true)
+          return
+        }
+      }
+    } catch {
+      // Storage unavailable (privacy mode, quota) or malformed JSON —
+      // fall through to the auto-select default.
+    }
+
+    // Pre-select ETH when payment options first arrive — saves the user a click
+    // for the most common case. Falls back to leaving everything unselected if
+    // ETH isn't offered (oracle divergence, chain disabled, etc.); the user
+    // picks an asset manually then. Only fires when nothing has been picked yet
+    // so we don't clobber an explicit user choice on a re-render.
     const firstEth = options.find(o => o.symbol === 'ETH')
     if (!firstEth) return
     setTokenFilter('ETH')
     setPicked(firstEth)
-  }, [options, tokenFilter, picked])
+  }, [options, tokenFilter, picked, pickStorageKey])
+
+  // Mirror the current pick out to sessionStorage on every change so a
+  // reload mid-signing restores correctly. Stored as `{chain_id, symbol}`
+  // identity only — not the full option object, since the option's
+  // server-side fields (rates, addresses) can shift between reloads.
+  useEffect(() => {
+    try {
+      if (picked) {
+        window.sessionStorage.setItem(
+          pickStorageKey,
+          JSON.stringify({ chain_id: picked.chain_id, symbol: picked.symbol }),
+        )
+      } else {
+        window.sessionStorage.removeItem(pickStorageKey)
+      }
+    } catch {
+      // Storage unavailable — non-fatal, just lose reload-persistence
+    }
+  }, [picked, pickStorageKey])
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
@@ -711,6 +773,91 @@ export function CheckoutStep({
     setError(null)
 
     try {
+      // ── Pre-flight: ensure the wallet is actually on the picked chain ──
+      //
+      // We do the switch *before* the sign so the buyer doesn't waste a
+      // signature on a flow we know is going to fail. The trickier part
+      // is verification: some wallets (Coinbase / Base Smart Wallet on
+      // *desktop* specifically) acknowledge `wallet_switchEthereumChain`
+      // at the SDK level — wagmi's connection state advances and
+      // `switchChainAsync` resolves cleanly — but the underlying
+      // provider's `getChainId()` keeps returning the wallet's previous
+      // chain. The subsequent `eth_sendTransaction` then either trips
+      // wagmi's `ConnectorChainMismatchError` or shows a confused wallet
+      // UI that the user rejects. Manual page refresh fixes it (wagmi's
+      // persisted chain wins on rehydrate), so we automate that: poll
+      // `connector.getChainId()` until it catches up, and if it doesn't
+      // within ~2 s, reload the page (sessionStorage preserves the pick,
+      // so the buyer lands back on the same screen with a single tap to
+      // retry). Bounded at 1 auto-reload per orderCode to avoid loops.
+      if (picked.chain_id !== walletChainId) {
+        setStatus('switching')
+        try {
+          await switchChainAsync({ chainId: picked.chain_id })
+        } catch (switchErr) {
+          const isWc = connectionKind === 'walletConnect'
+          const chainName = picked.chain_name ?? `chain ${picked.chain_id}`
+          throw new Error(
+            isWc
+              ? `Your wallet refused to switch to ${chainName}. This usually means the WalletConnect session was approved for Ethereum only. Disconnect (button at the top), reconnect, and approve all networks listed in your wallet's prompt — then retry the payment.`
+              : `Couldn't switch your wallet to ${chainName}. Please switch manually in your wallet and try again.`,
+          )
+        }
+
+        // Verify the connector's actual chain caught up. Poll up to 2 s
+        // (20 × 100 ms) — gives a slow wallet enough time without
+        // hanging the UI noticeably.
+        let synced = false
+        const canQueryChainId = typeof connector?.getChainId === 'function'
+        if (!canQueryChainId) {
+          // Defensive: if the connector doesn't expose getChainId, trust
+          // the wagmi state and move on. In wagmi v3 the method is
+          // required so this branch shouldn't fire — keep it so a custom
+          // connector doesn't dead-end us.
+          synced = true
+        } else {
+          for (let i = 0; i < 20; i++) {
+            try {
+              const actual = await connector!.getChainId()
+              if (actual === picked.chain_id) {
+                synced = true
+                break
+              }
+            } catch {
+              // RPC blip on getChainId — keep polling
+            }
+            await new Promise(r => setTimeout(r, 100))
+          }
+        }
+
+        if (!synced) {
+          const reloadKey = `wc-chain-reload:${config.orderCode}`
+          const attempts = parseInt(window.sessionStorage.getItem(reloadKey) || '0', 10)
+          if (attempts < 1) {
+            try { window.sessionStorage.setItem(reloadKey, String(attempts + 1)) } catch {}
+            // Reload — the pick survives via sessionStorage, and
+            // wagmi rehydrates the persisted chainId so the connector
+            // initializes on the right chain. Return so the caller
+            // doesn't proceed against a dead component.
+            window.location.reload()
+            return
+          }
+          // We've already auto-reloaded once for this order and we're
+          // still stuck. Surface the actionable instruction rather
+          // than reloading in a loop.
+          try { window.sessionStorage.removeItem(reloadKey) } catch {}
+          const chainName = picked.chain_name ?? `chain ${picked.chain_id}`
+          throw new Error(
+            `Your wallet acknowledges switching to ${chainName} but isn't actually moving to it. In your wallet UI, disconnect this site, refresh this page, and reconnect — then retry the payment.`,
+          )
+        }
+
+        // Pre-flight succeeded — clear the counter so a future
+        // unrelated failure on this same order can also get its one
+        // auto-reload attempt.
+        try { window.sessionStorage.removeItem(`wc-chain-reload:${config.orderCode}`) } catch {}
+      }
+
       // Step 1: Get challenge
       setStatus('challenge')
       const cr = await fetch(`${config.urlPrefix}/challenge/`, {
@@ -992,11 +1139,52 @@ export function CheckoutStep({
 
   const busy = status !== 'idle' && status !== 'error'
 
+  // ── Mobile / wallet-in-app browser detection for the resume banner ──
+  // Heuristic — UA string is the only signal available client-side. False
+  // positives mean a non-mobile user sees the same suggestion (harmless,
+  // they'll just ignore the link); false negatives mean an iPad in
+  // "Request Desktop Site" mode doesn't see the Coinbase Wallet deep
+  // link (also harmless, they fall back to "tap Pay to retry"). We also
+  // detect we're already inside the Coinbase Wallet in-app browser
+  // (which sets `coinbase wallet` in the UA) and suppress the deep
+  // link there since there's nowhere to go.
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
+  const isMobile = /iPhone|iPad|iPod|Android/i.test(ua)
+  const inCoinbaseDappBrowser = /coinbase/i.test(ua) || /CoinbaseWallet/.test(ua)
+  // Coinbase Wallet's universal dapp-browser deep link. Wrapping the
+  // current URL in `go.cb-w.com/dapp?cb_url=…` opens the page inside
+  // the CB Wallet in-app browser on both iOS and Android — Base Smart
+  // Wallet rides the same SDK so this is the right entry point for
+  // Base users too. We URL-encode `window.location.href` so query
+  // params (incl. the Pretix order signing string) survive intact.
+  const cbDappUrl = typeof window !== 'undefined'
+    ? `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(window.location.href)}`
+    : ''
+  const showResumeBanner = restoredFromStorage && status === 'idle'
+
   return (
     <div className="wc-root">
       <WalletHeader disabled={busy} />
 
       <h3 style={{ marginTop: 0 }}>Select payment method</h3>
+
+      {showResumeBanner && (
+        <div className="wc-notice wc-resume-notice" role="status">
+          <strong>We picked up where you left off.</strong>{' '}
+          Your previous payment attempt was interrupted by your wallet — your
+          selection has been restored. Tap <em>Pay</em> below to continue.
+          {isMobile && !inCoinbaseDappBrowser && (
+            <>
+              {' '}
+              For a smoother experience on mobile, you can also{' '}
+              <a href={cbDappUrl} target="_blank" rel="noopener noreferrer">
+                open this page in the Coinbase Wallet app
+              </a>
+              {' '}— the in-app browser doesn't get interrupted by mobile Safari.
+            </>
+          )}
+        </div>
+      )}
 
       {/* DEBUG — uncomment to re-test the tx-hash recovery paths without
           rebuilding new code. Forces the recovery wrapper into a specific
