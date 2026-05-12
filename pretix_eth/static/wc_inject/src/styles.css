@@ -36,6 +36,34 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   font-size: 14px;
 }
 
+/* Mobile-Safari escape hatch for Coinbase / Base Smart Wallet buyers.
+   Only rendered when the bundle detects an iOS / Android browser that
+   isn't already inside the CB Wallet in-app browser — see the
+   `showCbEmbedLink` comment in ConnectStep.tsx. */
+.wc-cb-embed-block {
+  margin-top: 16px;
+  padding: 12px 14px;
+  background: #eef4fb;
+  border: 1px solid #b6cee8;
+  border-radius: 8px;
+  text-align: center;
+}
+.wc-cb-embed-hint {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: #1a3a5c;
+}
+.wc-cb-embed-link {
+  display: inline-block;
+  font-size: 13px;
+  font-weight: 600;
+  color: #0a58a5;
+  text-decoration: underline;
+}
+.wc-cb-embed-link:hover {
+  text-decoration: none;
+}
+
 /* Spacing + layout for the Pay button — the visual style (colors, hover,
    disabled) comes from Pretix's own .btn-primary so we blend with the rest
    of the checkout form. */

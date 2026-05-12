@@ -459,6 +459,23 @@ export function CheckoutStep({
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
+
+  // Pre-fetched challenge so `handlePay` doesn't have to do a network
+  // round-trip before opening the wallet. iOS Safari (and Coinbase /
+  // Base Account's keys.coinbase.com popup on desktop) require the
+  // first wallet RPC to fire inside the user-gesture window — any
+  // intervening `await fetch(...)` consumes the gesture token and the
+  // popup is blocked. The challenge is per-order (only `order_code` +
+  // `order_secret` are sent), not per-chain/token, so we can fetch it
+  // once at mount and reuse across pick changes. Stale nonces are
+  // handled by the `STALE_MS` check in handlePay — if the user idles
+  // past the TTL we fall back to inline fetch (one wallet popup will
+  // be blocked but it's a long-idle case the buyer can retry).
+  const [prefetchedChallenge, setPrefetchedChallenge] = useState<{
+    nonce: string
+    message: string
+    fetchedAt: number
+  } | null>(null)
   // Confirmation progress surfaced from the backend's `confirmations` /
   // `confirmations_required` fields. Used to render "Confirming on-chain
   // (X/N)" instead of an opaque spinner during the verify poll.
@@ -528,6 +545,45 @@ export function CheckoutStep({
   const wagmiConfig = useConfig()
 
   const { organizer, event } = parseOrgAndEvent()
+
+  // ── Challenge prefetch ──
+  // Fire-and-forget on connect so `handlePay`'s first await can be
+  // `signMessageAsync(...)` rather than `await fetch('/challenge/')`.
+  // Critical for iOS Safari and the keys.coinbase.com popup on desktop:
+  // user-gesture tokens don't survive a network round-trip, and without
+  // a gesture the wallet open is blocked. Re-fires whenever the
+  // connected address changes (reconnect, account switch) so the nonce
+  // we hand the user is always tied to the wallet they're paying from.
+  useEffect(() => {
+    if (!address) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const cr = await fetch(`${config.urlPrefix}/challenge/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            order_code: config.orderCode,
+            order_secret: config.orderSecret,
+            organizer,
+            event,
+          }),
+        })
+        if (!cr.ok) return // pre-fetch failed → handlePay falls back to inline fetch
+        const body = (await cr.json()) as { nonce?: string; message?: string }
+        if (cancelled || !body.nonce || !body.message) return
+        setPrefetchedChallenge({
+          nonce: body.nonce,
+          message: body.message,
+          fetchedAt: Date.now(),
+        })
+      } catch {
+        // Best-effort prefetch; silent failure → inline fetch later.
+      }
+    })()
+    return () => { cancelled = true }
+  }, [address, config.urlPrefix, config.orderCode, config.orderSecret, organizer, event])
 
   // Pretix's native submit button is hidden via `body.wc-full-checkout`, which
   // is now owned by WCPaymentApp (covers all stages, not just checkout).
@@ -765,26 +821,62 @@ export function CheckoutStep({
     setError(null)
 
     try {
-      // Step 1: Get challenge
-      setStatus('challenge')
-      const cr = await fetch(`${config.urlPrefix}/challenge/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          order_code: config.orderCode, order_secret: config.orderSecret,
-          organizer, event,
-        }),
-      })
-      if (!cr.ok) {
-        const body = await cr.json().catch(() => ({}))
-        throw new Error(body.error || `challenge HTTP ${cr.status}`)
+      // ── Step 1: Get challenge (prefetched-or-inline) ──
+      //
+      // The prefetch effect fires on connect, so by the time the buyer
+      // clicks Pay we usually already have a fresh `{nonce, message}` in
+      // state. Using it here means the *first* await in this click
+      // handler is `signMessageAsync` — which preserves the iOS Safari
+      // user-gesture token and unblocks the wallet popup on mobile
+      // (and the keys.coinbase.com popup on desktop Base Account).
+      //
+      // STALE_MS bounds how long we trust a prefetched nonce. Plugin's
+      // challenge nonce TTL is conservative (minutes), so 4 minutes
+      // leaves a comfortable safety margin without risking the server
+      // rejecting a stale nonce mid-flow. If the prefetch is stale or
+      // missing we fall back to inline fetch — one wallet popup may
+      // get blocked on iOS in that path, but it's a "buyer idled for
+      // minutes" case they can retry.
+      const STALE_MS = 4 * 60 * 1000
+      let nonce: string
+      let message: string
+      if (
+        prefetchedChallenge &&
+        Date.now() - prefetchedChallenge.fetchedAt < STALE_MS
+      ) {
+        nonce = prefetchedChallenge.nonce
+        message = prefetchedChallenge.message
+      } else {
+        setStatus('challenge')
+        const cr = await fetch(`${config.urlPrefix}/challenge/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            order_code: config.orderCode, order_secret: config.orderSecret,
+            organizer, event,
+          }),
+        })
+        if (!cr.ok) {
+          const body = await cr.json().catch(() => ({}))
+          throw new Error(body.error || `challenge HTTP ${cr.status}`)
+        }
+        const body = await cr.json()
+        nonce = body.nonce
+        message = body.message
       }
-      const { nonce, message } = await cr.json()
 
-      // Step 2: Sign challenge
+      // Step 2: Sign challenge.
+      // First wallet RPC of the click chain — gesture token must still
+      // be alive here on iOS. Don't insert any awaits between the click
+      // entry and this call.
       setStatus('signing-challenge')
       const signature = await signMessageAsync({ message })
+
+      // The nonce we just signed is now consumed — clear the prefetched
+      // copy so a retry (e.g. after a failed verify) goes through a
+      // fresh challenge fetch instead of replaying a used nonce.
+      setPrefetchedChallenge(null)
 
       // Step 3: Create quote.
       // `payer_address` is required for smart-wallet signatures (ERC-1271/6492 —
