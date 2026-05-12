@@ -15,13 +15,8 @@ import {
   getTransactionCount,
   getBlock,
   getBlockNumber,
-  getConnectorClient,
 } from 'wagmi/actions'
 import { erc20Abi } from 'viem'
-import {
-  sendTransaction as viemSendTransaction,
-  writeContract as viemWriteContract,
-} from 'viem/actions'
 import { NETWORK_LOGOS, TOKEN_LOGOS } from '../assetIcons'
 import type { WCConfig } from '../config'
 import type { PaymentOption } from '../hooks/usePaymentOptions'
@@ -56,31 +51,6 @@ function pollIntervalMs(chainId: number): number {
 function pollMaxDurationMs(chainId: number, requiredConfs: number): number {
   const blockTime = BLOCK_TIME_MS[chainId] ?? 4_000
   return Math.min(90_000, blockTime * (requiredConfs + 1) + 4_000)
-}
-
-/** Walks `error` (incl. .cause / .errors / .walk()) for wagmi's
- *  ConnectorChainMismatchError. Emitted when `connector.getChainId()` lags
- *  the wagmi state — Coinbase / Base Smart Wallet on mobile never updates
- *  its getChainId() in response to wallet_switchEthereumChain, so this
- *  fires deterministically there even though the wallet would happily sign
- *  on the target chain. We use it to decide when to fall through to the
- *  direct-viem path that bypasses the assertion. */
-function isConnectorChainMismatchError(err: unknown): boolean {
-  const seen = new Set<unknown>()
-  const visit = (e: unknown): boolean => {
-    if (!e || seen.has(e)) return false
-    seen.add(e)
-    if (typeof e === 'object') {
-      const obj = e as { name?: string; message?: string; cause?: unknown; errors?: unknown[] }
-      if (obj.name === 'ConnectorChainMismatchError') return true
-      const msg = typeof obj.message === 'string' ? obj.message : ''
-      if (msg.includes("does not match the connection's chain")) return true
-      if (Array.isArray(obj.errors) && obj.errors.some(visit)) return true
-      if (obj.cause && visit(obj.cause)) return true
-    }
-    return false
-  }
-  return visit(err)
 }
 
 // Backend verify errors that are transient (RPC indexer lag after tx is mined,
@@ -823,70 +793,22 @@ export function CheckoutStep({
       // etc.) don't strand the UI in "Confirm payment in wallet…" forever.
       // The wrapper races the wallet's promise vs nonce-based discovery vs
       // a manual-hash escape hatch.
-      //
-      // Inner builders wrap the wagmi hooks with a chain-mismatch fallback:
-      // multi-chain smart wallets (Coinbase / Base Smart Wallet, esp. on
-      // mobile) don't actually update their connector's getChainId() in
-      // response to wallet_switchEthereumChain — the call returns success
-      // and wagmi's connection state advances, but the connector keeps
-      // reporting the wallet's default chain (typically 1). wagmi's send
-      // path then throws ConnectorChainMismatchError ("The current chain of
-      // the connector (id: X) does not match the connection's chain (id:
-      // Y)"). Smart wallets sign on any chain via the same provider, so we
-      // catch that error and retry through viem directly with
-      // `assertChainId: false`, which routes the request through the same
-      // provider but skips the assertion. The destination chain is still
-      // enforced by the explicit `chainId` we pass.
       const walletSend = q.symbol === 'ETH'
-        ? async () => {
-            try {
-              return await sendTransactionAsync({
-                to: q.receive_address as `0x${string}`,
-                value: BigInt(q.amount_raw),
-                chainId: q.chain_id,
-              })
-            } catch (err) {
-              if (!isConnectorChainMismatchError(err)) throw err
-              const client = await getConnectorClient(wagmiConfig, {
-                assertChainId: false,
-                chainId: q.chain_id,
-              })
-              return await viemSendTransaction(client, {
-                to: q.receive_address as `0x${string}`,
-                value: BigInt(q.amount_raw),
-                account: address as `0x${string}`,
-                chain: null,
-              })
-            }
-          }
+        ? () => sendTransactionAsync({
+            to: q.receive_address as `0x${string}`,
+            value: BigInt(q.amount_raw),
+            chainId: q.chain_id,
+          })
         : (() => {
             if (!q.token_address) throw new Error('token_address missing')
             const tokenAddress = q.token_address as `0x${string}`
-            return async () => {
-              try {
-                return await writeContractAsync({
-                  address: tokenAddress,
-                  abi: erc20Abi,
-                  functionName: 'transfer',
-                  args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
-                  chainId: q.chain_id,
-                })
-              } catch (err) {
-                if (!isConnectorChainMismatchError(err)) throw err
-                const client = await getConnectorClient(wagmiConfig, {
-                  assertChainId: false,
-                  chainId: q.chain_id,
-                })
-                return await viemWriteContract(client, {
-                  address: tokenAddress,
-                  abi: erc20Abi,
-                  functionName: 'transfer',
-                  args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
-                  account: address as `0x${string}`,
-                  chain: null,
-                })
-              }
-            }
+            return () => writeContractAsync({
+              address: tokenAddress,
+              abi: erc20Abi,
+              functionName: 'transfer',
+              args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
+              chainId: q.chain_id,
+            })
           })()
       const txHash: string = await sendWithRecovery({
         walletSend,
