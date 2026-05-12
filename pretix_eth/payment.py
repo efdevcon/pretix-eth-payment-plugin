@@ -126,6 +126,27 @@ class WalletConnectPayment(BasePaymentProvider):
             required=False,
             initial=False,
         )
+        # Companion gate for the storefront's external-API purchase path.
+        # `fiat-purchase.ts` in the monorepo POSTs straight to Pretix's
+        # organizer REST `/api/v1/.../orders/` with the merchant API token —
+        # bypassing service-layer validation. The storefront polls
+        # `/plugin/x402/settings/` and refuses to call fiat-purchase when this
+        # toggle is OFF, mooting the M9 stopgap's residual gaps (M18–M22)
+        # for v1. Buyer-facing WC and x402 checkout flows are unaffected by
+        # this flag.
+        base['fiat_purchase_enabled'] = forms.BooleanField(
+            label=_('Enable external API purchase (devcon fiat-purchase)'),
+            help_text=_(
+                'Allow the storefront\'s external API purchase endpoint '
+                '(`/api/x402/tickets/fiat-purchase`) to create orders for '
+                'this event via Pretix organizer REST. Leave OFF unless '
+                'external-API checkout is operationally required. When OFF, '
+                'the storefront\'s WC and x402 buyer-facing checkout flows '
+                'are unaffected; only the external-API path is blocked.'
+            ),
+            required=False,
+            initial=False,
+        )
         base['receive_address'] = forms.CharField(
             label=_('Receive wallet address (EIP-55)'),
             max_length=42, min_length=42, required=True,

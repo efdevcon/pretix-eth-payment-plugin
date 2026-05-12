@@ -108,6 +108,44 @@ def _x402_enabled_or_404(event):
     return None
 
 
+@csrf_exempt
+@require_http_methods(['GET'])
+def settings(request: HttpRequest):
+    """Public read-only flags so the storefront can respect per-event toggles
+    before it hits a gated endpoint. The storefront polls this to know whether
+    `/api/x402/tickets/fiat-purchase` can be called for the event (M18–M22
+    follow-up; v1 ships with `fiat_purchase_enabled=False` by default).
+
+    Intentionally NOT wrapped in `_x402_enabled_or_404` — callers need to
+    fetch the toggle state even when x402 itself is off. No buyer data, no
+    secrets, no order info; only the two booleans. Standard cache headers
+    let the storefront cache short-term so toggling propagates within
+    seconds without burning Pretix request quota."""
+    org_slug = (request.GET.get('organizer') or '').strip()
+    ev_slug = (request.GET.get('event') or '').strip()
+    if not (org_slug and ev_slug):
+        return JsonResponse(
+            {'success': False, 'error': 'organizer and event are required'},
+            status=400,
+        )
+    event = _get_event(org_slug, ev_slug)
+    if event is None:
+        return JsonResponse(
+            {'success': False, 'error': 'event not found'},
+            status=404,
+        )
+    provider = _get_provider(event)
+    resp = JsonResponse({
+        'x402_enabled': provider.settings.get('x402_enabled', as_type=bool, default=False),
+        'fiat_purchase_enabled': provider.settings.get('fiat_purchase_enabled', as_type=bool, default=False),
+    })
+    # Short cache — storefront caches 5–15s so admin toggle flips propagate
+    # quickly. `private` because the per-event scope makes this useless to
+    # share across tenants on a multi-tenant CDN, but no PII either way.
+    resp['Cache-Control'] = 'private, max-age=10'
+    return resp
+
+
 def _addr_eq(a: str, b: str) -> bool:
     return (a or '').lower() == (b or '').lower()
 
