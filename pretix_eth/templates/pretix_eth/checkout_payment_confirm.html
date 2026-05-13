@@ -13,7 +13,8 @@
   "csrfToken": "{{ csrf_token|escapejs }}",
   "supportEmail": "{{ support_email|escapejs }}",
   "frontendOrderUrlTemplate": "{{ frontend_order_url_template|escapejs }}",
-  "ethMainnetOnly": {{ eth_mainnet_only|yesno:"true,false" }}
+  "ethMainnetOnly": {{ eth_mainnet_only|yesno:"true,false" }},
+  "pluginVersion": "{{ plugin_version|escapejs }}"
 }
 </script>
 

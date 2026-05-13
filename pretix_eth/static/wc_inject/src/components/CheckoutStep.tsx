@@ -15,11 +15,14 @@ import {
   getTransactionCount,
   getBlock,
   getBlockNumber,
-  getCapabilities,
   sendCalls,
-  waitForCallsStatus,
+  getConnectorClient,
 } from 'wagmi/actions'
 import { erc20Abi, encodeFunctionData } from 'viem'
+import {
+  getCapabilities as viemGetCapabilities,
+  waitForCallsStatus as viemWaitForCallsStatus,
+} from 'viem/actions'
 import { NETWORK_LOGOS, TOKEN_LOGOS } from '../assetIcons'
 import type { WCConfig } from '../config'
 import type { PaymentOption } from '../hooks/usePaymentOptions'
@@ -54,6 +57,28 @@ function pollIntervalMs(chainId: number): number {
 function pollMaxDurationMs(chainId: number, requiredConfs: number): number {
   const blockTime = BLOCK_TIME_MS[chainId] ?? 4_000
   return Math.min(90_000, blockTime * (requiredConfs + 1) + 4_000)
+}
+
+// Centralized debug logger. All wc_inject runtime logs share the same
+// `[wc_inject]` prefix so they can be grepped/filtered in a buyer's
+// browser console when triaging a stuck payment. Use `dbg` for happy-path
+// milestones (info level), `warn` for caught/expected failures (capability
+// probe missing, switchChain rejected, etc.), and `err` for the
+// hard-fail catch in handlePay.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function dbg(event: string, fields?: Record<string, any>) {
+  // eslint-disable-next-line no-console
+  console.info(`[wc_inject] ${event}`, fields ?? {})
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function dbgWarn(event: string, fields?: Record<string, any>) {
+  // eslint-disable-next-line no-console
+  console.warn(`[wc_inject] ${event}`, fields ?? {})
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function dbgErr(event: string, fields?: Record<string, any>) {
+  // eslint-disable-next-line no-console
+  console.error(`[wc_inject] ${event}`, fields ?? {})
 }
 
 // Backend verify errors that are transient (RPC indexer lag after tx is mined,
@@ -836,6 +861,22 @@ export function CheckoutStep({
     if (!picked || !address) return
     setError(null)
 
+    dbg('handlePay:start', {
+      pluginVersion: config.pluginVersion,
+      connectionKind,
+      connectedWalletName,
+      address,
+      walletChainId,
+      pickedChainId: picked.chain_id,
+      pickedChainName: picked.chain_name,
+      pickedSymbol: picked.symbol,
+      orderCode: config.orderCode,
+      hasPrefetchedChallenge: !!prefetchedChallenge,
+      prefetchedChallengeAgeMs: prefetchedChallenge
+        ? Date.now() - prefetchedChallenge.fetchedAt
+        : null,
+    })
+
     try {
       // ── Step 1: Get challenge (prefetched-or-inline) ──
       //
@@ -856,12 +897,14 @@ export function CheckoutStep({
       const STALE_MS = 4 * 60 * 1000
       let nonce: string
       let message: string
+      let challengeSource: 'prefetched' | 'inline'
       if (
         prefetchedChallenge &&
         Date.now() - prefetchedChallenge.fetchedAt < STALE_MS
       ) {
         nonce = prefetchedChallenge.nonce
         message = prefetchedChallenge.message
+        challengeSource = 'prefetched'
       } else {
         setStatus('challenge')
         const cr = await fetch(`${config.urlPrefix}/challenge/`, {
@@ -875,12 +918,15 @@ export function CheckoutStep({
         })
         if (!cr.ok) {
           const body = await cr.json().catch(() => ({}))
+          dbgErr('challenge:http', { status: cr.status, body })
           throw new Error(body.error || `challenge HTTP ${cr.status}`)
         }
         const body = await cr.json()
         nonce = body.nonce
         message = body.message
+        challengeSource = 'inline'
       }
+      dbg('challenge:ready', { source: challengeSource, nonce })
 
       // Step 2: Sign challenge.
       // First wallet RPC of the click chain — gesture token must still
@@ -888,6 +934,10 @@ export function CheckoutStep({
       // entry and this call.
       setStatus('signing-challenge')
       const signature = await signMessageAsync({ message })
+      dbg('sign:done', {
+        signatureLength: signature.length,
+        signingChainId: walletChainId,
+      })
 
       // The nonce we just signed is now consumed — clear the prefetched
       // copy so a retry (e.g. after a failed verify) goes through a
@@ -922,10 +972,19 @@ export function CheckoutStep({
       })
       if (!qr.ok) {
         const body = await qr.json().catch(() => ({}))
+        dbgErr('quote:http', { status: qr.status, body })
         throw new Error(body.error || `create-quote HTTP ${qr.status}`)
       }
       const q: Quote = await qr.json()
       setQuote(q)
+      dbg('quote:ready', {
+        quoteId: q.quote_id,
+        chainId: q.chain_id,
+        symbol: q.symbol,
+        amountRaw: q.amount_raw,
+        receiveAddress: q.receive_address,
+        expiresAt: q.expires_at,
+      })
 
       // ── Step 4: Capability probe ──
       //
@@ -959,16 +1018,26 @@ export function CheckoutStep({
       let atomicSupported = false
       if (connectionKind === 'coinbaseWallet') {
         try {
-          const caps = await getCapabilities(wagmiConfig, {
+          // Bypass wagmi's getCapabilities wrapper — it goes through
+          // getConnectorClient with the default `assertChainId: true`,
+          // which trips the CB SDK desync bug (the very bug we use 5792
+          // to route around). Pull a chain-bound client ourselves with
+          // assertChainId disabled and call viem's primitive directly.
+          const client = await getConnectorClient(wagmiConfig, {
+            assertChainId: false,
             chainId: q.chain_id,
             account: address as `0x${string}`,
           })
+          const caps = await viemGetCapabilities(client, { chainId: q.chain_id })
           const status = (caps as { atomic?: { status?: string } })?.atomic?.status
           atomicSupported = status === 'supported' || status === 'ready'
-        } catch {
+          dbg('capabilities:probed', { atomicStatus: status, atomicSupported })
+        } catch (e) {
+          dbgWarn('capabilities:failed', { error: (e as Error).message })
           // Capabilities RPC missing — fall through to legacy.
         }
       }
+      dbg('path:chosen', { atomicSupported, path: atomicSupported ? '5792' : 'legacy' })
 
       let minedHash: string
 
@@ -997,24 +1066,42 @@ export function CheckoutStep({
               }
             })()
 
+        dbg('sendCalls:invoke', { chainId: q.chain_id, callCount: 1 })
         const { id } = await sendCalls(wagmiConfig, {
           chainId: q.chain_id,
           account: address as `0x${string}`,
           calls: [callTo],
         })
+        dbg('sendCalls:returned', { id })
 
         // Poll the wallet's `wallet_getCallsStatus` until the bundle is
-        // mined. Default predicate (`status >= 200`) covers both success
-        // and on-chain failure — we extract the receipt and let pollVerify
-        // surface any reverts. 90 s cap matches the legacy receipt waiter.
+        // mined. Same bypass as the capability probe — wagmi's wrapper
+        // would re-assert chain via getConnectorClient and trip the CB
+        // SDK desync. Call viem's primitive directly on a chain-bound
+        // client with assertChainId off. Default predicate (`status >= 200`)
+        // covers both success and on-chain failure; pollVerify surfaces
+        // any reverts.
         setStatus('verifying')
-        const final = await waitForCallsStatus(wagmiConfig, {
+        const statusClient = await getConnectorClient(wagmiConfig, {
+          assertChainId: false,
+          chainId: q.chain_id,
+          account: address as `0x${string}`,
+        })
+        const final = await viemWaitForCallsStatus(statusClient, {
           id,
           timeout: 90_000,
         })
         const receipts = (final as { receipts?: Array<{ transactionHash?: string }> }).receipts || []
         const hash = receipts[0]?.transactionHash
+        dbg('waitForCallsStatus:done', {
+          id,
+          finalStatus: (final as { status?: string }).status,
+          statusCode: (final as { statusCode?: number }).statusCode,
+          receiptCount: receipts.length,
+          hash,
+        })
         if (!hash) {
+          dbgErr('waitForCallsStatus:no-hash', { id, final })
           throw new Error('Wallet completed payment but did not return a transaction hash. Refresh and check your wallet history before retrying — your funds may already be on the way.')
         }
         minedHash = hash
@@ -1028,9 +1115,16 @@ export function CheckoutStep({
         // intermittent Bitget / TokenPocket) don't strand the UI.
         if (walletChainId !== q.chain_id) {
           setStatus('switching')
+          dbg('legacy:switchChain:invoke', { from: walletChainId, to: q.chain_id })
           try {
             await switchChainAsync({ chainId: q.chain_id })
+            dbg('legacy:switchChain:done', { to: q.chain_id })
           } catch (switchErr) {
+            dbgWarn('legacy:switchChain:failed', {
+              from: walletChainId,
+              to: q.chain_id,
+              error: (switchErr as Error).message,
+            })
             const isWc = connectionKind === 'walletConnect'
             const chainName = picked?.chain_name ?? `chain ${q.chain_id}`
             throw new Error(
@@ -1075,12 +1169,18 @@ export function CheckoutStep({
                 chainId: q.chain_id,
               })
             })()
+        dbg('legacy:walletSend:invoke', {
+          chainId: q.chain_id,
+          symbol: q.symbol,
+          expectedNonce,
+        })
         const txHash: string = await sendWithRecovery({
           walletSend,
           payer: address as `0x${string}`,
           chainId: q.chain_id,
           expectedNonce,
         })
+        dbg('legacy:walletSend:returned', { txHash })
 
         // Wait for the tx to actually be mined before telling the backend
         // to verify. Races viem's onReplaced-aware waitForTransactionReceipt
@@ -1096,16 +1196,19 @@ export function CheckoutStep({
             expectedNonce,
           })
           minedHash = result.hash
-          if (minedHash !== txHash) {
-            // eslint-disable-next-line no-console
-            console.info('[wc_inject] tx replaced/sped-up:', txHash, '→', minedHash)
-          }
+          dbg('legacy:receipt:done', {
+            original: txHash,
+            mined: minedHash,
+            replaced: minedHash !== txHash,
+            cancelled: result.cancelled,
+          })
           if (result.cancelled) {
             throw new Error(`Transaction was cancelled ${walletLocationPhrase(connectionKind, connectedWalletName)} — please retry.`)
           }
         } catch (e) {
           const msg = (e as Error).message ?? ''
           if (msg.startsWith('Transaction was cancelled')) throw e
+          dbgWarn('legacy:receipt:fallback', { txHash, error: msg })
           // Otherwise indexer lag / network blip — pollVerify's retry
           // loop picks it up; we keep `minedHash = txHash` since we
           // weren't able to detect a replacement.
@@ -1114,10 +1217,17 @@ export function CheckoutStep({
 
       // Step 7: Verify
       setStatus('verifying')
+      dbg('verify:start', { minedHash, chainId: q.chain_id })
       await pollVerify(q, minedHash)
+      dbg('verify:done', { minedHash })
       onConfirmed(minedHash, q)
     } catch (e: unknown) {
-      const err = e as { shortMessage?: string; message?: string }
+      const err = e as { shortMessage?: string; message?: string; name?: string }
+      dbgErr('handlePay:caught', {
+        name: err.name,
+        message: err.message,
+        shortMessage: err.shortMessage,
+      })
       setError(err.shortMessage || err.message || String(e))
       setStatus('error')
     }

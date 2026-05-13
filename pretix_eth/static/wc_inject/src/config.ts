@@ -32,6 +32,10 @@ export interface WCConfig {
   /** True when this event has only ETH-on-mainnet enabled (the wave-launch
    *  flow). Drives the ConnectStep heading copy. */
   ethMainnetOnly?: boolean
+  /** Plugin version (`pretix_eth/__init__.py:__version__`). Surfaced via
+   *  WCConfig so debug logs and the in-page footer don't need a separate
+   *  injection path. */
+  pluginVersion?: string
 }
 
 export function readConfig(): WCConfig {
