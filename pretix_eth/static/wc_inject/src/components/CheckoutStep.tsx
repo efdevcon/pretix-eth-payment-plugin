@@ -511,12 +511,15 @@ export function CheckoutStep({
 
   // Fire-and-forget chain switch on user-initiated pick. Mirrors the
   // storefront's `selectPaymentOption` behavior — by the time the buyer
-  // taps Pay the wallet is usually already on the target chain, so the
-  // sign popup shows "Sign on Arbitrum" (not "Sign on Ethereum"), and a
-  // declined switch surfaces at pick time instead of mid-payment. No-op
-  // for multi-chain smart wallets, no-op when already on chain.
+  // taps Pay the wallet is usually already on the target chain.
+  // SKIPPED for Coinbase / Base Smart Wallet: calling switchChain there
+  // trips the CB SDK desync bug (wagmi state advances but the connector's
+  // getChainId() stays stale → ConnectorChainMismatchError later). CBSW
+  // is multi-chain and signs on any chain via the EIP-5792 sendCalls path
+  // (which passes chainId explicitly), so no prior switch is ever needed.
   function pickAndMaybeSwitch(opt: PaymentOption) {
     setPicked(opt)
+    if (connectionKind === 'coinbaseWallet') return
     if (walletChainId !== opt.chain_id && switchChain) {
       switchChain({ chainId: opt.chain_id })
     }
