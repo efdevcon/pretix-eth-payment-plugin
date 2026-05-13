@@ -507,7 +507,20 @@ export function CheckoutStep({
   const connectionKind = classifyConnection(connector)
   const connectedWalletName = walletInfo?.name || connector?.name
   const { signMessageAsync } = useSignMessage()
-  const { switchChainAsync } = useSwitchChain()
+  const { switchChainAsync, switchChain } = useSwitchChain()
+
+  // Fire-and-forget chain switch on user-initiated pick. Mirrors the
+  // storefront's `selectPaymentOption` behavior — by the time the buyer
+  // taps Pay the wallet is usually already on the target chain, so the
+  // sign popup shows "Sign on Arbitrum" (not "Sign on Ethereum"), and a
+  // declined switch surfaces at pick time instead of mid-payment. No-op
+  // for multi-chain smart wallets, no-op when already on chain.
+  function pickAndMaybeSwitch(opt: PaymentOption) {
+    setPicked(opt)
+    if (walletChainId !== opt.chain_id && switchChain) {
+      switchChain({ chainId: opt.chain_id })
+    }
+  }
   const { writeContractAsync } = useWriteContract()
   const { sendTransactionAsync } = useSendTransaction()
 
@@ -932,17 +945,26 @@ export function CheckoutStep({
       // 'supported' / 'ready' as the green light to use the new path and
       // fall back to the legacy switch-then-send flow otherwise. Both
       // paths converge at `minedHash` → Step 7 verify.
+      // Restrict 5792 to Coinbase / Base Account — that's the connector
+      // class that has the chain-switch desync bug we're routing around.
+      // MetaMask-over-WalletConnect returns capability shapes that can
+      // pass the `atomic.status` check but its sendCalls implementation
+      // isn't reliable when the WC session wasn't pre-scoped to the
+      // target chain (regression: buyer rejects on what looks like a
+      // confused tx prompt). Other wallets stay on the legacy path —
+      // it's been working for them and doesn't need replacing.
       let atomicSupported = false
-      try {
-        const caps = await getCapabilities(wagmiConfig, {
-          chainId: q.chain_id,
-          account: address as `0x${string}`,
-        })
-        const status = (caps as { atomic?: { status?: string } })?.atomic?.status
-        atomicSupported = status === 'supported' || status === 'ready'
-      } catch {
-        // `wallet_getCapabilities` unsupported (older Coinbase / MetaMask
-        // builds, most WC sessions) — fall through to the legacy path.
+      if (connectionKind === 'coinbaseWallet') {
+        try {
+          const caps = await getCapabilities(wagmiConfig, {
+            chainId: q.chain_id,
+            account: address as `0x${string}`,
+          })
+          const status = (caps as { atomic?: { status?: string } })?.atomic?.status
+          atomicSupported = status === 'supported' || status === 'ready'
+        } catch {
+          // Capabilities RPC missing — fall through to legacy.
+        }
       }
 
       let minedHash: string
@@ -1243,7 +1265,7 @@ export function CheckoutStep({
                       setTokenFilter(sym)
                       // Auto-select first network for this token
                       const first = options.find(o => o.symbol === sym)
-                      if (first) setPicked(first)
+                      if (first) pickAndMaybeSwitch(first)
                     }}
                   >
                     {TOKEN_LOGOS[sym] && (
@@ -1320,7 +1342,7 @@ export function CheckoutStep({
                         // real sufficiency check happens at quote time. This
                         // prevents over-blocking when the heuristic is wrong.
                         disabled={busy}
-                        onClick={() => setPicked(opt)}
+                        onClick={() => pickAndMaybeSwitch(opt)}
                       >
                         <span className="wc-network-row-left">
                           {logo && (
