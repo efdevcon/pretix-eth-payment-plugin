@@ -1165,19 +1165,6 @@ export function CheckoutStep({
     <div className="wc-root">
       <WalletHeader disabled={busy} />
 
-      {showCbMobileWarning && (
-        <div className="wc-cb-mobile-warning" role="status">
-          <p>
-            <strong>Heads-up:</strong> for the smoothest Coinbase / Base
-            Smart Wallet checkout on mobile, continue inside the Coinbase
-            Wallet app:
-          </p>
-          <a className="wc-cb-mobile-warning-link" href={cbDappUrl}>
-            Continue in Coinbase Wallet →
-          </a>
-        </div>
-      )}
-
       <h3 style={{ marginTop: 0 }}>Select payment method</h3>
 
       {/* DEBUG — uncomment to re-test the tx-hash recovery paths without
@@ -1381,7 +1368,18 @@ export function CheckoutStep({
           window between the disconnect event firing and the stage transition,
           and for any edge case where `address` is undefined without the
           component unmounting. */}
-      {address && (
+      {address && (showCbMobileWarning ? (
+        <div className="wc-cb-mobile-warning" role="alert">
+          <p>
+            <strong>Heads-up:</strong> for the smoothest Coinbase / Base
+            Smart Wallet checkout on mobile, continue inside the Coinbase
+            Wallet app:
+          </p>
+          <a className="wc-cb-mobile-warning-link" href={cbDappUrl}>
+            Continue in Coinbase Wallet →
+          </a>
+        </div>
+      ) : (
         <button
           type="button"
           className="btn btn-primary btn-lg btn-block wc-pay-btn"
@@ -1391,7 +1389,7 @@ export function CheckoutStep({
         >
           {pickedInsufficient ? `Insufficient ${displaySymbol(picked?.symbol ?? '')} balance` : buttonLabel}
         </button>
-      )}
+      ))}
 
       {/* Status banner for the recovery flow. Sits between the Pay button
           and the error area so the buyer sees it the moment discovery
