@@ -22,6 +22,7 @@ import { erc20Abi, encodeFunctionData } from 'viem'
 import {
   getCapabilities as viemGetCapabilities,
   waitForCallsStatus as viemWaitForCallsStatus,
+  signMessage as viemSignMessage,
 } from 'viem/actions'
 import { NETWORK_LOGOS, TOKEN_LOGOS } from '../assetIcons'
 import type { WCConfig } from '../config'
@@ -932,11 +933,33 @@ export function CheckoutStep({
       // First wallet RPC of the click chain — gesture token must still
       // be alive here on iOS. Don't insert any awaits between the click
       // entry and this call.
+      //
+      // For Coinbase / Base Smart Wallet we bypass wagmi's signMessage
+      // wrapper for the same reason the capability probe needs bypassing:
+      // wagmi's mutation calls `getConnectorClient` with default
+      // `assertChainId: true`, and the CB SDK desync (connector reports
+      // 1 while connection is 10) makes that assertion throw before the
+      // wallet ever sees the request. personal_sign is chain-agnostic on
+      // the RPC level — we just need to skip the assertion. Other
+      // wallets use the wagmi hook path unchanged.
       setStatus('signing-challenge')
-      const signature = await signMessageAsync({ message })
+      let signature: string
+      if (connectionKind === 'coinbaseWallet') {
+        const signClient = await getConnectorClient(wagmiConfig, {
+          assertChainId: false,
+          account: address as `0x${string}`,
+        })
+        signature = await viemSignMessage(signClient, {
+          message,
+          account: address as `0x${string}`,
+        })
+      } else {
+        signature = await signMessageAsync({ message })
+      }
       dbg('sign:done', {
         signatureLength: signature.length,
         signingChainId: walletChainId,
+        path: connectionKind === 'coinbaseWallet' ? 'viem-bypass' : 'wagmi',
       })
 
       // The nonce we just signed is now consumed — clear the prefetched
