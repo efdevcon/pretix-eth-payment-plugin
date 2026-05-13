@@ -43,7 +43,7 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
     return () => { document.body.classList.remove('wc-full-checkout') }
   }, [])
 
-  if (stage === 'connect') return <ConnectStep />
+  if (stage === 'connect') return <ConnectStep config={config} />
 
   if (stage === 'checkout') {
     if (opts.isLoading) return <div className="wc-root wc-small">Loading payment options...</div>

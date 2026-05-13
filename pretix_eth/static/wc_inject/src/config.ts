@@ -29,6 +29,9 @@ export interface WCConfig {
    *  consistent with the confirmation email. Supports `{code}` and
    *  `{secret}` substitution. Empty string = fall back to Pretix's order. */
   frontendOrderUrlTemplate?: string
+  /** True when this event has only ETH-on-mainnet enabled (the wave-launch
+   *  flow). Drives the ConnectStep heading copy. */
+  ethMainnetOnly?: boolean
 }
 
 export function readConfig(): WCConfig {

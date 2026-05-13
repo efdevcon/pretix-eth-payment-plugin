@@ -99,13 +99,38 @@ class WalletConnectPayment(BasePaymentProvider):
             and str(self.settings.get(f'token_{sym}', default='True')).lower() in ('true', '1', 'yes')
         ]
 
+    def _enabled_chain_ids(self):
+        """Chain IDs this event has enabled. Same shape as `_enabled_symbols`
+        — operator toggle = single source of truth."""
+        return [
+            cid for cid in SUPPORTED_CHAINS
+            if str(self.settings.get(f'chain_{cid}', default='True')).lower() in ('true', '1', 'yes')
+        ]
+
     @property
     def public_name(self):
         # Buyer-facing name in Pretix's checkout method picker. Reflects
         # only the tokens this event has enabled — never lists USDC if
-        # the operator turned it off.
-        symbols = self._english_token_list()
-        return _('Crypto') if not symbols else _('Crypto ({symbols})').format(symbols=symbols)
+        # the operator turned it off. Appends "— N% Discount" when a
+        # crypto discount is active so the negative-fee amount Pretix
+        # shows next to the row reads as a benefit, not a charge.
+        symbols = self._enabled_symbols()
+        chain_ids = self._enabled_chain_ids()
+        # Special case: ETH on mainnet only (L1 wave-launch flow). Render
+        # the chain explicitly so the buyer doesn't wonder which network
+        # the bare "Crypto (ETH)" label refers to.
+        if symbols == ['ETH'] and chain_ids == [1]:
+            base = _('ETH on Mainnet (L1)')
+        elif not symbols:
+            base = _('Crypto')
+        else:
+            base = _('Crypto ({symbols})').format(symbols=_english_list(symbols))
+        pct = _read_discount_pct(self.settings)
+        if pct <= 0:
+            return base
+        # Drop the trailing zeros so 10.00 → 10, 7.50 → 7.5.
+        pct_str = format(pct.normalize(), 'f')
+        return _('{base} — {pct}% Discount').format(base=base, pct=pct_str)
 
     def _english_token_list(self) -> str:
         return _english_list(self._enabled_symbols())
@@ -304,6 +329,11 @@ class WalletConnectPayment(BasePaymentProvider):
                 # every client. For dev iteration between version bumps, admins
                 # can also force a hard refresh / clear cache.
                 'plugin_version': _plugin_version,
+                # Single-token / single-chain ETH-on-mainnet wave-launch
+                # mode — drives the ConnectStep heading ("Pay with ETH"
+                # instead of "Pay with crypto") so the buyer doesn't
+                # wonder which network applies.
+                'eth_mainnet_only': self._enabled_symbols() == ['ETH'] and self._enabled_chain_ids() == [1],
             }
             return tpl.render(ctx, request=request)
         else:
