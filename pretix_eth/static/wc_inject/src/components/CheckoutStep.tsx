@@ -553,18 +553,31 @@ export function CheckoutStep({
   // Service confirms the connected address is a Safe and surfaces the
   // signers-required threshold for the multi-signer notice.
   useEffect(() => {
-    if (!config.safePaymentsEnabled || !address || !walletChainId) {
+    if (!config.safePaymentsEnabled) {
+      dbg('safe:probe:skipped', { reason: 'flag-off' })
+      setIsSafeAddress(false)
+      setSafeThreshold(null)
+      return
+    }
+    if (!address || !walletChainId) {
+      dbg('safe:probe:skipped', { reason: 'no-account-yet', hasAddress: !!address, walletChainId })
       setIsSafeAddress(false)
       setSafeThreshold(null)
       return
     }
     let cancelled = false
+    dbg('safe:probe:start', { address, chainId: walletChainId })
     probeSafe(walletChainId, address).then(r => {
       if (cancelled) return
+      dbg('safe:probe:done', {
+        address,
+        chainId: walletChainId,
+        isSafe: r.isSafe,
+        threshold: r.isSafe ? r.threshold : null,
+      })
       if (r.isSafe) {
         setIsSafeAddress(true)
         setSafeThreshold(r.threshold)
-        dbg('safe:detected', { address, chainId: walletChainId, threshold: r.threshold })
       } else {
         setIsSafeAddress(false)
         setSafeThreshold(null)
@@ -573,11 +586,14 @@ export function CheckoutStep({
     return () => { cancelled = true }
   }, [config.safePaymentsEnabled, address, walletChainId])
 
-  /** Connector-id heuristic OR on-chain Safe Tx Service confirmation —
-   *  either is enough to take the Safe send + sign-poll path. Gated by
-   *  the admin flag so a missing toggle leaves the flow exactly where
-   *  it was before this work. */
-  const isSafePath = !!config.safePaymentsEnabled && (isSafeWallet(connector) || isSafeAddress)
+  /** Heuristic OR on-chain confirmation — either is enough to take the
+   *  Safe send + sign-poll path. The heuristic now includes
+   *  `connectedWalletName` because Reown's WC Safe entry comes through
+   *  with the generic `walletConnect` connector type; the actual brand
+   *  ("Safe{Wallet}", "Safe Apps") only appears on `useWalletInfo().name`.
+   *  Gated by the admin flag so a missing toggle leaves the flow exactly
+   *  where it was before this work. */
+  const isSafePath = !!config.safePaymentsEnabled && (isSafeWallet(connector, connectedWalletName) || isSafeAddress)
 
   // Fire-and-forget chain switch on user-initiated pick. Mirrors the
   // storefront's `selectPaymentOption` behavior — by the time the buyer
@@ -926,6 +942,9 @@ export function CheckoutStep({
       prefetchedChallengeAgeMs: prefetchedChallenge
         ? Date.now() - prefetchedChallenge.fetchedAt
         : null,
+      isSafePath,
+      isSafeAddress,
+      safeThreshold,
     })
 
     try {

@@ -45,6 +45,11 @@ def add_wc_csp(sender, request, response, **kwargs):
             'https://api.web3modal.org',
             'https://*.web3modal.org',
             'https://*.coinbase.com',
+            # Safe Transaction Service (multisig detection + safeTxHash /
+            # safeMessageHash polling). Required only when an event admin
+            # opts in via `safe_payments_enabled`; harmless to allowlist
+            # globally since the bundle won't call it otherwise.
+            'https://*.safe.global',
         ],
         'manifest-src': ["'self'"],
     })

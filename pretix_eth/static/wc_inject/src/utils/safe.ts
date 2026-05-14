@@ -6,12 +6,20 @@
  * none of this code path runs by default.
  */
 
-/** Connector-id / connector-name heuristic. Covers the typical Reown
- *  WC Safe entry and the Safe Apps connector when injected. Falls back
- *  to `false` for any other shape. */
+/** Connector-id / wallet-name heuristic. Covers three shapes:
+ *   1. The dedicated `safe` connector (Safe Apps iframe injection).
+ *   2. A connector whose `.name` includes "safe" (rare, but covers any
+ *      future Safe-branded direct connector).
+ *   3. WalletConnect to Safe{Wallet} via Reown's wallet directory — the
+ *      connector itself is generic `walletConnect`, the Safe brand only
+ *      appears on `useWalletInfo().name` (so the caller has to pass it
+ *      in). This is the common production case.
+ *  Falls back to `false` for any other shape. */
 export function isSafeWallet(
   connector: { id?: string; name?: string } | undefined,
+  walletName?: string,
 ): boolean {
+  if (walletName && walletName.toLowerCase().includes('safe')) return true
   if (!connector) return false
   if (connector.id === 'safe') return true
   return Boolean(connector.name?.toLowerCase().includes('safe'))
