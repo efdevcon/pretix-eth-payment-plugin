@@ -1414,9 +1414,9 @@ export function CheckoutStep({
         // progress fraction so users see motion instead of a stalled spinner
         // (especially on Ethereum L1 where 3 confs \u2248 36 s).
         if (confirmProgress) {
-          return `Confirming on-chain (${confirmProgress.current}/${confirmProgress.required})\u2026`
+          return `Confirming onchain (${confirmProgress.current}/${confirmProgress.required})\u2026`
         }
-        return 'Verifying on-chain\u2026'
+        return 'Verifying onchain\u2026'
       case 'error': return 'Retry'
     }
   })()
