@@ -14,6 +14,7 @@
   "supportEmail": "{{ support_email|escapejs }}",
   "frontendOrderUrlTemplate": "{{ frontend_order_url_template|escapejs }}",
   "ethMainnetOnly": {{ eth_mainnet_only|yesno:"true,false" }},
+  "safePaymentsEnabled": {{ safe_payments_enabled|yesno:"true,false" }},
   "pluginVersion": "{{ plugin_version|escapejs }}"
 }
 </script>

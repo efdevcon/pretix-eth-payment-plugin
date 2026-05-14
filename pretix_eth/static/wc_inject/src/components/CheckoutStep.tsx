@@ -30,6 +30,13 @@ import type { PaymentOption } from '../hooks/usePaymentOptions'
 import type { Quote } from '../WCPaymentApp'
 import { useWalletBalances, findBalance, formatBalance } from '../hooks/useWalletBalances'
 import { WalletHeader } from './WalletHeader'
+import {
+  isSafeWallet,
+  probeSafe,
+  pollSafeTxService,
+  pollSafeMessagesService,
+  looksLikeSafeMessageHash,
+} from '../utils/safe'
 
 // Per-chain block time (ms). The verify-poll interval is derived from this
 // so we don't waste polls on slow chains (Ethereum L1 ~12 s blocks) and
@@ -507,6 +514,12 @@ export function CheckoutStep({
   // (X/N)" instead of an opaque spinner during the verify poll.
   const [confirmProgress, setConfirmProgress] = useState<{ current: number; required: number } | null>(null)
 
+  // Safe (multisig) detection state — populated by the post-`useAccount`
+  // effect below. Declared here so the recovery / picker render paths
+  // can reference `isSafeAddress` without a forward-ref dance.
+  const [isSafeAddress, setIsSafeAddress] = useState(false)
+  const [safeThreshold, setSafeThreshold] = useState<number | null>(null)
+
   // Hash-recovery escape hatch. Some wallets (Binance Wallet macOS;
   // intermittently Bitget Mobile / TokenPocket) broadcast the tx but never
   // return the hash via WC, leaving sendTransactionAsync hanging forever.
@@ -535,6 +548,37 @@ export function CheckoutStep({
   const { signMessageAsync } = useSignMessage()
   const { switchChainAsync, switchChain } = useSwitchChain()
 
+  // Safe (multisig) on-chain probe — opt-in per event via
+  // `config.safePaymentsEnabled`. Sets `isSafeAddress` when Safe Tx
+  // Service confirms the connected address is a Safe and surfaces the
+  // signers-required threshold for the multi-signer notice.
+  useEffect(() => {
+    if (!config.safePaymentsEnabled || !address || !walletChainId) {
+      setIsSafeAddress(false)
+      setSafeThreshold(null)
+      return
+    }
+    let cancelled = false
+    probeSafe(walletChainId, address).then(r => {
+      if (cancelled) return
+      if (r.isSafe) {
+        setIsSafeAddress(true)
+        setSafeThreshold(r.threshold)
+        dbg('safe:detected', { address, chainId: walletChainId, threshold: r.threshold })
+      } else {
+        setIsSafeAddress(false)
+        setSafeThreshold(null)
+      }
+    })
+    return () => { cancelled = true }
+  }, [config.safePaymentsEnabled, address, walletChainId])
+
+  /** Connector-id heuristic OR on-chain Safe Tx Service confirmation —
+   *  either is enough to take the Safe send + sign-poll path. Gated by
+   *  the admin flag so a missing toggle leaves the flow exactly where
+   *  it was before this work. */
+  const isSafePath = !!config.safePaymentsEnabled && (isSafeWallet(connector) || isSafeAddress)
+
   // Fire-and-forget chain switch on user-initiated pick. Mirrors the
   // storefront's `selectPaymentOption` behavior — by the time the buyer
   // taps Pay the wallet is usually already on the target chain.
@@ -546,6 +590,12 @@ export function CheckoutStep({
   function pickAndMaybeSwitch(opt: PaymentOption) {
     setPicked(opt)
     if (connectionKind === 'coinbaseWallet') return
+    // Safes are chain-scoped per deployment; `wallet_switchEthereumChain`
+    // is meaningless (the Safe app is already on whichever chain the
+    // buyer opened it on). Skip the prompt — if the picked chain differs
+    // from the Safe's chain, the send step will surface a friendlier
+    // error than the wallet's "unsupported method" response.
+    if (connectionKind === 'safe' || isSafePath) return
     if (walletChainId !== opt.chain_id && switchChain) {
       switchChain({ chainId: opt.chain_id })
     }
@@ -962,6 +1012,24 @@ export function CheckoutStep({
         path: connectionKind === 'coinbaseWallet' ? 'viem-bypass' : 'wagmi',
       })
 
+      // Multi-sig Safe path: the wallet returns a 32-byte
+      // safeMessageHash instead of a signature. Poll Safe Messages
+      // Service until co-signers have signed and the API returns the
+      // assembled ERC-1271 `preparedSignature` — that's what the
+      // backend verifies via the Safe contract's isValidSignature.
+      // Only enabled when `config.safePaymentsEnabled` is on.
+      if (isSafePath && looksLikeSafeMessageHash(signature)) {
+        setStatus('verifying')
+        dbg('safe:messages:poll-start', { safeAddress: address, safeMessageHash: signature })
+        signature = await pollSafeMessagesService(
+          walletChainId,
+          address as string,
+          signature,
+        )
+        dbg('safe:messages:poll-done', { preparedSignatureLength: signature.length })
+        setStatus('signing-challenge')
+      }
+
       // The nonce we just signed is now consumed — clear the prefetched
       // copy so a retry (e.g. after a failed verify) goes through a
       // fresh challenge fetch instead of replaying a used nonce.
@@ -1128,6 +1196,41 @@ export function CheckoutStep({
           throw new Error('Wallet completed payment but did not return a transaction hash. Refresh and check your wallet history before retrying — your funds may already be on the way.')
         }
         minedHash = hash
+      } else if (isSafePath) {
+        // ── Safe (multisig) path ──
+        //
+        // The Safe app is chain-scoped per deployment, so we skip the
+        // `switchChain` step entirely — the Safe is already on whichever
+        // chain the buyer opened it on. `eth_sendTransaction` /
+        // `eth_writeContract` on a Safe returns an off-chain
+        // *safeTxHash*, not a real on-chain hash; we poll Safe Tx
+        // Service for the executed `transactionHash` and feed that to
+        // pollVerify. Multi-sig Safes can take minutes-to-hours of
+        // co-signer time — the "verifying" status stays up while
+        // pollSafeTxService waits.
+        dbg('safe:send:invoke', { chainId: q.chain_id, symbol: q.symbol })
+        setStatus('signing-tx')
+        const safeTxHash: string = q.symbol === 'ETH'
+          ? await sendTransactionAsync({
+              to: q.receive_address as `0x${string}`,
+              value: BigInt(q.amount_raw),
+              chainId: q.chain_id,
+            })
+          : await (async () => {
+              if (!q.token_address) throw new Error('token_address missing')
+              return writeContractAsync({
+                address: q.token_address as `0x${string}`,
+                abi: erc20Abi,
+                functionName: 'transfer',
+                args: [q.receive_address as `0x${string}`, BigInt(q.amount_raw)],
+                chainId: q.chain_id,
+              })
+            })()
+        dbg('safe:send:returned', { safeTxHash })
+        setStatus('verifying')
+        dbg('safe:tx:poll-start', { chainId: q.chain_id, safeTxHash })
+        minedHash = await pollSafeTxService(q.chain_id, safeTxHash)
+        dbg('safe:tx:poll-done', { safeTxHash, onChainHash: minedHash })
       } else {
         // ── Legacy path (EOA wallets, older WC sessions) ──
         //
@@ -1322,6 +1425,22 @@ export function CheckoutStep({
   return (
     <div className="wc-root">
       <WalletHeader disabled={busy} />
+
+      {isSafePath && (
+        <div className="wc-safe-notice" role="status">
+          <strong>Safe detected — payment is experimental.</strong> Keep
+          this tab open while the transaction is signed and executed.
+          {safeThreshold !== null && safeThreshold > 1 && (
+            <>
+              {' '}
+              For Safes with multiple signers, use a <strong>dedicated
+              browser</strong> for the Safe app where co-signers add
+              signatures — this prevents losing the WalletConnect
+              connection to your Safe mid-flow.
+            </>
+          )}
+        </div>
+      )}
 
       <h3 style={{ marginTop: 0 }}>Select payment method</h3>
 

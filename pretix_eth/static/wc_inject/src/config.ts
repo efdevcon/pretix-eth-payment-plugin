@@ -32,6 +32,12 @@ export interface WCConfig {
   /** True when this event has only ETH-on-mainnet enabled (the wave-launch
    *  flow). Drives the ConnectStep heading copy. */
   ethMainnetOnly?: boolean
+  /** Opt-in: surface Safe / Safe-Apps as a wallet option, with safeTxHash
+   *  polling on the send path and safeMessageHash polling on the challenge
+   *  sign for multi-sig Safes. Default OFF — multi-sig Safe co-sign can
+   *  take hours, and an event that hasn't operationally validated this
+   *  path shouldn't expose a "stuck-order" footgun. */
+  safePaymentsEnabled?: boolean
   /** Plugin version (`pretix_eth/__init__.py:__version__`). Surfaced via
    *  WCConfig so debug logs and the in-page footer don't need a separate
    *  injection path. */
@@ -58,22 +64,25 @@ const FEATURED_WALLET_IDS = [
   'c57ca95b47569778a828d19178114f4db188b89b763c899ba0be274e97267d96', // MetaMask
 ]
 
-// Wallets explicitly hidden from the AppKit picker. Safes are excluded here
-// because the wc_inject flow doesn't bridge through Safe Tx Service / Safe
-// Messages API to recover the on-chain hash for multisigs (the devcon-next
-// FE does, but this legacy bundle hasn't been upgraded). A buyer who paid
-// with a Safe would see the tx confirm on-chain but the page never
-// recover — leaving the order stuck. Hide the option until that path is
-// implemented; admin manual-verify remains the recovery channel.
-const EXCLUDED_WALLET_IDS = [
-  '225affb176778569276e484e1b92637ad061b01e13a048b35a9d280c3b58970f', // Safe
-]
+// Wallet IDs we always hide. Safe is excluded by default — the bundle
+// only bridges through Safe Tx Service / Safe Messages API for safeTxHash
+// + safeMessageHash recovery when the `safe_payments_enabled` admin flag
+// is on. When the flag is off (default) we leave Safe in this list so a
+// buyer with a Safe gets clearly told the option isn't supported (no row
+// at all, vs. a row that completes payment on-chain but never recovers).
+const SAFE_WC_WALLET_ID = '225affb176778569276e484e1b92637ad061b01e13a048b35a9d280c3b58970f'
+const ALWAYS_EXCLUDED_WALLET_IDS: string[] = []
 
-export function initAppKit(projectId: string) {
+export function initAppKit(projectId: string, opts?: { safePaymentsEnabled?: boolean }) {
   const wagmiAdapter = new WagmiAdapter({
     projectId,
     networks: NETWORKS,
   })
+
+  const excludeWalletIds = [
+    ...ALWAYS_EXCLUDED_WALLET_IDS,
+    ...(opts?.safePaymentsEnabled ? [] : [SAFE_WC_WALLET_ID]),
+  ]
 
   const appKit = createAppKit({
     adapters: [wagmiAdapter],
@@ -91,7 +100,7 @@ export function initAppKit(projectId: string) {
       socials: [],
     },
     featuredWalletIds: FEATURED_WALLET_IDS,
-    excludeWalletIds: EXCLUDED_WALLET_IDS,
+    excludeWalletIds: excludeWalletIds,
   })
 
   return { wagmiAdapter, appKit, open: () => appKit.open() }

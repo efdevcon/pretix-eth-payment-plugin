@@ -172,6 +172,27 @@ class WalletConnectPayment(BasePaymentProvider):
             required=False,
             initial=False,
         )
+        # wc_inject's Safe-multisig support is opt-in per event. When ON, the
+        # bundle un-excludes Safe from the AppKit picker, detects Safes via
+        # Safe Transaction Service at connect time, surfaces a multi-signer
+        # notice, polls safeTxHash → on-chain hash after the payment is
+        # signed, and polls safeMessageHash → preparedSignature for the
+        # challenge sign on multi-sig Safes (ERC-1271). Default OFF so an
+        # operator who doesn't have Safe operationally validated for their
+        # event doesn't accidentally surface a "stuck-order" path.
+        base['safe_payments_enabled'] = forms.BooleanField(
+            label=_('Enable Safe (multisig) payments in wc_inject'),
+            help_text=_(
+                'Surface Safe / Safe-Apps as a connection option in the '
+                'on-Pretix crypto checkout, with safeTxHash polling and a '
+                'multi-signer notice. Leave OFF unless this event has '
+                'validated Safe payments end-to-end — multi-sig Safes can '
+                'take minutes to hours for co-signers to approve, so the '
+                'order stays in "verifying" the whole time.'
+            ),
+            required=False,
+            initial=False,
+        )
         base['receive_address'] = forms.CharField(
             label=_('Receive wallet address (EIP-55)'),
             max_length=42, min_length=42, required=True,
@@ -334,6 +355,12 @@ class WalletConnectPayment(BasePaymentProvider):
                 # instead of "Pay with crypto") so the buyer doesn't
                 # wonder which network applies.
                 'eth_mainnet_only': self._enabled_symbols() == ['ETH'] and self._enabled_chain_ids() == [1],
+                # Opt-in flag: see `safe_payments_enabled` field. Bundle
+                # reads it to (a) un-exclude Safe from the picker and (b)
+                # turn on safeTxHash / safeMessageHash polling. Default OFF.
+                'safe_payments_enabled': bool(
+                    self.settings.get('safe_payments_enabled', as_type=bool, default=False)
+                ),
             }
             return tpl.render(ctx, request=request)
         else:

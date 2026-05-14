@@ -5,7 +5,9 @@ import { readConfig, initAppKit, setAppKitInstance } from './config'
 import { WCPaymentApp } from './WCPaymentApp'
 
 const config = readConfig()
-const { wagmiAdapter, appKit } = initAppKit(config.wcProjectId)
+const { wagmiAdapter, appKit } = initAppKit(config.wcProjectId, {
+  safePaymentsEnabled: config.safePaymentsEnabled,
+})
 setAppKitInstance(appKit)
 const queryClient = new QueryClient()
 
