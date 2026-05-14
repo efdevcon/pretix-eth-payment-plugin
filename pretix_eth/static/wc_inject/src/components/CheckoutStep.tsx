@@ -1082,7 +1082,14 @@ export function CheckoutStep({
       })
       if (!qr.ok) {
         const body = await qr.json().catch(() => ({}))
-        dbgErr('quote:http', { status: qr.status, body })
+        // Stringify the error in the log so it's readable inline
+        // without expanding the Object — quote:http errors are the
+        // primary diagnostic for signature / chain mismatches.
+        dbgErr('quote:http', {
+          status: qr.status,
+          errorMessage: typeof body?.error === 'string' ? body.error : undefined,
+          body,
+        })
         throw new Error(body.error || `create-quote HTTP ${qr.status}`)
       }
       const q: Quote = await qr.json()

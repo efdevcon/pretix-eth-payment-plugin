@@ -590,6 +590,24 @@ def create_quote(request):
                     pass
             if chain_id not in check_chain_ids:
                 check_chain_ids.append(chain_id)
+            # Coinbase / Base Smart Wallet always wraps ERC-1271 sigs with
+            # its "home" chain (mainnet) regardless of what wagmi reports
+            # as the wallet's current chain — the SDK has a chain-id desync
+            # bug (coinbase-wallet-sdk#1317) where the connector lies about
+            # getChainId(). Empirically: a CBSW user with wagmi-state on
+            # Arbitrum signs with chainId=1, and the only chain whose
+            # contract validates the resulting sig is mainnet.
+            #
+            # Adding mainnet as a third check candidate fixes that without
+            # opening a replay vector — the message body still embeds
+            # order_code + single-use nonce + payer_address, so a sig
+            # validated on mainnet still only binds the specific buyer
+            # to the specific order. The V11 hardening was about closing
+            # *unrelated-contract* coincidence on arbitrary chains; chain
+            # 1 isn't arbitrary for smart wallets, every one has a mainnet
+            # deployment.
+            if 1 not in check_chain_ids:
+                check_chain_ids.append(1)
             sig_ok = False
             for cid in check_chain_ids:
                 try:
