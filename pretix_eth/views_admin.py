@@ -404,6 +404,85 @@ def admin_refund(request: HttpRequest):
     return JsonResponse({'success': False, 'error': f'unknown action: {action}'}, status=400)
 
 
+@csrf_exempt
+@require_http_methods(['POST'])
+@require_pretix_admin_token('can_change_orders')
+def admin_wc_refund(request: HttpRequest):
+    """Refund a legacy WalletConnect (pre-x402) order. Unlike the x402
+    refund which keeps its own plugin-side CAS ledger on the
+    `X402CompletedOrder` row, the WC path has no refund columns on
+    `WCPaymentAttempt`. Bookkeeping lives entirely in Pretix's native
+    `OrderRefund` — which IS the audit trail every operator expects to
+    consult anyway.
+    Idempotency: refuse to create a second OrderRefund for the same
+    `refund_tx_hash` on the same order. The on-chain refund is
+    already final; a double-record would just duplicate the Pretix-side
+    audit line.
+    """
+    body = _read_body(request)
+    event = _get_event(body.get('organizer', ''), body.get('event', ''))
+    if not event:
+        return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
+
+    pretix_order_code = body.get('pretix_order_code') or body.get('order_code') or ''
+    refund_tx_hash = body.get('refund_tx_hash', '')
+    chain_id = body.get('chain_id')
+    amount = body.get('amount', '')
+    if not pretix_order_code or not refund_tx_hash or chain_id is None or not amount:
+        return JsonResponse({
+            'success': False,
+            'error': 'pretix_order_code, refund_tx_hash, chain_id, amount all required',
+        }, status=400)
+    try:
+        chain_id_int = int(chain_id)
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
+
+    import json as _json
+    from pretix.base.models import Order, OrderRefund
+    with scopes_disabled():
+        try:
+            order = Order.objects.get(event=event, code=pretix_order_code)
+        except Order.DoesNotExist:
+            return JsonResponse({'success': False, 'error': 'pretix order not found'}, status=404)
+
+        # Idempotency check: a refund with the same on-chain tx hash on
+        # the same order is the same refund — return 409 so the admin UI
+        # can show "already refunded" instead of re-creating.
+        for r in order.refunds.all():
+            try:
+                existing_info = _json.loads(r.info or '{}')
+            except (ValueError, TypeError):
+                existing_info = {}
+            if existing_info.get('refund_tx_hash') == refund_tx_hash:
+                return JsonResponse({
+                    'success': False,
+                    'error': 'refund with this tx hash already recorded',
+                    'refund_id': r.local_id,
+                }, status=409)
+
+        from pretix_eth.x402.pretix_client import record_pretix_refund
+        try:
+            refund = record_pretix_refund(
+                event=event,
+                pretix_order_code=pretix_order_code,
+                amount=amount,
+                refund_tx_hash=refund_tx_hash,
+                chain_id=chain_id_int,
+            )
+        except Exception as e:
+            log.exception('[wc refund] record_pretix_refund failed for %s', pretix_order_code)
+            return JsonResponse({'success': False, 'error': f'pretix refund failed: {e}'}, status=500)
+
+        if refund is None:
+            return JsonResponse({
+                'success': False,
+                'error': 'could not record refund (no confirmed walletconnect payment on this order)',
+            }, status=409)
+
+        return JsonResponse({'success': True, 'refund_id': refund.local_id})
+
+
 # ---------------------------------------------------------------------------
 # Admin manual verification — operator-initiated recovery for payments
 # where the buyer's auto-verify didn't complete (browser crash, RPC blip
