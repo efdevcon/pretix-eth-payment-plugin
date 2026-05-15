@@ -505,7 +505,7 @@ def admin_wc_refund(request: HttpRequest):
         return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
 
     import json as _json
-    from pretix.base.models import Order, OrderRefund
+    from pretix.base.models import Order
     with scopes_disabled():
         try:
             order = Order.objects.get(event=event, code=pretix_order_code)
