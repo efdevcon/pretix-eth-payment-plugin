@@ -499,6 +499,24 @@ class WalletConnectPayment(BasePaymentProvider):
             'block_number': info.get('block_number'),
         }
 
+    def api_refund_details(self, refund) -> dict:
+        """Populate the `details` field of refunds in Pretix's REST API.
+        Same shape contract as `api_payment_details` — Pretix's
+        `OrderRefundSerializer.details` calls `provider.api_refund_details`
+        (see pretix/api/serializers/order.py:`RefundDetailsField`), and
+        the default implementation on `BasePaymentProvider` returns `{}`.
+        Without this override, the on-chain refund tx hash + chain id
+        that the plugin writes into `OrderRefund.info` via
+        `record_pretix_refund` is invisible to any REST API consumer
+        (devcon's buyer recap page in particular). The plugin's native
+        UI already reads from `info_data` directly, so it's unaffected
+        either way."""
+        info = refund.info_data or {}
+        return {
+            'refund_tx_hash': info.get('refund_tx_hash'),
+            'chain_id': info.get('chain_id'),
+        }
+
     def order_pending_mail_render(self, order, payment) -> str:
         """Insert a crypto-payment recap into Pretix's order confirmation mail
         (the `{payment_info}` placeholder in the email template). Matches the
