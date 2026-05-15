@@ -529,6 +529,7 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
     logged on the order, and respects locale conventions. Skipped
     silently if the order has no email recorded."""
     from pretix.base.services.mail import mail
+    from i18nfield.strings import LazyI18nString
     from pretix_eth.chains import CHAIN_METADATA
     if not getattr(order, 'email', None):
         return
@@ -539,25 +540,37 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
         f'{explorer_tx_base}{refund_tx_hash}' if explorer_tx_base
         else refund_tx_hash
     )
-    body_lines = [
-        f'Hello,',
-        '',
-        f'A refund of {amount} {order.event.currency} has been issued for your order {order.code}.',
-        '',
-        'Refund details:',
-        f'Amount: {amount} {order.event.currency}',
-        f'Network: {chain_name}',
-        f'Refund transaction: {tx_url}',
-        '',
+    # Pretix's `mail()` treats a plain `str` template as a Django
+    # template *filename*. To pass inline body text instead, wrap it
+    # in `LazyI18nString` — that's the documented hook for the
+    # `format_map(template, context)` path (see the docstring on
+    # `pretix.base.services.mail.mail`). The context dict carries the
+    # values referenced as `{placeholder}` markers in the body.
+    body_template = LazyI18nString(
+        'Hello,\n'
+        '\n'
+        'A refund of {amount} {currency} has been issued for your order {order}.\n'
+        '\n'
+        'Refund details:\n'
+        'Amount: {amount} {currency}\n'
+        'Network: {chain_name}\n'
+        'Refund transaction: {tx_url}\n'
+        '\n'
         'The funds were returned on-chain to the wallet that originally paid. '
         'If you don\'t see the transfer or have any questions, please reply '
-        'to this email.',
-    ]
+        'to this email.\n'
+    )
     mail(
         email=order.email,
-        subject=f'Refund issued for your order {order.code}',
-        template='\n'.join(body_lines),
-        context={},
+        subject=LazyI18nString('Refund issued for your order {order}'),
+        template=body_template,
+        context={
+            'order': order.code,
+            'amount': str(amount),
+            'currency': order.event.currency,
+            'chain_name': chain_name,
+            'tx_url': tx_url,
+        },
         event=order.event,
         order=order,
         locale=getattr(order, 'locale', None) or order.event.settings.locale,
