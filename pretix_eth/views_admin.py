@@ -57,6 +57,7 @@ def _serialize_completed(
     pretix_testmode: Optional[bool] = None,
     pretix_total: Optional[Decimal] = None,
     overpaid_usd: Optional[str] = None,
+    refunded_amount: Optional[str] = None,
 ) -> dict:
     return {
         'source': 'x402',
@@ -82,6 +83,11 @@ def _serialize_completed(
         'pretixTestmode': pretix_testmode if pretix_testmode is not None else False,
         'pretixTotal': str(pretix_total) if pretix_total is not None else None,
         'overpaidUsd': overpaid_usd,
+        # Sum of Pretix OrderRefunds in DONE state on the matched order.
+        # Drives the "Refunded $X" badge + button-suppression in the
+        # admin UI. Includes refunds applied via *any* path (plugin's
+        # x402 refund flow, plugin's WC refund flow, Pretix-native UI).
+        'refundedAmount': refunded_amount,
     }
 
 
@@ -91,6 +97,7 @@ def _serialize_wc_attempt(
     pretix_status: Optional[str] = None,
     pretix_testmode: Optional[bool] = None,
     overpaid_usd: Optional[str] = None,
+    refunded_amount: Optional[str] = None,
 ) -> dict:
     """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
     the tx hash was verified on-chain and the Pretix order confirmed.
@@ -118,13 +125,15 @@ def _serialize_wc_attempt(
         'tokenSymbol': token_symbol,
         'cryptoAmount': crypto_amount if crypto_amount else None,
         'email': email,
-        # Pretix-side state mirror. `overpaid_usd` is computed from
-        # Pretix payments/refunds at the call site so the same cancelled-
-        # but-unrefunded detection works for legacy WC rows too.
+        # Pretix-side state mirror. `overpaid_usd` and `refunded_amount`
+        # are both computed from Pretix payments/refunds at the call
+        # site so the same logic catches cancelled-but-unrefunded and
+        # already-refunded rows for legacy WC orders too.
         'pretixStatus': pretix_status,
         'pretixTestmode': pretix_testmode if pretix_testmode is not None else False,
         'pretixTotal': str(total) if total is not None else None,
         'overpaidUsd': overpaid_usd,
+        'refundedAmount': refunded_amount,
     }
 
 
@@ -225,11 +234,14 @@ def admin_orders(request: HttpRequest):
                 # — a real case we hit on a test order with $0.01 total.
                 refund_owed = (net_paid - effective_owed).quantize(Decimal('0.01'))
                 overpaid_usd = str(refund_owed) if refund_owed > Decimal('0') else None
+                refunded_qd = refunded_out.quantize(Decimal('0.01'))
+                refunded_amount = str(refunded_qd) if refunded_qd > Decimal('0') else None
                 order_meta_by_code[porder.code] = {
                     'status': porder.status,
                     'testmode': bool(porder.testmode),
                     'total': porder.total,
                     'overpaid_usd': overpaid_usd,
+                    'refunded_amount': refunded_amount,
                 }
 
         x402_rows = [
@@ -240,6 +252,7 @@ def admin_orders(request: HttpRequest):
                 pretix_testmode=(order_meta_by_code.get(o.pretix_order_code) or {}).get('testmode'),
                 pretix_total=(order_meta_by_code.get(o.pretix_order_code) or {}).get('total'),
                 overpaid_usd=(order_meta_by_code.get(o.pretix_order_code) or {}).get('overpaid_usd'),
+                refunded_amount=(order_meta_by_code.get(o.pretix_order_code) or {}).get('refunded_amount'),
             )
             for o in x402_completed_list
         ]
@@ -267,6 +280,7 @@ def admin_orders(request: HttpRequest):
             # columns we need plus the payment/refund children for the
             # refund-owed computation. Same shape as the x402 fetch above.
             wc_overpaid_by_code: dict = {}
+            wc_refunded_by_code: dict = {}
             orders_by_code = {}
             if wc_codes:
                 for porder in (
@@ -292,6 +306,8 @@ def admin_orders(request: HttpRequest):
                     effective_owed = Decimal('0') if porder.status == 'c' else Decimal(porder.total or 0)
                     refund_owed = (net_paid - effective_owed).quantize(Decimal('0.01'))
                     wc_overpaid_by_code[porder.code] = str(refund_owed) if refund_owed > Decimal('0') else None
+                    refunded_qd = refunded_out.quantize(Decimal('0.01'))
+                    wc_refunded_by_code[porder.code] = str(refunded_qd) if refunded_qd > Decimal('0') else None
             for code, order in orders_by_code.items():
                 email_by_code.setdefault(code, order.email)
             # The legacy verify handler (views.py) writes token_symbol + amount
@@ -322,6 +338,7 @@ def admin_orders(request: HttpRequest):
                     pretix_status=orders_by_code[w.order_code].status if w.order_code in orders_by_code else None,
                     pretix_testmode=bool(orders_by_code[w.order_code].testmode) if w.order_code in orders_by_code else None,
                     overpaid_usd=wc_overpaid_by_code.get(w.order_code),
+                    refunded_amount=wc_refunded_by_code.get(w.order_code),
                 )
                 for w in wc_attempts if w.order_code in orders_by_code
             ]
