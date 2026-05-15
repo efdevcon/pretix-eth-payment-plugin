@@ -50,7 +50,27 @@ def _get_event(org_slug: str, event_slug: str):
         return None
 
 
-def _serialize_completed(o: X402CompletedOrder, email: Optional[str] = None) -> dict:
+def _serialize_completed(
+    o: X402CompletedOrder,
+    email: Optional[str] = None,
+    pretix_status: Optional[str] = None,
+    pretix_testmode: Optional[bool] = None,
+    pretix_total: Optional[Decimal] = None,
+) -> dict:
+    # Overpayment detection: total_usd is the USD value the buyer was
+    # *charged* (locked at quote time, reflects crypto-discount); pretix
+    # `order.total` is what the order actually owes. A meaningfully large
+    # delta (> 1 cent) flags the order for admin refund. Negative
+    # deltas (underpaid) would have caused verify to reject before
+    # writing this row, so they don't show up here.
+    overpaid_usd = None
+    if pretix_total is not None:
+        try:
+            delta = Decimal(o.total_usd) - Decimal(pretix_total)
+            if delta > Decimal('0.01'):
+                overpaid_usd = str(delta.quantize(Decimal('0.01')))
+        except Exception:
+            pass
     return {
         'source': 'x402',
         'paymentReference': o.payment_reference,
@@ -67,12 +87,22 @@ def _serialize_completed(o: X402CompletedOrder, email: Optional[str] = None) -> 
         'refundStatus': o.refund_status,
         'refundTxHash': o.refund_tx_hash,
         'refundMeta': o.refund_meta or {},
+        # Pretix order state mirror — `n` pending, `p` paid, `e` expired,
+        # `c` canceled. `None` when the matching Pretix Order couldn't
+        # be loaded (rare — admin row points at a Pretix code that's
+        # since been deleted).
+        'pretixStatus': pretix_status,
+        'pretixTestmode': pretix_testmode if pretix_testmode is not None else False,
+        'pretixTotal': str(pretix_total) if pretix_total is not None else None,
+        'overpaidUsd': overpaid_usd,
     }
 
 
 def _serialize_wc_attempt(
     w: WCPaymentAttempt, total: Optional[Decimal], payment_info: Optional[dict] = None,
     email: Optional[str] = None,
+    pretix_status: Optional[str] = None,
+    pretix_testmode: Optional[bool] = None,
 ) -> dict:
     """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
     the tx hash was verified on-chain and the Pretix order confirmed.
@@ -100,10 +130,17 @@ def _serialize_wc_attempt(
         'tokenSymbol': token_symbol,
         'cryptoAmount': crypto_amount if crypto_amount else None,
         'email': email,
+        # Legacy WC attempts don't carry a discount-adjusted USD figure,
+        # so we can't reliably flag overpayment for them — only mirror
+        # the Pretix Order's status + testmode.
+        'pretixStatus': pretix_status,
+        'pretixTestmode': pretix_testmode if pretix_testmode is not None else False,
+        'pretixTotal': str(total) if total is not None else None,
+        'overpaidUsd': None,
     }
 
 
-def _serialize_pending(o: X402PendingOrder) -> dict:
+def _serialize_pending(o: X402PendingOrder, pretix_testmode: Optional[bool] = None) -> dict:
     order_data = o.order_data or {}
     addons = order_data.get('addons') or []
     addon_ids = [a.get('item', {}).get('id') for a in addons if isinstance(a, dict)]
@@ -114,6 +151,11 @@ def _serialize_pending(o: X402PendingOrder) -> dict:
         'intendedPayer': o.intended_payer,
         'totalUsd': str(o.total_usd),
         'expectedChainId': o.expected_chain_id,
+        # Pending rows are pre-order-creation, so they don't have a
+        # Pretix Order to mirror state from — `testmode` is the event-
+        # level flag instead, telling the admin "this attempt was made
+        # against the test catalog".
+        'pretixTestmode': pretix_testmode if pretix_testmode is not None else False,
         # Pre-computed ETH wei per chain (snapshot at pending creation time —
         # locks in the rate the buyer was quoted). Stables aren't pre-stored
         # because their amount is just `total_usd * 10^6`.
@@ -146,23 +188,39 @@ def admin_orders(request: HttpRequest):
         x402_completed_list = list(completed_qs.order_by('-completed_at')[:500])
 
         # Single round-trip to fetch all relevant Pretix Orders so the
-        # admin UI can show the buyer's email per row without N+1 queries.
-        # `.only('code', 'email')` skips Pretix Order's wide payload (~30+
-        # columns including meta_info JSON, transactions, attendee data) —
-        # we read only `code` + `email` here.
+        # admin UI can show buyer email, order state, testmode flag, and
+        # over-payment delta per row without N+1 queries. `.only(...)`
+        # skips Pretix Order's wide payload (~30+ columns including
+        # meta_info JSON, transactions, attendee data).
         x402_codes = {o.pretix_order_code for o in x402_completed_list if o.pretix_order_code}
         email_by_code: dict = {}
+        order_meta_by_code: dict = {}
         if x402_codes:
-            email_by_code.update({
-                o.code: o.email
-                for o in Order.objects.filter(event=event, code__in=x402_codes).only('code', 'email')
-            })
+            for o in Order.objects.filter(event=event, code__in=x402_codes).only(
+                'code', 'email', 'status', 'testmode', 'total',
+            ):
+                email_by_code[o.code] = o.email
+                order_meta_by_code[o.code] = {
+                    'status': o.status,
+                    'testmode': bool(o.testmode),
+                    'total': o.total,
+                }
 
         x402_rows = [
-            _serialize_completed(o, email=email_by_code.get(o.pretix_order_code))
+            _serialize_completed(
+                o,
+                email=email_by_code.get(o.pretix_order_code),
+                pretix_status=(order_meta_by_code.get(o.pretix_order_code) or {}).get('status'),
+                pretix_testmode=(order_meta_by_code.get(o.pretix_order_code) or {}).get('testmode'),
+                pretix_total=(order_meta_by_code.get(o.pretix_order_code) or {}).get('total'),
+            )
             for o in x402_completed_list
         ]
-        pending = [_serialize_pending(o) for o in pending_qs.order_by('-created_at')[:200]]
+        # `event.testmode` is the catalog-level flag — pending rows are
+        # created before any Pretix Order exists, so this is the only
+        # signal that an attempt was a test.
+        event_testmode = bool(getattr(event, 'testmode', False))
+        pending = [_serialize_pending(o, pretix_testmode=event_testmode) for o in pending_qs.order_by('-created_at')[:200]]
 
         # Legacy pre-x402 WalletConnect direct-send rows are merged into
         # `completed` with `source='wc_attempt'` so the unified admin table
@@ -178,11 +236,13 @@ def admin_orders(request: HttpRequest):
                 .order_by('-created_at')[:500]
             )
             wc_codes = {w.order_code for w in wc_attempts}
-            # `.only(...)`: the wc_attempt serializer reads `total` and `email`
-            # only — skip the rest of Pretix Order's wide payload.
+            # `.only(...)`: the wc_attempt serializer needs `total`, `email`,
+            # `status`, `testmode` to render the row + state pills.
             orders_by_code = {
                 o.code: o
-                for o in Order.objects.filter(event=event, code__in=wc_codes).only('code', 'email', 'total')
+                for o in Order.objects.filter(event=event, code__in=wc_codes).only(
+                    'code', 'email', 'total', 'status', 'testmode',
+                )
             } if wc_codes else {}
             for code, order in orders_by_code.items():
                 email_by_code.setdefault(code, order.email)
@@ -211,6 +271,8 @@ def admin_orders(request: HttpRequest):
                     total=orders_by_code[w.order_code].total if w.order_code in orders_by_code else None,
                     payment_info=payments_by_tx.get(w.tx_hash),
                     email=email_by_code.get(w.order_code),
+                    pretix_status=orders_by_code[w.order_code].status if w.order_code in orders_by_code else None,
+                    pretix_testmode=bool(orders_by_code[w.order_code].testmode) if w.order_code in orders_by_code else None,
                 )
                 for w in wc_attempts if w.order_code in orders_by_code
             ]
