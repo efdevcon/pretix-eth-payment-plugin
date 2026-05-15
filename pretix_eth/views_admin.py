@@ -202,19 +202,29 @@ def admin_orders(request: HttpRequest):
                 refunded_out = Decimal('0')
                 try:
                     for p in porder.payments.all():
-                        if getattr(p, 'state', None) == 'confirmed':
+                        # `confirmed` = paid and not yet refunded;
+                        # `refunded` = paid then fully refunded — the
+                        # matching refund(s) will be in refunds_out
+                        # below, so counting these here keeps the net
+                        # math correct (paid_in - refunded_out = 0 for
+                        # a clean paid-then-refunded round-trip).
+                        if getattr(p, 'state', None) in ('confirmed', 'refunded'):
                             paid_in += Decimal(p.amount or 0)
                     for r in porder.refunds.all():
-                        # Use OrderRefund constants instead of the bare
-                        # 'done' string in case Pretix renames states.
+                        # Use the OrderRefund constant instead of the
+                        # bare 'done' string so a Pretix rename of the
+                        # state vocabulary doesn't silently zero us.
                         if getattr(r, 'state', None) == OrderRefund.REFUND_STATE_DONE:
                             refunded_out += Decimal(r.amount or 0)
                 except Exception as e:
                     log.warning('[x402 admin] payment/refund agg failed for %s: %s', porder.code, e)
                 net_paid = paid_in - refunded_out
                 effective_owed = Decimal('0') if porder.status == 'c' else Decimal(porder.total or 0)
-                refund_owed = net_paid - effective_owed
-                overpaid_usd = str(refund_owed.quantize(Decimal('0.01'))) if refund_owed > Decimal('0.01') else None
+                # Quantize first, then check > 0. Avoids the off-by-one
+                # where a $0.01-exactly delta fell through `> Decimal('0.01')`
+                # — a real case we hit on a test order with $0.01 total.
+                refund_owed = (net_paid - effective_owed).quantize(Decimal('0.01'))
+                overpaid_usd = str(refund_owed) if refund_owed > Decimal('0') else None
                 order_meta_by_code[porder.code] = {
                     'status': porder.status,
                     'testmode': bool(porder.testmode),
@@ -269,7 +279,9 @@ def admin_orders(request: HttpRequest):
                     refunded_out = Decimal('0')
                     try:
                         for p in porder.payments.all():
-                            if getattr(p, 'state', None) == 'confirmed':
+                            # Same state filter as the x402 path above —
+                            # see comment there for the `refunded` rationale.
+                            if getattr(p, 'state', None) in ('confirmed', 'refunded'):
                                 paid_in += Decimal(p.amount or 0)
                         for r in porder.refunds.all():
                             if getattr(r, 'state', None) == OrderRefund.REFUND_STATE_DONE:
@@ -278,11 +290,8 @@ def admin_orders(request: HttpRequest):
                         log.warning('[wc admin] payment/refund agg failed for %s: %s', porder.code, e)
                     net_paid = paid_in - refunded_out
                     effective_owed = Decimal('0') if porder.status == 'c' else Decimal(porder.total or 0)
-                    refund_owed = net_paid - effective_owed
-                    wc_overpaid_by_code[porder.code] = (
-                        str(refund_owed.quantize(Decimal('0.01')))
-                        if refund_owed > Decimal('0.01') else None
-                    )
+                    refund_owed = (net_paid - effective_owed).quantize(Decimal('0.01'))
+                    wc_overpaid_by_code[porder.code] = str(refund_owed) if refund_owed > Decimal('0') else None
             for code, order in orders_by_code.items():
                 email_by_code.setdefault(code, order.email)
             # The legacy verify handler (views.py) writes token_symbol + amount
