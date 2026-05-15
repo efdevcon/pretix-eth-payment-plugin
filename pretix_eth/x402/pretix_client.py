@@ -499,11 +499,70 @@ def record_pretix_refund(
                     cancellation_fee=Decimal('0'), cancel_invoice=True,
                 )
             except Exception as e:
-                log.warning(
-                    '[x402 refund] cancel_order failed for %s (refund still recorded): %s',
+                log.info(
+                    '[x402 refund] cancel_order skipped for %s (refund still recorded): %s',
                     order.code, e,
                 )
+
+        # Best-effort buyer notification. Pretix doesn't ship a built-in
+        # "refund issued" email, so we send our own — mirrors the
+        # information layout from `order_pending_mail_render` (the
+        # `{payment_info}` block in the order-paid email) so the buyer
+        # can see the on-chain refund tx hash + chain explorer link
+        # without checking the order recap page. Failure is logged and
+        # swallowed — the refund itself is already on-chain + recorded,
+        # an email blip shouldn't surface as a 5xx to the admin tool.
+        try:
+            _send_refund_email(order, amount, refund_tx_hash, chain_id)
+        except Exception as e:
+            log.warning(
+                '[x402 refund] notification email failed for %s (refund still recorded): %s',
+                order.code, e,
+            )
         return refund
+
+
+def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
+    """Send a notification email to the buyer when a manual refund is
+    issued. Uses Pretix's `pretix.base.services.mail.mail()` so the
+    email goes through the event's configured SMTP + sender, gets
+    logged on the order, and respects locale conventions. Skipped
+    silently if the order has no email recorded."""
+    from pretix.base.services.mail import mail
+    from pretix_eth.chains import CHAIN_METADATA
+    if not getattr(order, 'email', None):
+        return
+    chain_meta = CHAIN_METADATA.get(chain_id) or {}
+    explorer_tx_base = chain_meta.get('explorer_url')
+    chain_name = chain_meta.get('name') or f'chain {chain_id}'
+    tx_url = (
+        f'{explorer_tx_base}{refund_tx_hash}' if explorer_tx_base
+        else refund_tx_hash
+    )
+    body_lines = [
+        f'Hello,',
+        '',
+        f'A refund of {amount} {order.event.currency} has been issued for your order {order.code}.',
+        '',
+        'Refund details:',
+        f'Amount: {amount} {order.event.currency}',
+        f'Network: {chain_name}',
+        f'Refund transaction: {tx_url}',
+        '',
+        'The funds were returned on-chain to the wallet that originally paid. '
+        'If you don\'t see the transfer or have any questions, please reply '
+        'to this email.',
+    ]
+    mail(
+        email=order.email,
+        subject=f'Refund issued for your order {order.code}',
+        template='\n'.join(body_lines),
+        context={},
+        event=order.event,
+        order=order,
+        locale=getattr(order, 'locale', None) or order.event.settings.locale,
+        auto_email=True,
+    )
 
 
 def confirm_x402_payment(
