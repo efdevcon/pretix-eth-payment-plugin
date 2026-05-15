@@ -546,19 +546,22 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
     # `format_map(template, context)` path (see the docstring on
     # `pretix.base.services.mail.mail`). The context dict carries the
     # values referenced as `{placeholder}` markers in the body.
+    # Pretix renders the body through `markdown_compile_email` for the
+    # HTML version, which collapses single newlines into a space. Use
+    # `\n\n` (paragraph break) between each detail row so they render
+    # as separate lines in both the HTML and plain-text variants.
+    # Same convention `order_pending_mail_render` uses for the
+    # `{payment_info}` block.
     body_template = LazyI18nString(
-        'Hello,\n'
-        '\n'
-        'A refund of {amount} {currency} has been issued for your order {order}.\n'
-        '\n'
-        'Refund details:\n'
-        'Amount: {amount} {currency}\n'
-        'Network: {chain_name}\n'
-        'Refund transaction: {tx_url}\n'
-        '\n'
+        'Hello,\n\n'
+        'A refund of {amount} {currency} has been issued for your order {order}.\n\n'
+        'Refund details:\n\n'
+        'Amount: {amount} {currency}\n\n'
+        'Network: {chain_name}\n\n'
+        'Refund transaction: {tx_url}\n\n'
         'The funds were returned on-chain to the wallet that originally paid. '
         'If you don\'t see the transfer or have any questions, please reply '
-        'to this email.\n'
+        'to this email.'
     )
     mail(
         email=order.email,
