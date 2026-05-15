@@ -457,6 +457,21 @@ def record_pretix_refund(
         # logs the action and, critically, flips payment.state to REFUNDED
         # when the refund amount fully covers the payment. Creating directly
         # in state=DONE skips that logic.
+        #
+        # `info` carries the machine-readable refund metadata (used by the
+        # plugin's Pretix-native UI render hook). `comment` mirrors it as
+        # human-readable text — that mirror is needed because Pretix's
+        # REST API `/orders/<code>/` strips `info` from embedded refunds
+        # but exposes `comment` as-is, so storefront / buyer-recap code
+        # that reads the order JSON can recover the on-chain tx hash by
+        # regex over the comment URL.
+        from pretix_eth.chains import CHAIN_METADATA
+        chain_meta = CHAIN_METADATA.get(chain_id) or {}
+        explorer_tx_base = chain_meta.get('explorer_url')
+        explorer_link = (
+            f'{explorer_tx_base}{refund_tx_hash}'
+            if explorer_tx_base else refund_tx_hash
+        )
         refund = OrderRefund.objects.create(
             order=order,
             payment=payment,
@@ -468,6 +483,7 @@ def record_pretix_refund(
                 'refund_tx_hash': refund_tx_hash,
                 'chain_id': chain_id,
             }),
+            comment=f'Crypto refund issued on-chain: {explorer_link}',
         )
         refund.done()
 
