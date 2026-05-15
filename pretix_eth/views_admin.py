@@ -56,21 +56,8 @@ def _serialize_completed(
     pretix_status: Optional[str] = None,
     pretix_testmode: Optional[bool] = None,
     pretix_total: Optional[Decimal] = None,
+    overpaid_usd: Optional[str] = None,
 ) -> dict:
-    # Overpayment detection: total_usd is the USD value the buyer was
-    # *charged* (locked at quote time, reflects crypto-discount); pretix
-    # `order.total` is what the order actually owes. A meaningfully large
-    # delta (> 1 cent) flags the order for admin refund. Negative
-    # deltas (underpaid) would have caused verify to reject before
-    # writing this row, so they don't show up here.
-    overpaid_usd = None
-    if pretix_total is not None:
-        try:
-            delta = Decimal(o.total_usd) - Decimal(pretix_total)
-            if delta > Decimal('0.01'):
-                overpaid_usd = str(delta.quantize(Decimal('0.01')))
-        except Exception:
-            pass
     return {
         'source': 'x402',
         'paymentReference': o.payment_reference,
@@ -103,6 +90,7 @@ def _serialize_wc_attempt(
     email: Optional[str] = None,
     pretix_status: Optional[str] = None,
     pretix_testmode: Optional[bool] = None,
+    overpaid_usd: Optional[str] = None,
 ) -> dict:
     """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
     the tx hash was verified on-chain and the Pretix order confirmed.
@@ -130,13 +118,13 @@ def _serialize_wc_attempt(
         'tokenSymbol': token_symbol,
         'cryptoAmount': crypto_amount if crypto_amount else None,
         'email': email,
-        # Legacy WC attempts don't carry a discount-adjusted USD figure,
-        # so we can't reliably flag overpayment for them — only mirror
-        # the Pretix Order's status + testmode.
+        # Pretix-side state mirror. `overpaid_usd` is computed from
+        # Pretix payments/refunds at the call site so the same cancelled-
+        # but-unrefunded detection works for legacy WC rows too.
         'pretixStatus': pretix_status,
         'pretixTestmode': pretix_testmode if pretix_testmode is not None else False,
         'pretixTotal': str(total) if total is not None else None,
-        'overpaidUsd': None,
+        'overpaidUsd': overpaid_usd,
     }
 
 
@@ -187,23 +175,51 @@ def admin_orders(request: HttpRequest):
         pending_qs = X402PendingOrder.objects.filter(event=event)
         x402_completed_list = list(completed_qs.order_by('-completed_at')[:500])
 
-        # Single round-trip to fetch all relevant Pretix Orders so the
-        # admin UI can show buyer email, order state, testmode flag, and
-        # over-payment delta per row without N+1 queries. `.only(...)`
-        # skips Pretix Order's wide payload (~30+ columns including
-        # meta_info JSON, transactions, attendee data).
+        # Single round-trip to fetch all relevant Pretix Orders + their
+        # payment/refund children. The admin UI needs buyer email, order
+        # state, testmode flag, and refund-owed delta. `.only(...)` on
+        # the main query skips Order's wide payload (~30+ columns
+        # including meta_info JSON, attendee data); `.prefetch_related`
+        # pulls the payment + refund children in two extra queries
+        # (one per relation), still avoiding the per-row N+1.
+        from pretix.base.models import OrderRefund
         x402_codes = {o.pretix_order_code for o in x402_completed_list if o.pretix_order_code}
         email_by_code: dict = {}
         order_meta_by_code: dict = {}
         if x402_codes:
-            for o in Order.objects.filter(event=event, code__in=x402_codes).only(
-                'code', 'email', 'status', 'testmode', 'total',
+            for porder in (
+                Order.objects.filter(event=event, code__in=x402_codes)
+                .prefetch_related('payments', 'refunds')
+                .only('code', 'email', 'status', 'testmode', 'total')
             ):
-                email_by_code[o.code] = o.email
-                order_meta_by_code[o.code] = {
-                    'status': o.status,
-                    'testmode': bool(o.testmode),
-                    'total': o.total,
+                email_by_code[porder.code] = porder.email
+                # "Refund owed" = paid in - refunded out - effective owed.
+                # For cancelled orders, effective_owed is 0 (the org owes
+                # back everything net of refunds — the order delivered
+                # nothing). For active orders it's the order total —
+                # buyer paid more than the order owes (overpayment).
+                paid_in = Decimal('0')
+                refunded_out = Decimal('0')
+                try:
+                    for p in porder.payments.all():
+                        if getattr(p, 'state', None) == 'confirmed':
+                            paid_in += Decimal(p.amount or 0)
+                    for r in porder.refunds.all():
+                        # Use OrderRefund constants instead of the bare
+                        # 'done' string in case Pretix renames states.
+                        if getattr(r, 'state', None) == OrderRefund.REFUND_STATE_DONE:
+                            refunded_out += Decimal(r.amount or 0)
+                except Exception as e:
+                    log.warning('[x402 admin] payment/refund agg failed for %s: %s', porder.code, e)
+                net_paid = paid_in - refunded_out
+                effective_owed = Decimal('0') if porder.status == 'c' else Decimal(porder.total or 0)
+                refund_owed = net_paid - effective_owed
+                overpaid_usd = str(refund_owed.quantize(Decimal('0.01'))) if refund_owed > Decimal('0.01') else None
+                order_meta_by_code[porder.code] = {
+                    'status': porder.status,
+                    'testmode': bool(porder.testmode),
+                    'total': porder.total,
+                    'overpaid_usd': overpaid_usd,
                 }
 
         x402_rows = [
@@ -213,6 +229,7 @@ def admin_orders(request: HttpRequest):
                 pretix_status=(order_meta_by_code.get(o.pretix_order_code) or {}).get('status'),
                 pretix_testmode=(order_meta_by_code.get(o.pretix_order_code) or {}).get('testmode'),
                 pretix_total=(order_meta_by_code.get(o.pretix_order_code) or {}).get('total'),
+                overpaid_usd=(order_meta_by_code.get(o.pretix_order_code) or {}).get('overpaid_usd'),
             )
             for o in x402_completed_list
         ]
@@ -236,14 +253,36 @@ def admin_orders(request: HttpRequest):
                 .order_by('-created_at')[:500]
             )
             wc_codes = {w.order_code for w in wc_attempts}
-            # `.only(...)`: the wc_attempt serializer needs `total`, `email`,
-            # `status`, `testmode` to render the row + state pills.
-            orders_by_code = {
-                o.code: o
-                for o in Order.objects.filter(event=event, code__in=wc_codes).only(
-                    'code', 'email', 'total', 'status', 'testmode',
-                )
-            } if wc_codes else {}
+            # `.only(...)` + `.prefetch_related(...)`: read the wide-payload
+            # columns we need plus the payment/refund children for the
+            # refund-owed computation. Same shape as the x402 fetch above.
+            wc_overpaid_by_code: dict = {}
+            orders_by_code = {}
+            if wc_codes:
+                for porder in (
+                    Order.objects.filter(event=event, code__in=wc_codes)
+                    .prefetch_related('payments', 'refunds')
+                    .only('code', 'email', 'total', 'status', 'testmode')
+                ):
+                    orders_by_code[porder.code] = porder
+                    paid_in = Decimal('0')
+                    refunded_out = Decimal('0')
+                    try:
+                        for p in porder.payments.all():
+                            if getattr(p, 'state', None) == 'confirmed':
+                                paid_in += Decimal(p.amount or 0)
+                        for r in porder.refunds.all():
+                            if getattr(r, 'state', None) == OrderRefund.REFUND_STATE_DONE:
+                                refunded_out += Decimal(r.amount or 0)
+                    except Exception as e:
+                        log.warning('[wc admin] payment/refund agg failed for %s: %s', porder.code, e)
+                    net_paid = paid_in - refunded_out
+                    effective_owed = Decimal('0') if porder.status == 'c' else Decimal(porder.total or 0)
+                    refund_owed = net_paid - effective_owed
+                    wc_overpaid_by_code[porder.code] = (
+                        str(refund_owed.quantize(Decimal('0.01')))
+                        if refund_owed > Decimal('0.01') else None
+                    )
             for code, order in orders_by_code.items():
                 email_by_code.setdefault(code, order.email)
             # The legacy verify handler (views.py) writes token_symbol + amount
@@ -273,6 +312,7 @@ def admin_orders(request: HttpRequest):
                     email=email_by_code.get(w.order_code),
                     pretix_status=orders_by_code[w.order_code].status if w.order_code in orders_by_code else None,
                     pretix_testmode=bool(orders_by_code[w.order_code].testmode) if w.order_code in orders_by_code else None,
+                    overpaid_usd=wc_overpaid_by_code.get(w.order_code),
                 )
                 for w in wc_attempts if w.order_code in orders_by_code
             ]
