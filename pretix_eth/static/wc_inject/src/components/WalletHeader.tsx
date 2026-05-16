@@ -71,8 +71,15 @@ export function WalletHeader({ disabled = false }: { disabled?: boolean }) {
         </div>
       </div>
       <button
+        type="button"
         className="wc-link-button"
         onClick={() => disconnect()}
+        // `type="button"` is critical — Pretix's checkout-confirm template
+        // wraps this whole panel in a <form>, and a bare <button> defaults
+        // to type=submit. Without the explicit type, clicking Disconnect
+        // would submit Pretix's form, reload the page, and reset scroll
+        // to the top.
+        //
         // Lock disconnect mid-flight: swapping wallets during tx-broadcast
         // or the verify poll leaves the backend tracking the original payer
         // while the UI reflects a different session. Caller passes `disabled`

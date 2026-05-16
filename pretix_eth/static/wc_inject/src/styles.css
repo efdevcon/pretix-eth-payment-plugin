@@ -318,6 +318,78 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   margin-top: 16px;
 }
 
+/* ────────────────────────────────────────────────────────────────────
+   ConnectStep layout — pill chips + CTA + find-wallet footer. The chips
+   replace what used to be a boring bullet list; sequential fade-in gives
+   the connect screen kinetic life without being gimmicky.
+   ──────────────────────────────────────────────────────────────────── */
+.wc-connect-step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+.wc-connect-heading {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: -0.2px;
+}
+
+.wc-features {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+}
+.wc-feature {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: rgba(0, 102, 204, 0.07);
+  color: #0066cc;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  /* Sequential fade-in stagger — each pill arrives ~100 ms after the
+     previous, giving the screen a deliberate "settling in" feel rather
+     than a single hard pop. */
+  opacity: 0;
+  transform: translateY(4px);
+  animation: wc-feature-in 0.4s ease-out forwards;
+}
+.wc-feature:nth-child(1) { animation-delay: 0.05s; }
+.wc-feature:nth-child(2) { animation-delay: 0.15s; }
+.wc-feature:nth-child(3) { animation-delay: 0.25s; }
+.wc-feature svg { flex-shrink: 0; }
+
+@keyframes wc-feature-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Footer escape hatch for buyers who don't have a wallet yet. Subtle —
+   not the primary CTA, but visible enough that a wallet-less buyer
+   has an obvious path forward instead of dropping off. */
+.wc-find-wallet {
+  font-size: 13px;
+  color: #6b7280;
+  text-decoration: none;
+  text-align: center;
+  margin-top: 2px;
+  transition: color 0.15s;
+}
+.wc-find-wallet:hover {
+  color: #0066cc;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .wc-error {
   color: #c62828;
   padding: 8px 12px;
