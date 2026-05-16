@@ -172,6 +172,24 @@ class WalletConnectPayment(BasePaymentProvider):
             required=False,
             initial=False,
         )
+        # When ON, Pretix's standard "Order Placed" email is suppressed for
+        # orders paid via this provider (both buyer and attendee variants).
+        # Useful when the crypto checkout resolves in seconds — buyer would
+        # otherwise receive placed + paid emails moments apart. Stripe / bank
+        # transfer orders still get the placed email; only this provider is
+        # short-circuited.
+        base['suppress_order_placed_email'] = forms.BooleanField(
+            label=_('Suppress "Order Placed" email for crypto orders'),
+            help_text=_(
+                'When checked, the buyer (and attendee) "Order Placed" emails '
+                'are not sent for orders paid via this Ethereum-payment '
+                'provider. Crypto orders typically settle within seconds, so '
+                'the placed email is redundant with the "Order Paid" one. '
+                'Orders paid via Stripe or bank transfer are unaffected.'
+            ),
+            required=False,
+            initial=False,
+        )
         # wc_inject's Safe-multisig support is opt-in per event. When ON, the
         # bundle un-excludes Safe from the AppKit picker, detects Safes via
         # Safe Transaction Service at connect time, surfaces a multi-signer
