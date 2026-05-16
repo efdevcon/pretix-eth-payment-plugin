@@ -8,8 +8,13 @@
     display: flex;
     flex-direction: column;
     align-items: center;
+    justify-content: center;
     gap: 12px;
     font-family: inherit;
+    /* Match `.wc-root` min-height so the boot placeholder → React swap and
+       any inter-stage swaps don't cause the surrounding page to jump. */
+    min-height: 240px;
+    box-sizing: border-box;
   }
   #wc-payment-root .wc-boot-loading h3 {
     margin: 0;

@@ -10,6 +10,12 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   margin: 0 auto;
   padding: 16px;
   color: #111;
+  /* Floor matches the tallest transient state (CheckoutStep loading shim,
+     ConnectStep, transient "Loading payment options...") so the surrounding
+     page doesn't jump when the React app swaps between stages. Tuned for the
+     ConnectStep card which is the largest stable state shown above the fold;
+     CheckoutStep is taller but pushes content below the fold anyway. */
+  min-height: 240px;
 }
 
 .wc-option {

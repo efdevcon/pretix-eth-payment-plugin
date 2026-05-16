@@ -23,15 +23,22 @@ export interface Quote {
 
 export function WCPaymentApp({ config }: { config: WCConfig }) {
   const account = useAccount()
-  const [stage, setStage] = useState<Stage>('connect')
   const [txHash, setTxHash] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
   const opts = usePaymentOptions(config)
 
-  useEffect(() => {
-    if (account.isConnected && stage === 'connect') setStage('checkout')
-    if (!account.isConnected && stage !== 'connect') setStage('connect')
-  }, [account.isConnected, stage])
+  // Derive stage synchronously from connection + completion state. Previous
+  // version stored stage in state and updated it via useEffect — that lag
+  // between an `isConnected` flip and the stage transition let one extra
+  // render through with stale stage, which on disconnect surfaced the
+  // CheckoutStep "Loading payment options..." shim between the disappearing
+  // connected UI and the ConnectStep. Synchronous derivation removes that
+  // in-between frame entirely.
+  const stage: Stage = txHash && quote
+    ? 'success'
+    : account.isConnected
+      ? 'checkout'
+      : 'connect'
 
   // Apply `wc-full-checkout` at the top level (not per-stage). styles.css uses
   // this class to hide Pretix's native submit button whenever our UI owns the
@@ -56,7 +63,7 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
         ethDisabledReason={opts.data.eth_disabled_reason}
         ethPriceUsd={opts.data.eth_price_usd}
         chainMetadata={opts.data.chain_metadata}
-        onConfirmed={(hash, q) => { setTxHash(hash); setQuote(q); setStage('success') }}
+        onConfirmed={(hash, q) => { setTxHash(hash); setQuote(q) }}
       />
     )
   }
