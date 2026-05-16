@@ -1625,14 +1625,12 @@ export function CheckoutStep({
 
       {showPicker && (
         <h3 style={{ marginTop: 0 }}>
-          {status === 'error'
-            ? 'Try again'
-            // Only one option (one symbol + one chain) means nothing
-            // to actually pick — "Select payment method" reads as an
-            // empty prompt. Frame the screen as a confirmation instead.
-            : options.length === 1
-              ? 'Confirm payment'
-              : 'Select payment method'}
+          {/* Header reflects the option count, not the error state — the
+              Pay button label already swaps to "Retry" on error, so the
+              header doesn't need to also shout "Try again". Single option
+              reads as "Confirm payment" (nothing to pick), multi-option
+              keeps the original "Select payment method". */}
+          {options.length === 1 ? 'Confirm payment' : 'Select payment method'}
         </h3>
       )}
 
@@ -1736,11 +1734,23 @@ export function CheckoutStep({
                        full 60s React Query refetchInterval. */}
                   <button
                     type="button"
-                    className="wc-network-refresh"
+                    className={
+                      'wc-network-refresh' +
+                      (balancesQuery.isFetching ? ' wc-network-refresh--loading' : '')
+                    }
                     onClick={() => balancesQuery.refetch()}
                     disabled={balancesQuery.isFetching || busy}
+                    aria-label="Refresh balances"
                   >
-                    Refresh balances
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" strokeWidth="2" strokeLinecap="round"
+                         strokeLinejoin="round" aria-hidden="true">
+                      <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+                      <path d="M21 3v5h-5" />
+                      <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
+                      <path d="M3 21v-5h5" />
+                    </svg>
+                    <span>Refresh</span>
                   </button>
                 </div>
                 <div className="wc-network-list">

@@ -199,15 +199,22 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 }
 
 .wc-status-card-message {
-  margin: 4px 0 0;
-  font-size: 13px;
+  margin: 0;
+  font-size: 12px;
   color: #6b7280;
   text-align: center;
-  line-height: 1.45;
+  line-height: 1.5;
+  max-width: 36ch;
+  word-break: break-word;
 }
+/* Error-state message stays in neutral grey rather than red — the
+   failure signal is already carried by the icon, title, and the card's
+   tinted border/background. Making the error string itself red + bold
+   reads as "wall of red doom" when it's often just a verbose wallet or
+   RPC error. Keep it as supporting context, not the headline. */
 .wc-status-card-message--error {
-  color: #b91c1c;
-  font-weight: 500;
+  color: #6b7280;
+  font-weight: 400;
 }
 
 .wc-option {
@@ -703,19 +710,41 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   margin-bottom: 0;
 }
 
+/* Refresh-balances control — sits to the right of the Network label.
+   Outlined button with refresh icon + label; icon spins during refetch
+   (controlled by the `--loading` modifier class set from React based on
+   `balancesQuery.isFetching`). Reuses the global `wc-spin` keyframe so
+   the spinner vocabulary stays consistent across the plugin. */
 .wc-network-refresh {
-  font-size: 13px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  color: #6b7280;
+  font-size: 12px;
   font-weight: 600;
-  color: var(--pretix-brand-primary, #0066cc);
-  background: none;
-  border: none;
   cursor: pointer;
-  padding: 0;
-  text-decoration: underline;
-  text-underline-offset: 2px;
+  white-space: nowrap;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
 }
-.wc-network-refresh:hover:not(:disabled) { opacity: 0.7; }
-.wc-network-refresh:disabled { opacity: 0.5; cursor: not-allowed; }
+.wc-network-refresh svg {
+  flex-shrink: 0;
+}
+.wc-network-refresh:hover:not(:disabled) {
+  color: var(--pretix-brand-primary, #0066cc);
+  border-color: var(--pretix-brand-primary, #0066cc);
+  background: var(--pretix-brand-primary-lighten-50, #f0f7ff);
+}
+.wc-network-refresh:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.wc-network-refresh--loading svg {
+  animation: wc-spin 0.8s linear infinite;
+}
 
 .wc-asset-chips {
   display: flex;
