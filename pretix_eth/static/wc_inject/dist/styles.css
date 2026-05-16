@@ -68,38 +68,53 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   justify-content: center;
   flex-shrink: 0;
 }
-/* Pending: dual-tone ring + pulsing center dot. Same vocabulary as the
-   boot-loader spinner so the transition from boot → React → first
-   in-flight state is visually continuous. */
+/* Pending: single clean classic ring — same exact spinner used by the
+   boot loader, the disconnect loader, and any other "we're working"
+   state in the plugin. Consistent vocabulary across every loading
+   surface. */
 .wc-status-card[data-state="pending"] .wc-status-card-icon::before {
   content: "";
   position: absolute;
   inset: 0;
   border: 3px solid rgba(0, 102, 204, 0.15);
   border-top-color: #0066cc;
-  border-right-color: #0066cc;
   border-radius: 50%;
-  animation: wc-boot-spin 0.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  animation: wc-spin 0.7s linear infinite;
 }
-.wc-status-card[data-state="pending"] .wc-status-card-icon::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 8px;
-  height: 8px;
-  margin: -4px 0 0 -4px;
-  background: #0066cc;
+@keyframes wc-spin { to { transform: rotate(360deg); } }
+
+/* Standalone spinner — used by LoadingState and anywhere we need a
+   "working" indicator without the card chrome. Single class, two
+   sizes. Identical visual to the status-card pending spinner above. */
+.wc-spinner {
+  display: inline-block;
+  border: 3px solid rgba(0, 102, 204, 0.15);
+  border-top-color: #0066cc;
   border-radius: 50%;
-  animation: wc-boot-pulse 1.6s ease-in-out infinite;
+  animation: wc-spin 0.7s linear infinite;
 }
-/* Reuses the boot-loader keyframes defined in the template's inline
-   <style>. Listed here so a non-boot-rendered status card (e.g. if the
-   template caching ever drops the inline block) still animates. */
-@keyframes wc-boot-spin { to { transform: rotate(360deg); } }
-@keyframes wc-boot-pulse {
-  0%, 100% { opacity: 0.45; transform: scale(0.8); }
-  50%      { opacity: 1;    transform: scale(1.1); }
+.wc-spinner--lg { width: 44px; height: 44px; }
+.wc-spinner--sm { width: 16px; height: 16px; border-width: 2px; }
+
+/* Full-card loading state — used for disconnect (shown briefly between
+   CheckoutStep and ConnectStep so the buyer sees a transition rather
+   than a hard cut), for the initial payment-options fetch, and as a
+   generic in-frame "working" placeholder. Same wrapper class (`wc-root`)
+   means it inherits the min-height + fade-in animation that anchor the
+   page during transitions. */
+.wc-loading-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  min-height: 240px;
+}
+.wc-loading-state-message {
+  margin: 0;
+  font-size: 14px;
+  color: #6b7280;
+  text-align: center;
 }
 
 .wc-status-card[data-state="success"] .wc-status-card-icon {

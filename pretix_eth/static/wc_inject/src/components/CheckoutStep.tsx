@@ -1436,13 +1436,16 @@ export function CheckoutStep({
       case 'switching': return 'Switching chain\u2026'
       case 'signing-tx': return `Confirm payment ${where}\u2026`
       case 'verifying':
-        // Once the backend has reported `confirmations`, surface the
-        // progress fraction so users see motion instead of a stalled spinner
-        // (especially on Ethereum L1 where 3 confs \u2248 36 s).
-        if (confirmProgress) {
-          return `Confirming onchain (${confirmProgress.current}/${confirmProgress.required})\u2026`
+        // Friendly copy, no bare "0/1" \u2014 that fraction reads as a stalled
+        // counter to non-technical buyers. Show plain "Confirming\u2026" while
+        // we're at zero confirmations, and only surface a progress count
+        // once we have \u2265 1 of the required blocks AND the chain actually
+        // requires more than one block (meaningful on Ethereum L1 with 3
+        // confs; never shown for L2s with 1 conf required).
+        if (confirmProgress && confirmProgress.current > 0 && confirmProgress.required > 1) {
+          return `Confirming \u00b7 ${confirmProgress.current} of ${confirmProgress.required} blocks`
         }
-        return 'Verifying onchain\u2026'
+        return 'Confirming on-chain\u2026'
       case 'success': return ''
       case 'error': return 'Retry'
     }
@@ -1450,12 +1453,15 @@ export function CheckoutStep({
 
   const busy = status !== 'idle' && status !== 'error'
 
-  // On success, schedule the redirect to the order page. Replaces the
-  // dedicated SuccessStep view + its 2 s redirect \u2014 we keep the buyer in
-  // CheckoutStep's frame (WalletHeader + the same `wc-root` wrapper) so the
-  // visual transition is "form swapped for confirmation card", not "screen
-  // swapped for a different screen". 800 ms is enough to register the
-  // confirmation copy without making the buyer wait.
+  // On success, schedule the redirect to the order page. The success
+  // card lingers for 2 s before navigating so the buyer has time to
+  // (a) register the green check + "Payment confirmed" copy as the
+  // emotional end-of-flow beat, (b) read or click the explorer link
+  // before being whisked away, and (c) on slower wallets / Coinbase
+  // popups, gives any wallet-side UI time to finish closing before
+  // the page navigates. We keep the buyer in CheckoutStep's frame
+  // (WalletHeader + same `wc-root` wrapper) throughout \u2014 only the
+  // status card swaps from verifying \u2192 success.
   useEffect(() => {
     if (status !== 'success') return
     const fe = (config.frontendOrderUrlTemplate || '').trim()
@@ -1474,7 +1480,7 @@ export function CheckoutStep({
     const t = setTimeout(() => {
       if (target) window.location.href = target
       else window.location.reload()
-    }, 800)
+    }, 2000)
     return () => clearTimeout(t)
   }, [status, config.frontendOrderUrlTemplate, config.orderCode, config.orderSecret])
 
@@ -1523,8 +1529,14 @@ export function CheckoutStep({
       case 'switching':         return 'Switching chain…'
       case 'signing-tx':        return `Confirm payment ${where}…`
       case 'verifying':
-        if (confirmProgress) return `Confirming onchain (${confirmProgress.current}/${confirmProgress.required})…`
-        return 'Confirming onchain…'
+        // See `buttonLabel` for rationale — skip the fraction when we're
+        // at 0 or the chain only needs a single block (avoids the noisy
+        // "0/1" reading), and frame the progress in natural language
+        // when the fraction IS meaningful.
+        if (confirmProgress && confirmProgress.current > 0 && confirmProgress.required > 1) {
+          return `Confirming · ${confirmProgress.current} of ${confirmProgress.required} blocks`
+        }
+        return 'Confirming on-chain…'
       case 'success':           return 'Payment confirmed'
       case 'error':             return 'Payment failed'
       default:                  return ''

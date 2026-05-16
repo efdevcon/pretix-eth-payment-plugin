@@ -41,42 +41,19 @@
     color: #666;
     text-align: center;
   }
-  /* Dual-tone ring with a pulsing inner dot — same animation language used
-     by the React-side status card (.wc-status-card-spinner) so the boot
-     → mount transition is visually continuous. */
+  /* Single clean classic ring spinner — same exact visual + animation
+     used by the React-side .wc-spinner / .wc-status-card pending state,
+     so the boot → React handoff is one continuous loading vocabulary. */
   #wc-boot-loading .wc-boot-spinner {
-    position: relative;
     width: 44px;
     height: 44px;
-  }
-  #wc-boot-loading .wc-boot-spinner::before {
-    content: "";
-    position: absolute;
-    inset: 0;
     border: 3px solid rgba(0, 102, 204, 0.15);
     border-top-color: #0066cc;
-    border-right-color: #0066cc;
     border-radius: 50%;
-    animation: wc-boot-spin 0.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-  }
-  #wc-boot-loading .wc-boot-spinner::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 8px;
-    height: 8px;
-    margin: -4px 0 0 -4px;
-    background: #0066cc;
-    border-radius: 50%;
-    animation: wc-boot-pulse 1.6s ease-in-out infinite;
+    animation: wc-boot-spin 0.7s linear infinite;
   }
   @keyframes wc-boot-spin {
     to { transform: rotate(360deg); }
-  }
-  @keyframes wc-boot-pulse {
-    0%, 100% { opacity: 0.45; transform: scale(0.8); }
-    50%      { opacity: 1;    transform: scale(1.1); }
   }
   @keyframes wc-boot-fade-in {
     from { opacity: 0; }

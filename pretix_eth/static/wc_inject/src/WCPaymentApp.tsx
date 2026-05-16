@@ -1,11 +1,12 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAccount } from 'wagmi'
 import type { WCConfig } from './config'
 import { ConnectStep } from './components/ConnectStep'
 import { CheckoutStep } from './components/CheckoutStep'
+import { LoadingState } from './components/LoadingState'
 import { usePaymentOptions } from './hooks/usePaymentOptions'
 
-type Stage = 'connect' | 'checkout'
+type Stage = 'connect' | 'checkout' | 'disconnecting'
 
 export interface Quote {
   quote_id: string
@@ -20,15 +21,42 @@ export interface Quote {
   order_total_usd: string
 }
 
+// How long the explicit "Disconnecting…" loader is held after wagmi
+// flips isConnected from true to false. Long enough to register a clean
+// transition (instead of a hard CheckoutStep → ConnectStep cut, which
+// previously read as a flicker), short enough not to feel sluggish.
+const DISCONNECT_LOADER_MS = 500
+
 export function WCPaymentApp({ config }: { config: WCConfig }) {
   const account = useAccount()
   const opts = usePaymentOptions(config)
 
-  // Stage derived synchronously from connection state. Success is handled
-  // inline by CheckoutStep (it renders a confirmation card in the same
-  // `wc-root` wrapper and triggers its own redirect), so we don't need a
-  // separate post-payment stage that swaps the entire view.
-  const stage: Stage = account.isConnected ? 'checkout' : 'connect'
+  // Show a brief loading frame when the user disconnects, so the
+  // transition is "connected UI → loader → ConnectStep" rather than a
+  // hard cut that previously read as a flicker. Tracked via a ref so
+  // we only fire the loader on the true→false edge (initial mount,
+  // when isConnected starts false, does NOT trigger the loader).
+  const prevConnectedRef = useRef(account.isConnected)
+  const [disconnecting, setDisconnecting] = useState(false)
+  useEffect(() => {
+    const wasConnected = prevConnectedRef.current
+    prevConnectedRef.current = account.isConnected
+    if (wasConnected && !account.isConnected) {
+      setDisconnecting(true)
+      const t = setTimeout(() => setDisconnecting(false), DISCONNECT_LOADER_MS)
+      return () => clearTimeout(t)
+    }
+  }, [account.isConnected])
+
+  // Stage derived synchronously. `disconnecting` wins over `connect` so
+  // the loader covers the brief window while wagmi finishes tearing
+  // down the connector and any AppKit cleanup completes. Success is
+  // handled inline by CheckoutStep (no separate stage needed).
+  const stage: Stage = disconnecting
+    ? 'disconnecting'
+    : account.isConnected
+      ? 'checkout'
+      : 'connect'
 
   // Apply `wc-full-checkout` at the top level (not per-stage). styles.css uses
   // this class to hide Pretix's native submit button whenever our UI owns the
@@ -40,10 +68,11 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
     return () => { document.body.classList.remove('wc-full-checkout') }
   }, [])
 
+  if (stage === 'disconnecting') return <LoadingState message="Disconnecting your wallet…" />
   if (stage === 'connect') return <ConnectStep config={config} />
 
   if (stage === 'checkout') {
-    if (opts.isLoading) return <div className="wc-root wc-small">Loading payment options...</div>
+    if (opts.isLoading) return <LoadingState message="Loading payment options…" />
     if (opts.isError || !opts.data) return <div className="wc-root wc-error">Failed to load payment options.</div>
     return (
       <CheckoutStep
