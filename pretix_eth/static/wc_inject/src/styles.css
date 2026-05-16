@@ -16,6 +16,173 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
      ConnectStep card which is the largest stable state shown above the fold;
      CheckoutStep is taller but pushes content below the fold anyway. */
   min-height: 240px;
+  /* Every fresh .wc-root mount fades in — boot → React, connect → checkout,
+     disconnect → connect. Pairs with the boot-loader's own fade so the
+     hand-off reads as one smooth crossfade rather than three discrete steps. */
+  animation: wc-fade-in 0.22s ease-out;
+}
+
+@keyframes wc-fade-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Payment status card — single layout used for every non-idle state.
+   The picker (asset chips, network list, Pay button) hides; this card
+   takes its place inside the same `wc-root` wrapper with WalletHeader
+   still on top, so the buyer stays in the same visual frame through
+   signing → verifying → success / error.
+   Icon and tone change per state via [data-state] attribute. Tx-link
+   row is always rendered when a quote exists; content swaps between
+   "Waiting for transaction…" and a clickable explorer link, no layout
+   jump when the hash arrives.
+   ──────────────────────────────────────────────────────────────────── */
+.wc-status-card {
+  margin-top: 4px;
+  padding: 22px 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  animation: wc-fade-in 0.22s ease-out;
+}
+.wc-status-card[data-state="success"] {
+  border-color: #c8e6c9;
+  background: #f1f8f3;
+}
+.wc-status-card[data-state="error"] {
+  border-color: #fecaca;
+  background: #fff5f5;
+}
+
+.wc-status-card-icon {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+/* Pending: dual-tone ring + pulsing center dot. Same vocabulary as the
+   boot-loader spinner so the transition from boot → React → first
+   in-flight state is visually continuous. */
+.wc-status-card[data-state="pending"] .wc-status-card-icon::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 3px solid rgba(0, 102, 204, 0.15);
+  border-top-color: #0066cc;
+  border-right-color: #0066cc;
+  border-radius: 50%;
+  animation: wc-boot-spin 0.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+}
+.wc-status-card[data-state="pending"] .wc-status-card-icon::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 8px;
+  height: 8px;
+  margin: -4px 0 0 -4px;
+  background: #0066cc;
+  border-radius: 50%;
+  animation: wc-boot-pulse 1.6s ease-in-out infinite;
+}
+/* Reuses the boot-loader keyframes defined in the template's inline
+   <style>. Listed here so a non-boot-rendered status card (e.g. if the
+   template caching ever drops the inline block) still animates. */
+@keyframes wc-boot-spin { to { transform: rotate(360deg); } }
+@keyframes wc-boot-pulse {
+  0%, 100% { opacity: 0.45; transform: scale(0.8); }
+  50%      { opacity: 1;    transform: scale(1.1); }
+}
+
+.wc-status-card[data-state="success"] .wc-status-card-icon {
+  background: #2e7d32;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+  animation: wc-status-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.wc-status-card[data-state="error"] .wc-status-card-icon {
+  background: #c62828;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 22px;
+  font-weight: 700;
+}
+@keyframes wc-status-pop {
+  0%   { transform: scale(0.5); opacity: 0; }
+  100% { transform: scale(1);   opacity: 1; }
+}
+
+.wc-status-card-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #111;
+  text-align: center;
+  line-height: 1.35;
+}
+.wc-status-card[data-state="success"] .wc-status-card-title { color: #1b5e20; }
+.wc-status-card[data-state="error"]   .wc-status-card-title { color: #b71c1c; }
+
+.wc-status-card-info {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+.wc-status-card-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+.wc-status-card-label {
+  color: #6b7280;
+  font-weight: 500;
+}
+.wc-status-card-value {
+  color: #111;
+  font-weight: 600;
+  text-align: right;
+  word-break: break-all;
+}
+.wc-status-card-value a {
+  color: #0066cc;
+  text-decoration: none;
+  font-weight: 600;
+}
+.wc-status-card-value a:hover {
+  text-decoration: underline;
+}
+.wc-status-card-pending {
+  color: #9ca3af;
+  font-weight: 500;
+  font-style: italic;
+}
+
+.wc-status-card-message {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: #6b7280;
+  text-align: center;
+  line-height: 1.45;
+}
+.wc-status-card-message--error {
+  color: #b91c1c;
+  font-weight: 500;
 }
 
 .wc-option {

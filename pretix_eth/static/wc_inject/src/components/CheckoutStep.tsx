@@ -1503,24 +1503,51 @@ export function CheckoutStep({
     ? `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(window.location.href)}`
     : ''
 
-  // Inline success view. Renders inside the same `wc-root` wrapper as the
-  // picker, with WalletHeader still on top — so the swap from form → success
-  // happens within the existing frame instead of replacing the whole screen
-  // with a separate SuccessStep view.
-  if (status === 'success' && confirmedTxHash) {
-    return (
-      <div className="wc-root">
-        <WalletHeader disabled />
-        <div className="wc-success">
-          <h3 style={{ marginTop: 0, color: '#2e7d32' }}>✓ Payment confirmed</h3>
-          <p className="wc-small">
-            Transaction: <code style={{ wordBreak: 'break-all' }}>{confirmedTxHash}</code>
-          </p>
-          <p>Redirecting to your order…</p>
-        </div>
-      </div>
-    )
-  }
+  // Single status-card rendering for every non-idle state: signing chain,
+  // verifying, success, error. Picks tone + icon + title from `status`,
+  // shows amount + tx-link rows when a quote/hash exist. Replaces the
+  // picker section in the main return while WalletHeader + the
+  // `wc-root` wrapper stay constant — so the buyer never sees a layout
+  // context swap from picking → paying → confirmed.
+  const statusCardState: 'pending' | 'success' | 'error' | null =
+    status === 'success' ? 'success'
+    : status === 'error' ? 'error'
+    : status !== 'idle' ? 'pending'
+    : null
+
+  const statusCardTitle = (() => {
+    switch (status) {
+      case 'challenge':         return 'Preparing payment…'
+      case 'signing-challenge': return `Sign message ${where}…`
+      case 'quoting':           return 'Creating quote…'
+      case 'switching':         return 'Switching chain…'
+      case 'signing-tx':        return `Confirm payment ${where}…`
+      case 'verifying':
+        if (confirmProgress) return `Confirming onchain (${confirmProgress.current}/${confirmProgress.required})…`
+        return 'Confirming onchain…'
+      case 'success':           return 'Payment confirmed'
+      case 'error':             return 'Payment failed'
+      default:                  return ''
+    }
+  })()
+
+  // Resolve the tx hash for the status card's Transaction row. During
+  // verifying we use `pendingTxHash` (set the moment the wallet returns
+  // the hash); on success we prefer `confirmedTxHash` which is identical
+  // in practice but explicit. Either may be null if we never got past
+  // signing — the row then shows "Waiting for transaction…".
+  const statusCardTxHash = confirmedTxHash || pendingTxHash
+  const statusCardExplorerBase = quote && chainMetadata[String(quote.chain_id)]?.explorer_url
+  const statusCardTxUrl = statusCardTxHash && statusCardExplorerBase
+    ? `${statusCardExplorerBase}${statusCardTxHash}`
+    : null
+
+  // Picker + retry control are shown during idle (initial choice) AND
+  // error (retry path). The status card sits above and surfaces the
+  // failure context; the picker below lets the buyer either retry the
+  // same option or switch tokens/networks and try again. Pay button
+  // label flips to "Retry" automatically (see buttonLabel switch).
+  const showPicker = status === 'idle' || status === 'error'
 
   return (
     <div className="wc-root">
@@ -1542,7 +1569,49 @@ export function CheckoutStep({
         </div>
       )}
 
-      <h3 style={{ marginTop: 0 }}>Select payment method</h3>
+      {/* Unified status card — drives the visual for every state except
+          'idle'. Same layout, same Transaction row visual, same tx-link
+          styling for signing → verifying → success → error. The picker
+          (asset chips, network list, Pay button) below is gated on
+          status==='idle' so it hides when this card takes over. */}
+      {statusCardState && (
+        <div className="wc-status-card" data-state={statusCardState}>
+          <div className="wc-status-card-icon" aria-hidden="true">
+            {statusCardState === 'success' ? '✓' : statusCardState === 'error' ? '!' : ''}
+          </div>
+          <h3 className="wc-status-card-title">{statusCardTitle}</h3>
+          {quote && (
+            <div className="wc-status-card-info">
+              <div className="wc-status-card-row">
+                <span className="wc-status-card-label">Amount</span>
+                <span className="wc-status-card-value">
+                  {formatAmount(quote)} on {chainMetadata[String(quote.chain_id)]?.name || `chain ${quote.chain_id}`}
+                </span>
+              </div>
+              <div className="wc-status-card-row">
+                <span className="wc-status-card-label">Transaction</span>
+                <span className="wc-status-card-value">
+                  {statusCardTxUrl ? (
+                    <a href={statusCardTxUrl} target="_blank" rel="noopener noreferrer">
+                      View on explorer →
+                    </a>
+                  ) : (
+                    <span className="wc-status-card-pending">Waiting for transaction…</span>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+          {statusCardState === 'success' && (
+            <p className="wc-status-card-message">Taking you to your order…</p>
+          )}
+          {statusCardState === 'error' && error && (
+            <p className="wc-status-card-message wc-status-card-message--error">{error}</p>
+          )}
+        </div>
+      )}
+
+      {showPicker && <h3 style={{ marginTop: 0 }}>{status === 'error' ? 'Try again' : 'Select payment method'}</h3>}
 
       {/* DEBUG — uncomment to re-test the tx-hash recovery paths without
           rebuilding new code. Forces the recovery wrapper into a specific
@@ -1572,7 +1641,7 @@ export function CheckoutStep({
       </div>
       */}
 
-      {!ethAvailable && ethDisabledReason && (
+      {showPicker && !ethAvailable && ethDisabledReason && (
         <div className="wc-notice">
           {ethReasonText(
             ethDisabledReason,
@@ -1583,12 +1652,12 @@ export function CheckoutStep({
         </div>
       )}
 
-      {options.length === 0 && (
+      {showPicker && options.length === 0 && (
         <div className="wc-error">No payment options available.</div>
       )}
 
       {/* Step 1: Token selection chips */}
-      {(() => {
+      {showPicker && (() => {
         // Canonical display order for the asset chips — independent of the
         // order the backend returns options in. Symbols not in this list
         // fall to the end, keeping the picker stable if new tokens are added.
@@ -1733,40 +1802,26 @@ export function CheckoutStep({
         )
       })()}
 
-      {quote && (() => {
-        // While the tx is mining/verifying (or after a verify failure we
-        // recovered a hash for), surface a clickable explorer link in place
-        // of the recipient address. The hash is the actionable artifact the
-        // buyer cares about at that point; the recipient address was only
-        // informative pre-broadcast.
-        const explorerBase = chainMetadata[String(quote.chain_id)]?.explorer_url
-        const txUrl = pendingTxHash && explorerBase ? `${explorerBase}${pendingTxHash}` : null
-        return (
-          <p className="wc-small" style={{ marginTop: 8 }}>
-            Amount: <strong>{formatAmount(quote)}</strong>{' '}
-            {txUrl ? (
-              <>
-                ·{' '}
-                <a href={txUrl} target="_blank" rel="noopener noreferrer">
-                  View transaction →
-                </a>
-              </>
-            ) : (
-              <>
-                to <code style={{ wordBreak: 'break-all' }}>{quote.receive_address}</code>
-              </>
-            )}
-          </p>
-        )
-      })()}
+      {/* Pre-pay summary line — shown only in idle state so the buyer
+          sees what they're about to send. Once they click Pay, the
+          unified status card above takes over and surfaces amount + tx
+          link in its own rows. The recipient `<code>` is dropped from
+          the card-driven views since the hash is the more relevant
+          artifact once a transaction is in flight. */}
+      {status === 'idle' && quote && (
+        <p className="wc-small" style={{ marginTop: 8 }}>
+          Amount: <strong>{formatAmount(quote)}</strong> to{' '}
+          <code style={{ wordBreak: 'break-all' }}>{quote.receive_address}</code>
+        </p>
+      )}
 
-      {/* Hide the Pay button entirely while the wallet is disconnected. The
-          parent `WCPaymentApp` should already flip the stage back to 'connect'
-          on disconnect, but this is a defensive render guard for the brief
-          window between the disconnect event firing and the stage transition,
-          and for any edge case where `address` is undefined without the
-          component unmounting. */}
-      {address && (showCbMobileWarning ? (
+      {/* Pay (or Retry) button — visible during idle AND error so the
+          buyer has a clear retry path on failure. Hidden during in-flight
+          + success states (the status card owns the in-flight UI; success
+          auto-redirects). Also defensively gated on `address` for the
+          brief window between a disconnect event firing and WCPaymentApp's
+          stage transition. */}
+      {showPicker && address && (showCbMobileWarning ? (
         <div className="wc-cb-mobile-warning" role="alert">
           <p>
             <strong>Heads-up:</strong> for the smoothest Coinbase / Base
@@ -1833,7 +1888,10 @@ export function CheckoutStep({
         </div>
       )}
 
-      {error && <div className="wc-error">{error}</div>}
+      {/* Error copy is shown inside the status card's `.wc-status-card-message--error`
+          slot now — no separate `.wc-error` strip below the card. The
+          support-pill link is still rendered after this so a stuck buyer
+          has a help path. */}
 
       {/* Support fallback. Self-serve manual verification was removed because
           it required an in-memory quote that expires with the browser session,

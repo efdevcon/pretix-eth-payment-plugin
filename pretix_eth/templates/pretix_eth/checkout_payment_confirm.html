@@ -1,11 +1,5 @@
 {% load i18n %}
 
-{# If the bundle has already booted once in this browser session — which
-   includes any case where Pretix re-renders this template after a wallet
-   connect/disconnect cycle, switching cart contents, etc. — the script
-   below tags <html> so the inline boot CSS hides the placeholder
-   immediately. Prevents the "spinner reappears for a second on disconnect"
-   flicker the user reported when Pretix re-serves the checkout step. #}
 <script>
   try {
     if (sessionStorage.getItem('wc-inject-booted')) {
@@ -31,13 +25,15 @@
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 14px;
+    gap: 18px;
+    animation: wc-boot-fade-in 0.25s ease-out;
   }
   #wc-boot-loading h3 {
-    margin: 0 0 4px;
+    margin: 0;
     font-size: 17px;
     font-weight: 600;
     text-align: center;
+    color: #111;
   }
   #wc-boot-loading p {
     margin: 0;
@@ -45,16 +41,46 @@
     color: #666;
     text-align: center;
   }
+  /* Dual-tone ring with a pulsing inner dot — same animation language used
+     by the React-side status card (.wc-status-card-spinner) so the boot
+     → mount transition is visually continuous. */
   #wc-boot-loading .wc-boot-spinner {
-    width: 28px;
-    height: 28px;
-    border: 3px solid rgba(0, 0, 0, 0.08);
+    position: relative;
+    width: 44px;
+    height: 44px;
+  }
+  #wc-boot-loading .wc-boot-spinner::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border: 3px solid rgba(0, 102, 204, 0.15);
     border-top-color: #0066cc;
+    border-right-color: #0066cc;
     border-radius: 50%;
-    animation: wc-boot-spin 0.7s linear infinite;
+    animation: wc-boot-spin 0.9s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  }
+  #wc-boot-loading .wc-boot-spinner::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 8px;
+    height: 8px;
+    margin: -4px 0 0 -4px;
+    background: #0066cc;
+    border-radius: 50%;
+    animation: wc-boot-pulse 1.6s ease-in-out infinite;
   }
   @keyframes wc-boot-spin {
     to { transform: rotate(360deg); }
+  }
+  @keyframes wc-boot-pulse {
+    0%, 100% { opacity: 0.45; transform: scale(0.8); }
+    50%      { opacity: 1;    transform: scale(1.1); }
+  }
+  @keyframes wc-boot-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
   }
   /* Suppress the placeholder when the bundle has already booted this
      session — handles the case where Pretix re-renders the checkout step
@@ -65,7 +91,7 @@
   }
 </style>
 
-<div id="wc-boot-loading" class="wc-boot-loading" aria-busy="true" aria-live="polite">
+<div id="wc-boot-loading" aria-busy="true" aria-live="polite">
   <h3>{% if eth_mainnet_only %}{% trans "Pay with ETH" %}{% else %}{% trans "Pay with crypto" %}{% endif %}</h3>
   <div class="wc-boot-spinner" aria-hidden="true"></div>
   <p>{% trans "Loading wallet…" %}</p>
