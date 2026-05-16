@@ -9,6 +9,17 @@
 </script>
 
 <style>
+  /* Anchor the entire Pretix panel-body that hosts our content. Doing it
+     here (instead of relying on `.wc-root`'s own min-height) means the
+     surrounding page is stable even during React unmount/remount frames,
+     boot → React handoff, disconnect transitions, etc. Scoped via
+     :has(#wc-payment-root) so it only affects the panel containing our
+     content, not every Pretix panel-body on the page. Modern browsers
+     only (Chrome 105+, Safari 15.4+, Firefox 121+); on older browsers it
+     just doesn't apply and `.wc-root`'s own min-height takes over. */
+  .panel-body:has(#wc-payment-root) {
+    min-height: 280px;
+  }
   /* Mirrors .wc-root (styles.css): same max-width, padding, font, centered
      in the parent column. Paints from inline CSS so it works before
      styles.css loads. min-height matches .wc-root so the boot → React swap

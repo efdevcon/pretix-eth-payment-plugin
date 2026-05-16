@@ -4,6 +4,16 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   display: none !important;
 }
 
+/* Anchor the Pretix panel-body that contains our React root. Prevents the
+   surrounding page from reflowing during any React unmount/remount cycle
+   inside our content. Scoped via :has so only the wc_inject panel is
+   affected, not every Pretix panel-body on the page. Mirrors the rule in
+   the template's inline <style> for the (rare) case where styles.css
+   loads but the template inline block doesn't. */
+.panel-body:has(#wc-payment-root) {
+  min-height: 280px;
+}
+
 .wc-root {
   font-family: system-ui, -apple-system, sans-serif;
   max-width: 480px;

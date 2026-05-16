@@ -38,15 +38,33 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
   // when isConnected starts false, does NOT trigger the loader).
   const prevConnectedRef = useRef(account.isConnected)
   const [disconnecting, setDisconnecting] = useState(false)
+
+  // Detection effect — sets the disconnecting flag on the true → false
+  // edge. Detection and timeout are split into separate effects so the
+  // timeout's cleanup can't clear the timer while leaving the flag set
+  // (which was the "stuck on Disconnecting…" bug from the first version).
   useEffect(() => {
     const wasConnected = prevConnectedRef.current
     prevConnectedRef.current = account.isConnected
     if (wasConnected && !account.isConnected) {
       setDisconnecting(true)
-      const t = setTimeout(() => setDisconnecting(false), DISCONNECT_LOADER_MS)
-      return () => clearTimeout(t)
     }
   }, [account.isConnected])
+
+  // Clearing effect — guarantees the loader resolves:
+  //   (a) after DISCONNECT_LOADER_MS via setTimeout, OR
+  //   (b) immediately if the user reconnects mid-window.
+  // No matter what wagmi/AppKit do, this effect always converges back
+  // to disconnecting=false.
+  useEffect(() => {
+    if (!disconnecting) return
+    if (account.isConnected) {
+      setDisconnecting(false)
+      return
+    }
+    const t = setTimeout(() => setDisconnecting(false), DISCONNECT_LOADER_MS)
+    return () => clearTimeout(t)
+  }, [disconnecting, account.isConnected])
 
   // Stage derived synchronously. `disconnecting` wins over `connect` so
   // the loader covers the brief window while wagmi finishes tearing
