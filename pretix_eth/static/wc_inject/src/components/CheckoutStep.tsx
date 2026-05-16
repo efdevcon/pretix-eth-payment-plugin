@@ -142,6 +142,7 @@ type Status =
   | 'switching'
   | 'signing-tx'
   | 'verifying'
+  | 'success'
   | 'error'
 
 function parseOrgAndEvent(): { organizer: string; event: string } {
@@ -492,6 +493,20 @@ export function CheckoutStep({
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
+  // Tx hash captured when verify succeeds — drives the inline success card.
+  // We render the success view inside CheckoutStep (not via a separate
+  // SuccessStep swap) so the buyer stays in the same visual frame the whole
+  // time: same wrapper, same WalletHeader, just the picker swapped for a
+  // confirmation card. Avoids the jarring view replacement at the moment of
+  // success.
+  const [confirmedTxHash, setConfirmedTxHash] = useState<string | null>(null)
+  // Tx hash captured as soon as the wallet returns it (post-broadcast, pre-
+  // verification). Lets the "Amount: X to ADDRESS" line swap to a clickable
+  // explorer link while the user waits for the backend's confirmation poll
+  // — same hash that will land on the success card, just surfaced earlier.
+  // Preserved across `verifying` → `error` so a verify failure still lets
+  // the buyer inspect the on-chain state.
+  const [pendingTxHash, setPendingTxHash] = useState<string | null>(null)
 
   // Pre-fetched challenge so `handlePay` doesn't have to do a network
   // round-trip before opening the wallet. iOS Safari (and Coinbase /
@@ -927,6 +942,9 @@ export function CheckoutStep({
   async function handlePay() {
     if (!picked || !address) return
     setError(null)
+    // Clear any hash from a previous attempt so the in-progress UI doesn't
+    // show a stale "View transaction" link until this attempt has its own.
+    setPendingTxHash(null)
 
     dbg('handlePay:start', {
       pluginVersion: config.pluginVersion,
@@ -1368,10 +1386,18 @@ export function CheckoutStep({
       }
 
       // Step 7: Verify
+      setPendingTxHash(minedHash)
       setStatus('verifying')
       dbg('verify:start', { minedHash, chainId: q.chain_id })
       await pollVerify(q, minedHash)
       dbg('verify:done', { minedHash })
+      // Render the inline success card and start the redirect. We still
+      // call `onConfirmed` so the parent can observe completion (today it's
+      // unused; kept for future hooks). The actual redirect runs from this
+      // component's success-status effect so the visual transition stays in
+      // the same `wc-root` frame — no swap to a separate SuccessStep view.
+      setConfirmedTxHash(minedHash)
+      setStatus('success')
       onConfirmed(minedHash, q)
     } catch (e: unknown) {
       const err = e as { shortMessage?: string; message?: string; name?: string }
@@ -1417,11 +1443,40 @@ export function CheckoutStep({
           return `Confirming onchain (${confirmProgress.current}/${confirmProgress.required})\u2026`
         }
         return 'Verifying onchain\u2026'
+      case 'success': return ''
       case 'error': return 'Retry'
     }
   })()
 
   const busy = status !== 'idle' && status !== 'error'
+
+  // On success, schedule the redirect to the order page. Replaces the
+  // dedicated SuccessStep view + its 2 s redirect \u2014 we keep the buyer in
+  // CheckoutStep's frame (WalletHeader + the same `wc-root` wrapper) so the
+  // visual transition is "form swapped for confirmation card", not "screen
+  // swapped for a different screen". 800 ms is enough to register the
+  // confirmation copy without making the buyer wait.
+  useEffect(() => {
+    if (status !== 'success') return
+    const fe = (config.frontendOrderUrlTemplate || '').trim()
+    let target: string | null = null
+    if (fe) {
+      target = fe
+        .replace(/\{code\}/g, encodeURIComponent(config.orderCode))
+        .replace(/\{secret\}/g, encodeURIComponent(config.orderSecret))
+    } else {
+      const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)/)
+      if (match) {
+        const [, organizer, event] = match
+        target = `/${organizer}/${event}/order/${config.orderCode}/${config.orderSecret}/`
+      }
+    }
+    const t = setTimeout(() => {
+      if (target) window.location.href = target
+      else window.location.reload()
+    }, 800)
+    return () => clearTimeout(t)
+  }, [status, config.frontendOrderUrlTemplate, config.orderCode, config.orderSecret])
 
   // Sufficiency check for the currently picked option — drives the Pay
   // button's disabled state. Null when we can't tell yet (balances
@@ -1447,6 +1502,25 @@ export function CheckoutStep({
   const cbDappUrl = typeof window !== 'undefined'
     ? `https://go.cb-w.com/dapp?cb_url=${encodeURIComponent(window.location.href)}`
     : ''
+
+  // Inline success view. Renders inside the same `wc-root` wrapper as the
+  // picker, with WalletHeader still on top — so the swap from form → success
+  // happens within the existing frame instead of replacing the whole screen
+  // with a separate SuccessStep view.
+  if (status === 'success' && confirmedTxHash) {
+    return (
+      <div className="wc-root">
+        <WalletHeader disabled />
+        <div className="wc-success">
+          <h3 style={{ marginTop: 0, color: '#2e7d32' }}>✓ Payment confirmed</h3>
+          <p className="wc-small">
+            Transaction: <code style={{ wordBreak: 'break-all' }}>{confirmedTxHash}</code>
+          </p>
+          <p>Redirecting to your order…</p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="wc-root">
@@ -1659,11 +1733,32 @@ export function CheckoutStep({
         )
       })()}
 
-      {quote && (
-        <p className="wc-small" style={{ marginTop: 8 }}>
-          Amount: <strong>{formatAmount(quote)}</strong> to <code style={{ wordBreak: 'break-all' }}>{quote.receive_address}</code>
-        </p>
-      )}
+      {quote && (() => {
+        // While the tx is mining/verifying (or after a verify failure we
+        // recovered a hash for), surface a clickable explorer link in place
+        // of the recipient address. The hash is the actionable artifact the
+        // buyer cares about at that point; the recipient address was only
+        // informative pre-broadcast.
+        const explorerBase = chainMetadata[String(quote.chain_id)]?.explorer_url
+        const txUrl = pendingTxHash && explorerBase ? `${explorerBase}${pendingTxHash}` : null
+        return (
+          <p className="wc-small" style={{ marginTop: 8 }}>
+            Amount: <strong>{formatAmount(quote)}</strong>{' '}
+            {txUrl ? (
+              <>
+                ·{' '}
+                <a href={txUrl} target="_blank" rel="noopener noreferrer">
+                  View transaction →
+                </a>
+              </>
+            ) : (
+              <>
+                to <code style={{ wordBreak: 'break-all' }}>{quote.receive_address}</code>
+              </>
+            )}
+          </p>
+        )
+      })()}
 
       {/* Hide the Pay button entirely while the wallet is disconnected. The
           parent `WCPaymentApp` should already flip the stage back to 'connect'

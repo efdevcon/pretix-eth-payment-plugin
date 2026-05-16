@@ -32,11 +32,17 @@ if (el) {
   // The Django template ships a sibling `#wc-boot-loading` div so the user
   // sees branded "Pay with ETH / Loading wallet…" copy immediately, before the
   // bundle finishes downloading on slow connections. Remove it from the DOM
-  // once React has mounted so it cannot reappear during stage transitions —
-  // a previous version kept the placeholder INSIDE the React root and relied
-  // on createRoot wiping it, which left an ambiguous "could the boot
-  // placeholder come back?" question during disconnect flickers.
+  // once React has mounted so it cannot reappear during stage transitions.
   document.getElementById('wc-boot-loading')?.remove()
+  // Mark this session as "bundle has booted" so any subsequent Pretix
+  // re-render of the checkout template (which re-includes the boot loader
+  // markup) hides it via the inline CSS rule keyed off
+  // `html.wc-inject-booted`. Avoids the placeholder flashing during
+  // disconnect when Pretix partially re-renders the payment step.
+  try {
+    sessionStorage.setItem('wc-inject-booted', '1')
+    document.documentElement.classList.add('wc-inject-booted')
+  } catch (_) { /* sessionStorage unavailable — fall back to normal flow */ }
 } else {
   console.error('wc-payment-root element missing')
 }

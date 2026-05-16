@@ -1,12 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useAccount } from 'wagmi'
 import type { WCConfig } from './config'
 import { ConnectStep } from './components/ConnectStep'
 import { CheckoutStep } from './components/CheckoutStep'
-import { SuccessStep } from './components/SuccessStep'
 import { usePaymentOptions } from './hooks/usePaymentOptions'
 
-type Stage = 'connect' | 'checkout' | 'success'
+type Stage = 'connect' | 'checkout'
 
 export interface Quote {
   quote_id: string
@@ -23,22 +22,13 @@ export interface Quote {
 
 export function WCPaymentApp({ config }: { config: WCConfig }) {
   const account = useAccount()
-  const [txHash, setTxHash] = useState<string | null>(null)
-  const [quote, setQuote] = useState<Quote | null>(null)
   const opts = usePaymentOptions(config)
 
-  // Derive stage synchronously from connection + completion state. Previous
-  // version stored stage in state and updated it via useEffect — that lag
-  // between an `isConnected` flip and the stage transition let one extra
-  // render through with stale stage, which on disconnect surfaced the
-  // CheckoutStep "Loading payment options..." shim between the disappearing
-  // connected UI and the ConnectStep. Synchronous derivation removes that
-  // in-between frame entirely.
-  const stage: Stage = txHash && quote
-    ? 'success'
-    : account.isConnected
-      ? 'checkout'
-      : 'connect'
+  // Stage derived synchronously from connection state. Success is handled
+  // inline by CheckoutStep (it renders a confirmation card in the same
+  // `wc-root` wrapper and triggers its own redirect), so we don't need a
+  // separate post-payment stage that swaps the entire view.
+  const stage: Stage = account.isConnected ? 'checkout' : 'connect'
 
   // Apply `wc-full-checkout` at the top level (not per-stage). styles.css uses
   // this class to hide Pretix's native submit button whenever our UI owns the
@@ -63,13 +53,13 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
         ethDisabledReason={opts.data.eth_disabled_reason}
         ethPriceUsd={opts.data.eth_price_usd}
         chainMetadata={opts.data.chain_metadata}
-        onConfirmed={(hash, q) => { setTxHash(hash); setQuote(q) }}
+        onConfirmed={() => {
+          // CheckoutStep owns the inline success card + redirect now. This
+          // callback is kept on the signature for future hooks (analytics,
+          // external observers) but is intentionally a no-op here.
+        }}
       />
     )
-  }
-
-  if (stage === 'success' && quote && txHash) {
-    return <SuccessStep quote={quote} txHash={txHash} />
   }
 
   return null

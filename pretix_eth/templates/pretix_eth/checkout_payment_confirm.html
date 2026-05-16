@@ -1,44 +1,67 @@
 {% load i18n %}
 
+{# If the bundle has already booted once in this browser session — which
+   includes any case where Pretix re-renders this template after a wallet
+   connect/disconnect cycle, switching cart contents, etc. — the script
+   below tags <html> so the inline boot CSS hides the placeholder
+   immediately. Prevents the "spinner reappears for a second on disconnect"
+   flicker the user reported when Pretix re-serves the checkout step. #}
+<script>
+  try {
+    if (sessionStorage.getItem('wc-inject-booted')) {
+      document.documentElement.classList.add('wc-inject-booted');
+    }
+  } catch (_) { /* sessionStorage unavailable — fall back to normal flow */ }
+</script>
+
 <style>
-  #wc-payment-root .wc-boot-loading {
-    border: 1px solid rgba(0, 0, 0, 0.1);
-    border-radius: 8px;
-    padding: 24px 16px;
+  /* Mirrors .wc-root (styles.css): same max-width, padding, font, centered
+     in the parent column. Paints from inline CSS so it works before
+     styles.css loads. min-height matches .wc-root so the boot → React swap
+     doesn't reflow the surrounding Pretix page. */
+  #wc-boot-loading {
+    font-family: system-ui, -apple-system, sans-serif;
+    max-width: 480px;
+    margin: 0 auto;
+    padding: 16px;
+    color: #111;
+    min-height: 240px;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     align-items: center;
     justify-content: center;
-    gap: 12px;
-    font-family: inherit;
-    /* Match `.wc-root` min-height so the boot placeholder → React swap and
-       any inter-stage swaps don't cause the surrounding page to jump. */
-    min-height: 240px;
-    box-sizing: border-box;
+    gap: 14px;
   }
-  #wc-payment-root .wc-boot-loading h3 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 700;
-    color: #160b2b;
+  #wc-boot-loading h3 {
+    margin: 0 0 4px;
+    font-size: 17px;
+    font-weight: 600;
     text-align: center;
   }
-  #wc-payment-root .wc-boot-loading p {
+  #wc-boot-loading p {
     margin: 0;
-    font-size: 14px;
-    color: #594d73;
+    font-size: 13px;
+    color: #666;
     text-align: center;
   }
-  #wc-payment-root .wc-boot-loading .wc-boot-spinner {
-    width: 24px;
-    height: 24px;
-    border: 3px solid rgba(0, 0, 0, 0.1);
-    border-top-color: #d65600;
+  #wc-boot-loading .wc-boot-spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid rgba(0, 0, 0, 0.08);
+    border-top-color: #0066cc;
     border-radius: 50%;
-    animation: wc-boot-spin 0.8s linear infinite;
+    animation: wc-boot-spin 0.7s linear infinite;
   }
   @keyframes wc-boot-spin {
     to { transform: rotate(360deg); }
+  }
+  /* Suppress the placeholder when the bundle has already booted this
+     session — handles the case where Pretix re-renders the checkout step
+     (disconnect, cart change, etc.) and the boot loader element gets
+     re-injected. */
+  html.wc-inject-booted #wc-boot-loading {
+    display: none !important;
   }
 </style>
 
