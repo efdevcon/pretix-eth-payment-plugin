@@ -1,6 +1,58 @@
 {% load i18n %}
 
-<div id="wc-payment-root"></div>
+{# Critical inline CSS for the boot placeholder — paints instantly without
+   waiting on the (separately-loaded) styles.css. Once bundle.js executes
+   `createRoot(el).render(...)` the placeholder is replaced by the live
+   React tree, so this CSS only matters for the few hundred ms ↔ few seconds
+   between HTML parse and bundle mount on a cold visit. #}
+<style>
+  #wc-payment-root .wc-boot-loading {
+    border: 1px solid rgba(0, 0, 0, 0.1);
+    border-radius: 8px;
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    font-family: inherit;
+  }
+  #wc-payment-root .wc-boot-loading h3 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 700;
+    color: #160b2b;
+    text-align: center;
+  }
+  #wc-payment-root .wc-boot-loading p {
+    margin: 0;
+    font-size: 14px;
+    color: #594d73;
+    text-align: center;
+  }
+  #wc-payment-root .wc-boot-loading .wc-boot-spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(0, 0, 0, 0.1);
+    border-top-color: #d65600;
+    border-radius: 50%;
+    animation: wc-boot-spin 0.8s linear infinite;
+  }
+  @keyframes wc-boot-spin {
+    to { transform: rotate(360deg); }
+  }
+</style>
+
+<div id="wc-payment-root">
+  {# This placeholder renders from the static HTML the moment Pretix serves
+     the checkout page. React replaces it on mount via `createRoot().render()`.
+     Mirrors ConnectStep.tsx's headline so the user sees the same "Pay with
+     ETH / crypto" branding before the bundle parses. #}
+  <div class="wc-boot-loading" aria-busy="true" aria-live="polite">
+    <h3>{% if eth_mainnet_only %}{% trans "Pay with ETH" %}{% else %}{% trans "Pay with crypto" %}{% endif %}</h3>
+    <div class="wc-boot-spinner" aria-hidden="true"></div>
+    <p>{% trans "Loading wallet…" %}</p>
+  </div>
+</div>
 
 <script id="wc-config" type="application/json">
 {
@@ -20,4 +72,9 @@
 </script>
 
 <link rel="stylesheet" href="/static/wc_inject/dist/styles.css?v={{ plugin_version|urlencode }}">
+{# `modulepreload` starts the bundle fetch in parallel with HTML parsing
+   without changing execution semantics — the actual <script type="module">
+   below still runs deferred. Saves the round-trip-to-discover-then-fetch
+   gap on the 5.5 MB bundle. #}
+<link rel="modulepreload" href="/static/wc_inject/dist/bundle.js?v={{ plugin_version|urlencode }}">
 <script type="module" src="/static/wc_inject/dist/bundle.js?v={{ plugin_version|urlencode }}"></script>
