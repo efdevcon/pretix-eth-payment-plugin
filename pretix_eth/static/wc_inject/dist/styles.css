@@ -61,12 +61,12 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   animation: wc-fade-in 0.22s ease-out;
 }
 .wc-status-card[data-state="success"] {
-  border-color: #c8e6c9;
-  background: #f1f8f3;
+  border-color: var(--pretix-brand-success-lighten-30, #c8e6c9);
+  background: var(--pretix-brand-success-lighten-48, #f1f8f3);
 }
 .wc-status-card[data-state="error"] {
-  border-color: #fecaca;
-  background: #fff5f5;
+  border-color: var(--pretix-brand-danger-lighten-30, #fecaca);
+  background: var(--pretix-brand-danger-lighten-48, #fff5f5);
 }
 
 .wc-status-card-icon {
@@ -86,8 +86,8 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   content: "";
   position: absolute;
   inset: 0;
-  border: 3px solid rgba(0, 102, 204, 0.15);
-  border-top-color: #0066cc;
+  border: 3px solid var(--pretix-brand-primary-lighten-40, rgba(0, 102, 204, 0.15));
+  border-top-color: var(--pretix-brand-primary, #0066cc);
   border-radius: 50%;
   animation: wc-spin 0.7s linear infinite;
 }
@@ -98,8 +98,8 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
    sizes. Identical visual to the status-card pending spinner above. */
 .wc-spinner {
   display: inline-block;
-  border: 3px solid rgba(0, 102, 204, 0.15);
-  border-top-color: #0066cc;
+  border: 3px solid var(--pretix-brand-primary-lighten-40, rgba(0, 102, 204, 0.15));
+  border-top-color: var(--pretix-brand-primary, #0066cc);
   border-radius: 50%;
   animation: wc-spin 0.7s linear infinite;
 }
@@ -128,7 +128,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 }
 
 .wc-status-card[data-state="success"] .wc-status-card-icon {
-  background: #2e7d32;
+  background: var(--pretix-brand-success, #2e7d32);
   border-radius: 50%;
   color: #fff;
   font-size: 22px;
@@ -136,7 +136,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   animation: wc-status-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .wc-status-card[data-state="error"] .wc-status-card-icon {
-  background: #c62828;
+  background: var(--pretix-brand-danger, #c62828);
   border-radius: 50%;
   color: #fff;
   font-size: 22px;
@@ -155,8 +155,8 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   text-align: center;
   line-height: 1.35;
 }
-.wc-status-card[data-state="success"] .wc-status-card-title { color: #1b5e20; }
-.wc-status-card[data-state="error"]   .wc-status-card-title { color: #b71c1c; }
+.wc-status-card[data-state="success"] .wc-status-card-title { color: var(--pretix-brand-success-darken-10, #1b5e20); }
+.wc-status-card[data-state="error"]   .wc-status-card-title { color: var(--pretix-brand-danger-darken-10, #b71c1c); }
 
 .wc-status-card-info {
   width: 100%;
@@ -185,7 +185,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   word-break: break-all;
 }
 .wc-status-card-value a {
-  color: #0066cc;
+  color: var(--pretix-brand-primary, #0066cc);
   text-decoration: none;
   font-weight: 600;
 }
@@ -223,6 +223,13 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 }
 
 .wc-option:hover { background: #f5f5f5; }
+/* Selected states (asset chips + network rows + generic option) hold
+   their own hardcoded blue rather than the theme color. Reason: the
+   "I picked this" affordance needs predictable visual punch — a soft
+   or neutral theme color would mute the selected state and erode the
+   user's confidence in their selection. Ambient accents (spinner,
+   links, pills) still inherit `--pretix-brand-primary` and respect
+   the operator's brand. */
 .wc-option.selected { border-color: #0066cc; background: #f0f7ff; }
 
 .wc-notice {
@@ -351,8 +358,8 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  background: rgba(0, 102, 204, 0.07);
-  color: #0066cc;
+  background: var(--pretix-brand-primary-lighten-48, rgba(0, 102, 204, 0.07));
+  color: var(--pretix-brand-primary, #0066cc);
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
@@ -373,25 +380,33 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   to { opacity: 1; transform: translateY(0); }
 }
 
-/* Footer escape hatch for buyers who don't have a wallet yet. Subtle —
-   not the primary CTA, but visible enough that a wallet-less buyer
-   has an obvious path forward instead of dropping off. */
+/* Footer helper row — escape hatches for buyers who don't yet have a
+   wallet or don't have ETH to pay with. Sits below the CTA in muted
+   grey so it doesn't compete with the primary action; each link lifts
+   to the brand color on hover. Stacks on narrow viewports where the
+   horizontal row would otherwise wrap awkwardly. */
+.wc-connect-helpers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 18px;
+  margin-top: 2px;
+}
 .wc-find-wallet {
   font-size: 13px;
   color: #6b7280;
   text-decoration: none;
   text-align: center;
-  margin-top: 2px;
   transition: color 0.15s;
 }
 .wc-find-wallet:hover {
-  color: #0066cc;
+  color: var(--pretix-brand-primary, #0066cc);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 .wc-error {
-  color: #c62828;
+  color: var(--pretix-brand-danger, #c62828);
   padding: 8px 12px;
   background: #ffebee;
   border-radius: 4px;
@@ -594,14 +609,45 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 .wc-link-button {
   background: none;
   border: none;
-  color: #0066cc;
+  color: var(--pretix-brand-primary, #0066cc);
   cursor: pointer;
   font-size: 13px;
   padding: 0;
   text-decoration: underline;
 }
 
-.wc-link-button:hover { color: #0052a3; }
+.wc-link-button:hover { color: var(--pretix-brand-primary-darken-10, #0052a3); }
+
+/* Disconnect icon button — icon-only on the right edge of WalletHeader,
+   subtle by default, tints toward `--pretix-brand-danger` on hover to
+   signal that it's a destructive-ish action (sign out of the session).
+   Icon-only saves precious width on mobile where the wallet name + type
+   pill already fill the left side; aria-label + title carry the meaning
+   for AT users. */
+.wc-disconnect-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: transparent;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.wc-disconnect-btn:hover:not(:disabled) {
+  color: var(--pretix-brand-danger, #c62828);
+  border-color: var(--pretix-brand-danger-lighten-30, #fecaca);
+  background: var(--pretix-brand-danger-lighten-48, #fff5f5);
+}
+.wc-disconnect-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .wc-manual-verify {
   display: flex;
@@ -621,7 +667,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 
 .wc-input:focus {
   outline: none;
-  border-color: #0066cc;
+  border-color: var(--pretix-brand-primary, #0066cc);
 }
 
 /* (wc-button-secondary removed along with the manual-verify UI that used it) */
@@ -660,7 +706,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 .wc-network-refresh {
   font-size: 13px;
   font-weight: 600;
-  color: #0066cc;
+  color: var(--pretix-brand-primary, #0066cc);
   background: none;
   border: none;
   cursor: pointer;
@@ -693,6 +739,8 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 }
 
 .wc-asset-chip:hover:not(:disabled) { border-color: #999; }
+/* Active chip stays in hardcoded blue territory — see `.wc-option.selected`
+   comment for the rationale. */
 .wc-asset-chip--active { border-color: #0066cc; background: #f0f7ff; color: #0066cc; }
 .wc-asset-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
@@ -747,6 +795,10 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 
 .wc-network-row:hover:not(:disabled) { background: #f9f9f9; border-color: #ccc; }
 
+/* Selected network row holds hardcoded blue — same rationale as the
+   asset chip's active state. The picker's "this is your pick" affordance
+   needs to read unambiguously regardless of how soft the operator's
+   brand color is. */
 .wc-network-row--selected {
   border-color: #0066cc;
   background: #f0f7ff;
@@ -772,6 +824,8 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   font-weight: 500;
 }
 
+/* Check glyph next to the selected network — hardcoded blue to match
+   `.wc-network-row--selected`'s border/background. */
 .wc-network-row-check {
   color: #0066cc;
   font-size: 18px;

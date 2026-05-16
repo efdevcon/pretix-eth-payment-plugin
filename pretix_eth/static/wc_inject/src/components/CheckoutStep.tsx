@@ -1623,7 +1623,18 @@ export function CheckoutStep({
         </div>
       )}
 
-      {showPicker && <h3 style={{ marginTop: 0 }}>{status === 'error' ? 'Try again' : 'Select payment method'}</h3>}
+      {showPicker && (
+        <h3 style={{ marginTop: 0 }}>
+          {status === 'error'
+            ? 'Try again'
+            // Only one option (one symbol + one chain) means nothing
+            // to actually pick — "Select payment method" reads as an
+            // empty prompt. Frame the screen as a confirmation instead.
+            : options.length === 1
+              ? 'Confirm payment'
+              : 'Select payment method'}
+        </h3>
+      )}
 
       {/* DEBUG — uncomment to re-test the tx-hash recovery paths without
           rebuilding new code. Forces the recovery wrapper into a specific

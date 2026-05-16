@@ -54,12 +54,16 @@
   }
   /* Single clean classic ring spinner — same exact visual + animation
      used by the React-side .wc-spinner / .wc-status-card pending state,
-     so the boot → React handoff is one continuous loading vocabulary. */
+     so the boot → React handoff is one continuous loading vocabulary.
+     Color picks up Pretix's brand variables when available (`--pretix-
+     brand-primary` and its lighten-40 variant) so the spinner is
+     theme-aware out of the box; falls back to a sensible blue if the
+     Pretix theme stylesheet hasn't loaded yet. */
   #wc-boot-loading .wc-boot-spinner {
     width: 44px;
     height: 44px;
-    border: 3px solid rgba(0, 102, 204, 0.15);
-    border-top-color: #0066cc;
+    border: 3px solid var(--pretix-brand-primary-lighten-40, rgba(0, 102, 204, 0.15));
+    border-top-color: var(--pretix-brand-primary, #0066cc);
     border-radius: 50%;
     animation: wc-boot-spin 0.7s linear infinite;
   }

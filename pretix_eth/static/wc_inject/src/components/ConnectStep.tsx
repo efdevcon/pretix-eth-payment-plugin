@@ -1,6 +1,7 @@
 import { appKitInstance, type WCConfig } from '../config'
 
 const FIND_WALLET_URL = 'https://ethereum.org/wallets/find-wallet/'
+const GET_ETH_URL = 'https://ethereum.org/get-eth/'
 
 // Lucide-style line icons inlined as SVG (no runtime dep, ~0.5 KB total).
 // Stroke uses currentColor so the parent's color setting drives the tint.
@@ -68,14 +69,24 @@ export function ConnectStep({ config }: { config?: WCConfig } = {}) {
       >
         Connect wallet
       </button>
-      <a
-        className="wc-find-wallet"
-        href={FIND_WALLET_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        Don&apos;t have a wallet? →
-      </a>
+      <div className="wc-connect-helpers">
+        <a
+          className="wc-find-wallet"
+          href={FIND_WALLET_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Don&apos;t have a wallet? →
+        </a>
+        <a
+          className="wc-find-wallet"
+          href={GET_ETH_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Where to get ETH? →
+        </a>
+      </div>
     </div>
   )
 }

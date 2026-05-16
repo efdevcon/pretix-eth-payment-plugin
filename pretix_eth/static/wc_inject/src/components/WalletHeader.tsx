@@ -72,7 +72,7 @@ export function WalletHeader({ disabled = false }: { disabled?: boolean }) {
       </div>
       <button
         type="button"
-        className="wc-link-button"
+        className="wc-disconnect-btn"
         onClick={() => disconnect()}
         // `type="button"` is critical — Pretix's checkout-confirm template
         // wraps this whole panel in a <form>, and a bare <button> defaults
@@ -86,9 +86,15 @@ export function WalletHeader({ disabled = false }: { disabled?: boolean }) {
         // bound to the parent's busy flag so the button is greyed out from
         // first sign through verify-success.
         disabled={disabled}
-        title={disabled ? 'Disconnect disabled while a payment is being verified.' : undefined}
+        aria-label="Disconnect wallet"
+        title={disabled ? 'Disconnect disabled while a payment is being verified.' : 'Disconnect wallet'}
       >
-        Disconnect
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+          <polyline points="16 17 21 12 16 7" />
+          <line x1="21" x2="9" y1="12" y2="12" />
+        </svg>
       </button>
     </div>
   )
