@@ -151,7 +151,7 @@ function parseOrgAndEvent(): { organizer: string; event: string } {
   return { organizer: match[1], event: match[2] }
 }
 
-/** Format a raw on-chain integer (wei for ETH, base units for stables) at
+/** Format a raw onchain integer (wei for ETH, base units for stables) at
  *  full precision via BigInt division. The previous `Number(BigInt(...)) / 1e18`
  *  + `.toFixed(6)` path lost both arithmetic precision (Number caps at ~15 sig
  *  figs) and display precision — small ETH amounts like 4_333_520_758_106 wei
@@ -505,7 +505,7 @@ export function CheckoutStep({
   // explorer link while the user waits for the backend's confirmation poll
   // — same hash that will land on the success card, just surfaced earlier.
   // Preserved across `verifying` → `error` so a verify failure still lets
-  // the buyer inspect the on-chain state.
+  // the buyer inspect the onchain state.
   const [pendingTxHash, setPendingTxHash] = useState<string | null>(null)
 
   // Pre-fetched challenge so `handlePay` doesn't have to do a network
@@ -525,7 +525,7 @@ export function CheckoutStep({
     fetchedAt: number
   } | null>(null)
   // Confirmation progress surfaced from the backend's `confirmations` /
-  // `confirmations_required` fields. Used to render "Confirming on-chain
+  // `confirmations_required` fields. Used to render "Confirming onchain
   // (X/N)" instead of an opaque spinner during the verify poll.
   const [confirmProgress, setConfirmProgress] = useState<{ current: number; required: number } | null>(null)
 
@@ -563,7 +563,7 @@ export function CheckoutStep({
   const { signMessageAsync } = useSignMessage()
   const { switchChainAsync, switchChain } = useSwitchChain()
 
-  // Safe (multisig) on-chain probe — opt-in per event via
+  // Safe (multisig) onchain probe — opt-in per event via
   // `config.safePaymentsEnabled`. Sets `isSafeAddress` when Safe Tx
   // Service confirms the connected address is a Safe and surfaces the
   // signers-required threshold for the multi-signer notice.
@@ -601,7 +601,7 @@ export function CheckoutStep({
     return () => { cancelled = true }
   }, [config.safePaymentsEnabled, address, walletChainId])
 
-  /** Heuristic OR on-chain confirmation — either is enough to take the
+  /** Heuristic OR onchain confirmation — either is enough to take the
    *  Safe send + sign-poll path. The heuristic now includes
    *  `connectedWalletName` because Reown's WC Safe entry comes through
    *  with the generic `walletConnect` connector type; the actual brand
@@ -898,7 +898,7 @@ export function CheckoutStep({
   }
 
   // ── Manual-hash submit ──
-  // Validates the pasted hash on-chain (from=payer, nonce=expectedNonce
+  // Validates the pasted hash onchain (from=payer, nonce=expectedNonce
   // when available) before accepting and resolving the recovery promise.
   async function submitManualHash() {
     const raw = manualHashInput.trim()
@@ -1132,7 +1132,7 @@ export function CheckoutStep({
       //     which is the root cause of the desktop ConnectorChainMismatch
       //     bug (coinbase-wallet-sdk #1317).
       //   * the wallet returns a call-bundle id; we poll its status via
-      //     `wallet_getCallsStatus` and get the on-chain hash back, with
+      //     `wallet_getCallsStatus` and get the onchain hash back, with
       //     no nonce-discovery race needed (sendWithRecovery exists to
       //     paper over wallets that broadcast but don't return the hash;
       //     5792's status RPC removes that failure mode by design).
@@ -1214,7 +1214,7 @@ export function CheckoutStep({
         // would re-assert chain via getConnectorClient and trip the CB
         // SDK desync. Call viem's primitive directly on a chain-bound
         // client with assertChainId off. Default predicate (`status >= 200`)
-        // covers both success and on-chain failure; pollVerify surfaces
+        // covers both success and onchain failure; pollVerify surfaces
         // any reverts.
         setStatus('verifying')
         const statusClient = await getConnectorClient(wagmiConfig, {
@@ -1246,8 +1246,8 @@ export function CheckoutStep({
         // The Safe app is chain-scoped per deployment, so we skip the
         // `switchChain` step entirely — the Safe is already on whichever
         // chain the buyer opened it on. `eth_sendTransaction` /
-        // `eth_writeContract` on a Safe returns an off-chain
-        // *safeTxHash*, not a real on-chain hash; we poll Safe Tx
+        // `eth_writeContract` on a Safe returns an offchain
+        // *safeTxHash*, not a real onchain hash; we poll Safe Tx
         // Service for the executed `transactionHash` and feed that to
         // pollVerify. Multi-sig Safes can take minutes-to-hours of
         // co-signer time — the "verifying" status stays up while
@@ -1445,7 +1445,7 @@ export function CheckoutStep({
         if (confirmProgress && confirmProgress.current > 0 && confirmProgress.required > 1) {
           return `Confirming \u00b7 ${confirmProgress.current} of ${confirmProgress.required} blocks`
         }
-        return 'Confirming on-chain\u2026'
+        return 'Confirming onchain\u2026'
       case 'success': return ''
       case 'error': return 'Retry'
     }
@@ -1524,9 +1524,9 @@ export function CheckoutStep({
   const statusCardTitle = (() => {
     switch (status) {
       case 'challenge':         return 'Preparing payment…'
-      case 'signing-challenge': return `Sign message ${where}…`
+      case 'signing-challenge': return `Sign in your wallet ${where}…`
       case 'quoting':           return 'Creating quote…'
-      case 'switching':         return 'Switching chain…'
+      case 'switching':         return `Switch network ${where}…`
       case 'signing-tx':        return `Confirm payment ${where}…`
       case 'verifying':
         // See `buttonLabel` for rationale — skip the fraction when we're
@@ -1536,10 +1536,41 @@ export function CheckoutStep({
         if (confirmProgress && confirmProgress.current > 0 && confirmProgress.required > 1) {
           return `Confirming · ${confirmProgress.current} of ${confirmProgress.required} blocks`
         }
-        return 'Confirming on-chain…'
+        return 'Confirming onchain…'
       case 'success':           return 'Payment confirmed'
-      case 'error':             return 'Payment failed'
+      case 'error':
+        // Distinguish "user rejected in wallet" from actual failures.
+        // A wallet rejection is the buyer changing their mind, not a
+        // failure — calling it "Payment failed" reads as alarmist.
+        // Most wallets surface rejection with these phrases in
+        // shortMessage/message.
+        if (error && /(user (?:rejected|denied|cancel))|^rejected|user closed/i.test(error)) {
+          return 'Payment cancelled'
+        }
+        return "Couldn't complete payment"
       default:                  return ''
+    }
+  })()
+
+  // One-line context shown directly under the title. The signing-challenge
+  // state is the most confusing one — buyers see "Sign in your wallet" and
+  // reasonably wonder whether they're committing to a transaction (gas?
+  // is this the payment?). Explicit "free, offchain, no gas" reassurance
+  // there. For other states we keep the description short or omit when
+  // the title alone is clear (challenge / quoting are quick, self-evident
+  // prep steps).
+  const statusCardDescription = (() => {
+    switch (status) {
+      case 'signing-challenge':
+        return 'Free offchain signature — no gas fee'
+      case 'switching':
+        return 'Approve the network change — no gas fee'
+      case 'signing-tx':
+        return 'This is the onchain payment'
+      case 'verifying':
+        return 'Waiting for the network to confirm'
+      default:
+        return null
     }
   })()
 
@@ -1592,6 +1623,9 @@ export function CheckoutStep({
             {statusCardState === 'success' ? '✓' : statusCardState === 'error' ? '!' : ''}
           </div>
           <h3 className="wc-status-card-title">{statusCardTitle}</h3>
+          {statusCardDescription && (
+            <p className="wc-status-card-description">{statusCardDescription}</p>
+          )}
           {quote && (
             <div className="wc-status-card-info">
               <div className="wc-status-card-row">
@@ -1888,7 +1922,7 @@ export function CheckoutStep({
 
       {/* Manual hash escape hatch — appears after the auto window expires
           without finding the tx via nonce-discovery. Buyer pastes the hash
-          from their wallet's history; we validate it on-chain (correct
+          from their wallet's history; we validate it onchain (correct
           payer + nonce) before accepting. */}
       {recoveryStatus === 'manual' && (
         <div className="wc-recovery-prompt">

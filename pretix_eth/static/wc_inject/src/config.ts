@@ -69,7 +69,7 @@ const FEATURED_WALLET_IDS = [
 // + safeMessageHash recovery when the `safe_payments_enabled` admin flag
 // is on. When the flag is off (default) we leave Safe in this list so a
 // buyer with a Safe gets clearly told the option isn't supported (no row
-// at all, vs. a row that completes payment on-chain but never recovers).
+// at all, vs. a row that completes payment onchain but never recovers).
 const SAFE_WC_WALLET_ID = '225affb176778569276e484e1b92637ad061b01e13a048b35a9d280c3b58970f'
 const ALWAYS_EXCLUDED_WALLET_IDS: string[] = []
 

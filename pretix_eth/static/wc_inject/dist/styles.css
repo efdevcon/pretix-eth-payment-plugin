@@ -50,14 +50,18 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
    ──────────────────────────────────────────────────────────────────── */
 .wc-status-card {
   margin-top: 4px;
-  padding: 22px 18px;
+  /* Tighter padding (was 22px 18px) — the previous bottom whitespace
+     felt cavernous when the card had no info section (e.g. error
+     before quote arrived). 16px top/bottom keeps the card composed
+     without feeling cramped against the tinted border. */
+  padding: 16px 18px 18px;
   border: 1px solid #e5e7eb;
   border-radius: 12px;
   background: #fff;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 14px;
+  gap: 10px;
   animation: wc-fade-in 0.22s ease-out;
 }
 .wc-status-card[data-state="success"] {
@@ -71,8 +75,12 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
 
 .wc-status-card-icon {
   position: relative;
-  width: 44px;
-  height: 44px;
+  /* 32 px (was 44 px). The terminal icons (success ✓ and error !) used
+     to read as "alarm bell" at 44 px — especially the red error state
+     felt screamy. 32 px reads as confident supporting indicator while
+     leaving room for the title and amount to carry the message. */
+  width: 32px;
+  height: 32px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -86,7 +94,11 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   content: "";
   position: absolute;
   inset: 0;
-  border: 3px solid var(--pretix-brand-primary-lighten-40, rgba(0, 102, 204, 0.15));
+  /* Border thinned from 3 → 2.5 px to stay proportional to the new
+     32 px icon size. Half-pixel borders render cleanly in modern
+     browsers and keep the ring visually similar to the boot loader's
+     larger spinner. */
+  border: 2.5px solid var(--pretix-brand-primary-lighten-40, rgba(0, 102, 204, 0.15));
   border-top-color: var(--pretix-brand-primary, #0066cc);
   border-radius: 50%;
   animation: wc-spin 0.7s linear infinite;
@@ -131,7 +143,9 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   background: var(--pretix-brand-success, #2e7d32);
   border-radius: 50%;
   color: #fff;
-  font-size: 22px;
+  /* Scaled down from 22 px to match the new 32 px icon container —
+     keeps the glyph centered with roughly the same inset proportion. */
+  font-size: 16px;
   font-weight: 700;
   animation: wc-status-pop 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -139,7 +153,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   background: var(--pretix-brand-danger, #c62828);
   border-radius: 50%;
   color: #fff;
-  font-size: 22px;
+  font-size: 16px;
   font-weight: 700;
 }
 @keyframes wc-status-pop {
@@ -154,6 +168,18 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   color: #111;
   text-align: center;
   line-height: 1.35;
+}
+/* One-line context under the title — clarifies what's happening in
+   the wallet right now. Especially important for `signing-challenge`
+   where the buyer might otherwise worry about gas. Muted grey so it
+   reads as supporting copy, not a second headline. */
+.wc-status-card-description {
+  margin: -2px 0 0;
+  font-size: 12px;
+  color: #6b7280;
+  text-align: center;
+  line-height: 1.4;
+  max-width: 36ch;
 }
 .wc-status-card[data-state="success"] .wc-status-card-title { color: var(--pretix-brand-success-darken-10, #1b5e20); }
 .wc-status-card[data-state="error"]   .wc-status-card-title { color: var(--pretix-brand-danger-darken-10, #b71c1c); }

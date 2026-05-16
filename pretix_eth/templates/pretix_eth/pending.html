@@ -1,7 +1,7 @@
 {% load i18n %}
 <div class="wc-pending">
   {% if tx_hash %}
-    <p>{% trans "Your payment is being verified on-chain." %}</p>
+    <p>{% trans "Your payment is being verified onchain." %}</p>
     <p>
       <strong>{% trans "Transaction:" %}</strong>
       <a href="{{ explorer_url }}" target="_blank" rel="noopener">{{ tx_hash }}</a>

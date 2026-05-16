@@ -5,7 +5,7 @@ import type { WCConfig } from '../config'
 export interface BalanceEntry {
   chain_id: number
   symbol: string
-  /** Raw on-chain base units (string to preserve precision past 2^53). */
+  /** Raw onchain base units (string to preserve precision past 2^53). */
   balance: string
   decimals: number
   /** ERC-20 contract address; null for native ETH. */

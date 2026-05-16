@@ -59,9 +59,9 @@ export async function probeSafe(
   }
 }
 
-/** Poll Safe Tx Service for the on-chain transactionHash after a Safe
+/** Poll Safe Tx Service for the onchain transactionHash after a Safe
  *  has signed/executed a queued transaction. `eth_sendTransaction` on a
- *  Safe returns a *safeTxHash* (off-chain) — we translate that to the
+ *  Safe returns a *safeTxHash* (offchain) — we translate that to the
  *  real chain hash here so /verify/ has something to look up.
  *
  *  Bails after 10 consecutive 404/422s ("not a Safe, or never broadcast")
@@ -103,7 +103,7 @@ export async function pollSafeTxService(
     await new Promise(r => setTimeout(r, 5_000))
   }
   throw new Error(
-    'Safe transaction timed out — please complete the signing in your Safe and click Retry verification with the on-chain tx hash.',
+    'Safe transaction timed out — please complete the signing in your Safe and click Retry verification with the onchain tx hash.',
   )
 }
 
