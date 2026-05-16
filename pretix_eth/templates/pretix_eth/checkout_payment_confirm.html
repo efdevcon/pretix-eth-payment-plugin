@@ -42,13 +42,12 @@
   }
 </style>
 
-<div id="wc-payment-root">
-  <div class="wc-boot-loading" aria-busy="true" aria-live="polite">
-    <h3>{% if eth_mainnet_only %}{% trans "Pay with ETH" %}{% else %}{% trans "Pay with crypto" %}{% endif %}</h3>
-    <div class="wc-boot-spinner" aria-hidden="true"></div>
-    <p>{% trans "Loading wallet…" %}</p>
-  </div>
+<div id="wc-boot-loading" class="wc-boot-loading" aria-busy="true" aria-live="polite">
+  <h3>{% if eth_mainnet_only %}{% trans "Pay with ETH" %}{% else %}{% trans "Pay with crypto" %}{% endif %}</h3>
+  <div class="wc-boot-spinner" aria-hidden="true"></div>
+  <p>{% trans "Loading wallet…" %}</p>
 </div>
+<div id="wc-payment-root"></div>
 
 <script id="wc-config" type="application/json">
 {

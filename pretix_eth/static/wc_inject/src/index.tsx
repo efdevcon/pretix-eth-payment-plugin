@@ -22,13 +22,6 @@ if (typeof window !== 'undefined') {
 
 const el = document.getElementById('wc-payment-root')
 if (el) {
-  // The Django template ships a static loading placeholder inside this div so
-  // the user sees branded "Pay with ETH / Loading wallet…" copy immediately
-  // (before the 5.5 MB bundle finishes downloading on slow connections). Clear
-  // it explicitly before mounting React — createRoot does this on its own but
-  // emits a dev-mode warning when the container has non-React children, and
-  // doing it manually avoids any future React-version edge cases.
-  el.innerHTML = ''
   createRoot(el).render(
     <WagmiProvider config={wagmiAdapter.wagmiConfig}>
       <QueryClientProvider client={queryClient}>
@@ -36,6 +29,14 @@ if (el) {
       </QueryClientProvider>
     </WagmiProvider>
   )
+  // The Django template ships a sibling `#wc-boot-loading` div so the user
+  // sees branded "Pay with ETH / Loading wallet…" copy immediately, before the
+  // bundle finishes downloading on slow connections. Remove it from the DOM
+  // once React has mounted so it cannot reappear during stage transitions —
+  // a previous version kept the placeholder INSIDE the React root and relied
+  // on createRoot wiping it, which left an ambiguous "could the boot
+  // placeholder come back?" question during disconnect flickers.
+  document.getElementById('wc-boot-loading')?.remove()
 } else {
   console.error('wc-payment-root element missing')
 }
