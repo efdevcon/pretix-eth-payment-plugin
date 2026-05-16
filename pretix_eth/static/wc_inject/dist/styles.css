@@ -50,6 +50,11 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
    ──────────────────────────────────────────────────────────────────── */
 .wc-status-card {
   margin-top: 4px;
+  /* Bottom margin so the picker below (visible in `error` state for
+     the retry flow) has clear separation from the card — and so
+     in-flight states (no picker following) get breathing room before
+     `.wc-root`'s padding edge instead of sitting flush. */
+  margin-bottom: 16px;
   /* Tighter padding (was 22px 18px) — the previous bottom whitespace
      felt cavernous when the card had no info section (e.g. error
      before quote arrived). 16px top/bottom keeps the card composed
@@ -436,6 +441,16 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   color: var(--pretix-brand-primary, #0066cc);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+/* When the helper appears inline below the Pay button (insufficient
+   ETH balance case), give it a bit of breathing room from the button
+   and center it. The plain `.wc-find-wallet` selector relies on its
+   flex parent (`.wc-connect-helpers`) for centering on ConnectStep —
+   here there's no flex parent so we need an explicit display + margin. */
+.wc-insufficient-helper {
+  display: block;
+  margin: 12px auto 0;
+  width: fit-content;
 }
 
 .wc-error {

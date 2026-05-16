@@ -1911,6 +1911,22 @@ export function CheckoutStep({
         </button>
       ))}
 
+      {/* Helper link when ETH balance is insufficient on the picked option.
+          Same subtle styling as the ConnectStep "where to get a wallet" link
+          so the visual vocabulary stays consistent. Only shown for ETH
+          since the destination URL is ETH-specific — for stables the buyer
+          typically already knows where to top up. */}
+      {showPicker && pickedInsufficient && picked?.symbol === 'ETH' && (
+        <a
+          className="wc-find-wallet wc-insufficient-helper"
+          href="https://ethereum.org/get-eth/"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          Where to get ETH? →
+        </a>
+      )}
+
       {/* Status banner for the recovery flow. Sits between the Pay button
           and the error area so the buyer sees it the moment discovery
           starts polling, and again when the manual entry surfaces. */}
