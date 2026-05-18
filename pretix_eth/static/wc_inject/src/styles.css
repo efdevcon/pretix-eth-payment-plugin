@@ -1023,4 +1023,17 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   .wc-status-card-description {
     max-width: 100%;
   }
+
+  /* Reclaim Pretix's panel-body horizontal padding on mobile. We keep
+     .wc-root's own 16 px (so the internal design stays intact), but
+     zero out the panel-body's 15 px so the effective horizontal margin
+     drops from 31 px → 16 px per side. Vertical padding stays so the
+     content isn't flush against the panel header/footer. Scoped via
+     :has(#wc-payment-root) so only the panel hosting our React root is
+     affected — every other Pretix .panel-body on the page is
+     untouched. */
+  .panel-body:has(#wc-payment-root) {
+    padding-left: 0;
+    padding-right: 0;
+  }
 }

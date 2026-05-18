@@ -12,6 +12,18 @@
   .panel-body:has(#wc-payment-root) {
     min-height: 280px;
   }
+  /* On mobile, drop the panel-body horizontal padding so the React app
+     gets the full viewport width minus its own .wc-root padding. Saves
+     ~30 px of width per row — meaningful on narrow phones where the
+     status card info rows were getting squeezed. Mirrors the rule in
+     styles.css; lives here too so it applies on first paint instead of
+     waiting for the external stylesheet to load. */
+  @media (max-width: 480px) {
+    .panel-body:has(#wc-payment-root) {
+      padding-left: 0;
+      padding-right: 0;
+    }
+  }
   /* Mirrors .wc-root (styles.css): same max-width, padding, font, centered
      in the parent column. Paints from inline CSS so it works before
      styles.css loads. min-height matches .wc-root so the boot → React swap

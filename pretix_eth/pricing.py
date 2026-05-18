@@ -158,9 +158,35 @@ async def fetch_eth_price_usd() -> Optional[EthPriceResult]:
 from pretix_eth.chains import get_token_contract
 
 
+# ETH amounts get rounded to the nearest multiple of 10^10 wei (= 8
+# fractional digits when divided by 10^18). The native 18-digit precision
+# produces buyer-facing strings like `0.165017964616885856 ETH` — accurate
+# but unreadable, and the trailing digits represent fractions of a
+# millionth of a cent at any realistic ETH price. 10^10 wei resolution
+# means the *quoted, signed, and verified* amount itself is the clean
+# value; there's no display-vs-reality drift to reason about for
+# security — the BigInt sent on-chain equals what the buyer sees.
+#
+# Rounding error bound at typical ETH prices: 5 × 10^9 wei ≈ $0.00002 at
+# $4500/ETH — three orders of magnitude below cent precision. Either
+# direction (we round to nearest, not floor) is acceptable for the buyer
+# *and* merchant since the drift is well below the receivable precision
+# of any downstream accounting.
+ETH_AMOUNT_PRECISION_FLOOR_WEI = 10 ** 10
+
+
 def usd_to_token_raw(usd_amount: Decimal, symbol: str, chain_id: int,
                      eth_price: Optional[float]) -> int:
-    """Convert a USD amount (Decimal, e.g. 50.00) to raw token base units."""
+    """Convert a USD amount (Decimal, e.g. 50.00) to raw token base units.
+
+    Stablecoins (USDC, USDT0) are returned at full 6-decimal precision —
+    their `usd_amount * 10**6` is already an integer cent count, no
+    cleaning needed.
+
+    ETH is rounded to `ETH_AMOUNT_PRECISION_FLOOR_WEI` granularity so the
+    on-chain amount itself (not just its display) is a clean 8-decimal
+    value. See the constant's comment for the rationale.
+    """
     if symbol in ('USDC', 'USDT0'):
         contract = get_token_contract(chain_id, symbol)
         if contract is None:
@@ -170,7 +196,12 @@ def usd_to_token_raw(usd_amount: Decimal, symbol: str, chain_id: int,
         if eth_price is None:
             raise ValueError('ETH conversion requires eth_price')
         eth_float = float(usd_amount) / eth_price
-        return int(eth_float * 10**18)
+        raw = int(eth_float * 10**18)
+        # Round-to-nearest at the precision floor. Banker's rounding isn't
+        # needed because we're not in a streaming-statistical context;
+        # standard +half//floor is fine and stays in pure integer math.
+        floor = ETH_AMOUNT_PRECISION_FLOOR_WEI
+        return ((raw + floor // 2) // floor) * floor
     raise ValueError(f'unsupported symbol: {symbol}')
 
 
