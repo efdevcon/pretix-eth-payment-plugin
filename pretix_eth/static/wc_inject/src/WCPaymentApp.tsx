@@ -33,23 +33,32 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
 
   // Show a brief loading frame when the user disconnects, so the
   // transition is "connected UI → loader → ConnectStep" rather than a
-  // hard cut that previously read as a flicker. Tracked via a ref so
-  // we only fire the loader on the true→false edge (initial mount,
-  // when isConnected starts false, does NOT trigger the loader).
-  const prevConnectedRef = useRef(account.isConnected)
+  // hard cut. Detection keys off wagmi's `status` (rather than the
+  // boolean `isConnected`) so we can distinguish a real user disconnect
+  // (`connected` → `disconnected`) from wagmi's own reconnect handshake
+  // on page load (`reconnecting` → `connected` or `reconnecting` →
+  // `disconnected`). The `hasMountedRef` guard skips the very first
+  // effect run so neither initial-load transition can trigger the
+  // loader either.
+  const hasMountedRef = useRef(false)
+  const prevStatusRef = useRef<typeof account.status>(account.status)
   const [disconnecting, setDisconnecting] = useState(false)
 
-  // Detection effect — sets the disconnecting flag on the true → false
-  // edge. Detection and timeout are split into separate effects so the
-  // timeout's cleanup can't clear the timer while leaving the flag set
-  // (which was the "stuck on Disconnecting…" bug from the first version).
+  // Detection effect — sets the disconnecting flag only on the
+  // `connected` → `disconnected` edge, and only after the component
+  // has settled (one full render cycle past mount).
   useEffect(() => {
-    const wasConnected = prevConnectedRef.current
-    prevConnectedRef.current = account.isConnected
-    if (wasConnected && !account.isConnected) {
+    if (!hasMountedRef.current) {
+      hasMountedRef.current = true
+      prevStatusRef.current = account.status
+      return
+    }
+    const wasConnected = prevStatusRef.current === 'connected'
+    prevStatusRef.current = account.status
+    if (wasConnected && account.status === 'disconnected') {
       setDisconnecting(true)
     }
-  }, [account.isConnected])
+  }, [account.status])
 
   // Clearing effect — guarantees the loader resolves:
   //   (a) after DISCONNECT_LOADER_MS via setTimeout, OR
