@@ -580,10 +580,36 @@ class WalletConnectPayment(BasePaymentProvider):
 
         lines: list = []
         if amount_display:
-            lines.append(
+            line = (
                 f'Amount: {amount_display} {token_symbol}' if token_symbol
                 else f'Amount: {amount_display}'
             )
+            # For ETH, append the order-currency equivalent so the buyer
+            # sees the dollar value alongside the wei-precise figure.
+            # `payment.amount` is the Pretix OrderPayment amount, recorded
+            # in the event's currency at order-create time — exactly what
+            # the buyer was charged. Stables (USDC, USDT0) are 1:1 USD so
+            # the token amount already conveys the dollar value; no extra
+            # line needed for them.
+            #
+            # Format mirrors the buyer-facing order recap on the storefront
+            # (`0.00000473 ETH ($0.01)`) — symbol prefix for the common
+            # currencies, ISO-code suffix as fallback for anything else.
+            if token_symbol == 'ETH':
+                try:
+                    currency = order.event.currency or 'USD'
+                    symbol_map = {
+                        'USD': '$', 'EUR': '€', 'GBP': '£',
+                        'INR': '₹', 'JPY': '¥', 'CAD': 'C$', 'AUD': 'A$',
+                    }
+                    symbol = symbol_map.get(currency)
+                    if symbol:
+                        line += f' ({symbol}{payment.amount:.2f})'
+                    else:
+                        line += f' ({payment.amount:.2f} {currency})'
+                except Exception:
+                    pass
+            lines.append(line)
         if chain_name:
             lines.append(f'Network: {chain_name}')
         if payer:

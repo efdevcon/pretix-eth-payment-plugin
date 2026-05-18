@@ -1593,6 +1593,20 @@ export function CheckoutStep({
       case 'signing-tx':
         return 'This is the onchain payment'
       case 'verifying':
+        // Ethereum L1's ~12 s block time means a single confirmation is
+        // ~12 s; the default 3-conf setup is ~36 s — long enough buyers
+        // wonder if it's stuck. Surface the per-block expectation only
+        // when more than one block is actually required (mainnet's
+        // default). If the operator has configured 1 confirmation, drop
+        // "per block" since the phrase is meaningless for a single-block
+        // wait. L2s (Arbitrum, Optimism, Base, Polygon) confirm in
+        // seconds and skip the hint entirely.
+        if (quote?.chain_id === 1) {
+          const multiBlock = !confirmProgress || confirmProgress.required > 1
+          return multiBlock
+            ? 'Waiting for the network to confirm (~12 s per block)'
+            : 'Waiting for the network to confirm (~12 s)'
+        }
         return 'Waiting for the network to confirm'
       default:
         return null
