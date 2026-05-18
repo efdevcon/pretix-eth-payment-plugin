@@ -214,6 +214,11 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   font-weight: 600;
   text-align: right;
   word-break: break-all;
+  /* Without `min-width: 0` flex items refuse to shrink below their
+     content size, so on narrow viewports a long "0.000004 ETH on
+     Arbitrum" pushes its row wider than the card and triggers
+     horizontal overflow. The 0 lets the value wrap or shrink. */
+  min-width: 0;
 }
 .wc-status-card-value a {
   color: var(--pretix-brand-primary, #0066cc);
@@ -590,6 +595,7 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 8px;
   padding: 8px 0;
   margin-bottom: 12px;
   border-bottom: 1px solid #eee;
@@ -598,6 +604,22 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* `min-width: 0` + `flex: 1 1 auto` are the canonical recipe for
+     letting a flex child with long text actually shrink instead of
+     overflowing its parent — without these, a long wallet name (e.g.
+     "WalletConnect (mobile)" type pill on top of the name) pushes the
+     Disconnect button off-screen on ~360 px phones. */
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.wc-wallet-header-meta {
+  min-width: 0;
+}
+.wc-wallet-header-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 .wc-wallet-header-icon {
   width: 22px;
@@ -959,4 +981,46 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   border-radius: 50%;
   object-fit: contain;
   flex-shrink: 0;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+   Narrow mobile (≤480 px) — tighten padding, scale headings, and let
+   the status card breathe on phones. Rules elsewhere already handle
+   per-component mobile concerns (asset chips, network rows); this
+   block covers the layout-wide tweaks that benefit from being
+   grouped together.
+   ──────────────────────────────────────────────────────────────────── */
+@media (max-width: 480px) {
+  /* `.wc-root`'s 16 px padding is fine, but the status card adds
+     another 18 px inside that — combined 34 px per side eats too
+     much of a ~360 px viewport's content area. Trim card horizontal
+     padding so amount/tx rows have more room to breathe. */
+  .wc-status-card {
+    padding: 16px 14px 16px;
+    gap: 8px;
+  }
+
+  /* Slightly tighten the info-row gap on mobile so long values don't
+     get squashed against the label. */
+  .wc-status-card-info {
+    padding-top: 12px;
+  }
+  .wc-status-card-row {
+    gap: 10px;
+    font-size: 12px;
+  }
+
+  /* ConnectStep heading: 22 px is "desktop hero" sized — on mobile,
+     20 px reads as the right anchor weight without dominating the
+     small viewport. */
+  .wc-connect-heading {
+    font-size: 20px;
+  }
+
+  /* The description's `max-width: 36ch` is fine on desktop but adds
+     phantom space on narrow viewports where 36ch > viewport. Cap to
+     100% so it flows naturally. */
+  .wc-status-card-description {
+    max-width: 100%;
+  }
 }
