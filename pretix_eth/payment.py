@@ -212,7 +212,8 @@ class WalletConnectPayment(BasePaymentProvider):
             initial=False,
         )
         base['receive_address'] = forms.CharField(
-            label=_('Receive wallet address (EIP-55)'),
+            label=_('wc_inject recipient (EIP-55)'),
+            help_text=_('Wallet that receives wc_inject (in-Pretix WalletConnect) payments. Should match the x402 recipient below.'),
             max_length=42, min_length=42, required=True,
         )
         base['wc_project_id'] = forms.CharField(
@@ -259,7 +260,8 @@ class WalletConnectPayment(BasePaymentProvider):
             decimal_places=2,
         )
         base['payment_recipient'] = forms.CharField(
-            label=_('Merchant wallet address (EIP-55) where crypto payments are sent'),
+            label=_('x402 recipient (EIP-55)'),
+            help_text=_('Wallet that receives x402 protocol payments (storefront, agent endpoint). Should match the wc_inject recipient above.'),
             max_length=42, min_length=42, required=True,
         )
         # Individual boolean per chain (hierarkey stores bools cleanly)
