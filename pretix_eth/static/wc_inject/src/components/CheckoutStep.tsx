@@ -549,12 +549,37 @@ export function CheckoutStep({
   const expectedTxRef = useRef<{ payer: string; chainId: number; expectedNonce: number | undefined } | null>(null)
 
   // ── DEBUG: tx-hash recovery simulation ──
-  // TEMPORARY — REMOVE AFTER TESTING. Lets us force the recovery wrapper
-  // into one of three modes without touching the code each time:
+  // Console-gated developer affordance. The panel is hidden by default —
+  // type `wcDebug()` in the browser console to flip `debugEnabled` and
+  // expose three radio modes that force the recovery wrapper down a
+  // specific path without rebuilding:
   //   normal: wallet returns hash → WALLET path wins
   //   no-hash: wallet hash is discarded → DISCOVERY path should win
   //   no-hash-no-discovery: discovery also stubbed → MANUAL path is the only way
   const [simulateMode, setSimulateMode] = useState<'normal' | 'no-hash' | 'no-hash-no-discovery'>('normal')
+  const [debugEnabled, setDebugEnabled] = useState(false)
+
+  // Expose the toggle on the window so devs can flip the panel from
+  // DevTools without a page reload. Two aliases (`wcDebug` and `wcdebug`)
+  // for ergonomics — different muscle memory between developers.
+  // We use a namespaced name (NOT `window.debug`) because Chrome's
+  // DevTools console already binds `debug(fn)` as a function-breakpoint
+  // utility — typing `debug` alone there resolves to Chrome's version,
+  // not anything we set on window.
+  useEffect(() => {
+    type WinWithDebug = Window & { wcDebug?: () => string; wcdebug?: () => string }
+    const w = window as unknown as WinWithDebug
+    const toggle = () => {
+      setDebugEnabled((prev) => !prev)
+      return '[wc_inject] debug panel toggled'
+    }
+    w.wcDebug = toggle
+    w.wcdebug = toggle
+    return () => {
+      delete w.wcDebug
+      delete w.wcdebug
+    }
+  }, [])
 
   const { address, chainId: walletChainId, connector } = useAccount()
   const { walletInfo } = useWalletInfo()
@@ -1668,33 +1693,34 @@ export function CheckoutStep({
         </h3>
       )}
 
-      {/* DEBUG — uncomment to re-test the tx-hash recovery paths without
-          rebuilding new code. Forces the recovery wrapper into a specific
-          path. The supporting state (simulateMode), wrapper branches, and
-          .wc-debug-* CSS are left in place so this is a one-block re-enable.
-      <div className="wc-debug-panel">
-        <div className="wc-debug-label">DEBUG · simulate tx-hash recovery</div>
-        <div className="wc-debug-options">
-          {([
-            ['normal', 'Normal (wallet returns hash)'],
-            ['no-hash', 'No hash → discovery should win'],
-            ['no-hash-no-discovery', 'No hash + no discovery → manual entry'],
-          ] as Array<['normal' | 'no-hash' | 'no-hash-no-discovery', string]>).map(([value, label]) => (
-            <label key={value} className="wc-debug-option">
-              <input
-                type="radio"
-                name="wc-debug-simulate"
-                value={value}
-                checked={simulateMode === value}
-                onChange={() => setSimulateMode(value)}
-                disabled={busy}
-              />
-              <span>{label}</span>
-            </label>
-          ))}
+      {/* DEBUG panel — only rendered when a dev has flipped the toggle
+          by typing `wcDebug()` in the browser console. Lets QA force
+          the tx-hash recovery wrapper down a specific path without
+          rebuilding. Type `wcDebug()` again to hide. */}
+      {debugEnabled && (
+        <div className="wc-debug-panel">
+          <div className="wc-debug-label">DEBUG · simulate tx-hash recovery</div>
+          <div className="wc-debug-options">
+            {([
+              ['normal', 'Normal (wallet returns hash)'],
+              ['no-hash', 'No hash → discovery should win'],
+              ['no-hash-no-discovery', 'No hash + no discovery → manual entry'],
+            ] as Array<['normal' | 'no-hash' | 'no-hash-no-discovery', string]>).map(([value, label]) => (
+              <label key={value} className="wc-debug-option">
+                <input
+                  type="radio"
+                  name="wc-debug-simulate"
+                  value={value}
+                  checked={simulateMode === value}
+                  onChange={() => setSimulateMode(value)}
+                  disabled={busy}
+                />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
-      */}
+      )}
 
       {showPicker && !ethAvailable && ethDisabledReason && (
         <div className="wc-notice">

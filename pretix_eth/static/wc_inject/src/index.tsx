@@ -17,7 +17,10 @@ const queryClient = new QueryClient()
 if (typeof window !== 'undefined') {
   ;(window as unknown as { WC_INJECT_VERSION?: string }).WC_INJECT_VERSION = config.pluginVersion
   // eslint-disable-next-line no-console
-  console.info(`[wc_inject] boot { pluginVersion: "${config.pluginVersion ?? 'unknown'}" }`)
+  console.info(
+    `[wc_inject] boot { pluginVersion: "${config.pluginVersion ?? 'unknown'}" } — ` +
+    'type `wcDebug()` to show the tx-hash recovery debug panel'
+  )
 }
 
 const el = document.getElementById('wc-payment-root')
