@@ -1,13 +1,5 @@
 {% load i18n %}
 
-<script>
-  try {
-    if (sessionStorage.getItem('wc-inject-booted')) {
-      document.documentElement.classList.add('wc-inject-booted');
-    }
-  } catch (_) { /* sessionStorage unavailable — fall back to normal flow */ }
-</script>
-
 <style>
   /* Anchor the entire Pretix panel-body that hosts our content. Doing it
      here (instead of relying on `.wc-root`'s own min-height) means the
@@ -73,13 +65,6 @@
   @keyframes wc-boot-fade-in {
     from { opacity: 0; }
     to   { opacity: 1; }
-  }
-  /* Suppress the placeholder when the bundle has already booted this
-     session — handles the case where Pretix re-renders the checkout step
-     (disconnect, cart change, etc.) and the boot loader element gets
-     re-injected. */
-  html.wc-inject-booted #wc-boot-loading {
-    display: none !important;
   }
 </style>
 

@@ -95,6 +95,14 @@ export function WCPaymentApp({ config }: { config: WCConfig }) {
     return () => { document.body.classList.remove('wc-full-checkout') }
   }, [])
 
+  // Remove the static boot loader once React has actually painted. Doing
+  // this here (in a mount effect) rather than synchronously in index.tsx
+  // guarantees there's no empty-frame gap on slow connections — the
+  // boot loader stays visible until React has something to swap in.
+  useEffect(() => {
+    document.getElementById('wc-boot-loading')?.remove()
+  }, [])
+
   if (stage === 'disconnecting') return <LoadingState message="Disconnecting your wallet…" />
   if (stage === 'connect') return <ConnectStep config={config} />
 

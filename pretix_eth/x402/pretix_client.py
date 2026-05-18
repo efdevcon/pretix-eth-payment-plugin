@@ -559,7 +559,7 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
         'Amount: {amount} {currency}\n\n'
         'Network: {chain_name}\n\n'
         'Refund transaction: {tx_url}\n\n'
-        'The funds were returned on-chain to the wallet that originally paid. '
+        'The funds were returned to the wallet that originally paid. '
         'If you don\'t see the transfer or have any questions, please reply '
         'to this email.'
     )
