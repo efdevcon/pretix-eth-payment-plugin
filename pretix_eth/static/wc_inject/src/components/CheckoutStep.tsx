@@ -2047,6 +2047,10 @@ export function CheckoutStep({
           `Amount sent: ${fill(amountValue)}`,
           `Recipient: ${fill(recipientValue)}`,
           `Transaction hash: (paste the 0x\u2026 hash from your wallet here)`,
+          // Include the last in-page error string when present so the
+          // operator has the exact failure context the buyer saw \u2014 no
+          // need to ask "what error did you get?" in a follow-up.
+          ...(error ? ['', `Error shown to me: ${error}`] : []),
           "",
           "Thanks!",
         ]
