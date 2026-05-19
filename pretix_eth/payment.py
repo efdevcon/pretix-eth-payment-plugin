@@ -616,8 +616,11 @@ class WalletConnectPayment(BasePaymentProvider):
             lines.append(f'Network: {chain_name}')
         if payer:
             lines.append(f'Payer: {payer}')
+        # Render the transaction as a markdown "View transaction" link so the
+        # email shows a clickable label instead of a long raw URL. Falls back
+        # to the bare tx hash when no explorer is configured for the chain.
         if tx_url:
-            lines.append(f'Transaction: {tx_url}')
+            lines.append(f'Transaction: [View transaction]({tx_url})')
         elif tx_hash:
             lines.append(f'Transaction: {tx_hash}')
         return '\n\n'.join(lines)

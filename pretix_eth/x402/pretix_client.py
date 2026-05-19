@@ -540,6 +540,31 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
         f'{explorer_tx_base}{refund_tx_hash}' if explorer_tx_base
         else refund_tx_hash
     )
+
+    # Order detail URL. Prefer the plugin's `frontend_order_url_template`
+    # (the same setting that powers the {url} mail placeholder in signals.py)
+    # so refund emails link into the storefront's order page. Fall back to
+    # Pretix's presale URL if the operator hasn't configured one.
+    order_url = ''
+    try:
+        from pretix_eth.payment import WalletConnectPayment
+        provider = WalletConnectPayment(order.event)
+        template = (provider.settings.get('frontend_order_url_template') or '').strip()
+        if template:
+            order_url = template.replace('{code}', order.code).replace('{secret}', order.secret)
+    except Exception:
+        pass
+    if not order_url:
+        try:
+            from pretix.multidomain.urlreverse import build_absolute_uri
+            order_url = build_absolute_uri(
+                order.event,
+                'presale:event.order',
+                kwargs={'order': order.code, 'secret': order.secret},
+            )
+        except Exception:
+            order_url = ''
+
     # Pretix's `mail()` treats a plain `str` template as a Django
     # template *filename*. To pass inline body text instead, wrap it
     # in `LazyI18nString` — that's the documented hook for the
@@ -555,17 +580,23 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
     body_template = LazyI18nString(
         'Hello,\n\n'
         'A refund of {amount} {currency} has been issued for your order {order}.\n\n'
-        'Refund details:\n\n'
+        'You can view the details of your refund below.\n\n'
+        '---\n\n'
+        '**Refund details**\n\n'
         'Amount: {amount} {currency}\n\n'
         'Network: {chain_name}\n\n'
-        'Refund transaction: {tx_url}\n\n'
+        'Transaction: [View transaction]({tx_url})\n\n'
+        '[View order details]({url})\n\n'
+        '---\n\n'
         'The funds were returned to the wallet that originally paid. '
         'If you don\'t see the transfer or have any questions, please reply '
-        'to this email.'
+        'to this email.\n\n'
+        'Best regards,\n\n'
+        '{event} team 🚀'
     )
     mail(
         email=order.email,
-        subject=LazyI18nString('Refund issued for your order {order}'),
+        subject=LazyI18nString('Refund issued for order {order}'),
         template=body_template,
         context={
             'order': order.code,
@@ -573,6 +604,8 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
             'currency': order.event.currency,
             'chain_name': chain_name,
             'tx_url': tx_url,
+            'url': order_url,
+            'event': str(order.event.name),
         },
         event=order.event,
         order=order,
