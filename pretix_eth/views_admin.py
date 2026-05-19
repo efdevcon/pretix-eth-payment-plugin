@@ -170,7 +170,7 @@ def _serialize_pending(o: X402PendingOrder, pretix_testmode: Optional[bool] = No
 @csrf_exempt
 @require_http_methods(['GET'])
 @require_pretix_admin_token('can_view_orders')
-def admin_orders(request: HttpRequest):
+def admin_orders(request: HttpRequest, **kwargs):
     org = request.GET.get('organizer', '')
     event_slug = request.GET.get('event', '')
     event = _get_event(org, event_slug)
@@ -395,7 +395,7 @@ def admin_orders(request: HttpRequest):
 @csrf_exempt
 @require_http_methods(['GET'])
 @require_pretix_admin_token('can_view_orders')
-def admin_stats(request: HttpRequest):
+def admin_stats(request: HttpRequest, **kwargs):
     org = request.GET.get('organizer', '')
     event_slug = request.GET.get('event', '')
     event = _get_event(org, event_slug)
@@ -424,7 +424,7 @@ def admin_stats(request: HttpRequest):
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_admin_token('can_change_orders')
-def admin_refund(request: HttpRequest):
+def admin_refund(request: HttpRequest, **kwargs):
     action = request.GET.get('action', '')
     body = _read_body(request)
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
@@ -496,7 +496,7 @@ def admin_refund(request: HttpRequest):
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_admin_token('can_change_orders')
-def admin_wc_refund(request: HttpRequest):
+def admin_wc_refund(request: HttpRequest, **kwargs):
     """Refund a legacy WalletConnect (pre-x402) order. Unlike the x402
     refund which keeps its own plugin-side CAS ledger on the
     `X402CompletedOrder` row, the WC path has no refund columns on
@@ -588,7 +588,7 @@ _TX_HASH_RE = re.compile(r'^0x[a-fA-F0-9]{64}$')
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_admin_token('can_change_orders')
-def admin_verify(request: HttpRequest):
+def admin_verify(request: HttpRequest, **kwargs):
     body = _read_body(request)
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:

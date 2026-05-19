@@ -239,7 +239,7 @@ def _typed_data_to_json(td: dict) -> dict:
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_token
-def payment_options(request: HttpRequest):
+def payment_options(request: HttpRequest, **kwargs):
     """Return rich PaymentOption[] matching the devcon frontend contract:
     - asset (CAIP), symbol, name, chain, chainId (CAIP string)
     - amount (raw token units), balance, sufficient
@@ -532,7 +532,7 @@ def get_ticket_purchase_info(event):
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_token
-def purchase(request):
+def purchase(request, **kwargs):
     """Create a pending x402 order. Returns HTTP 402 with payment details."""
     body = _read_body(request)
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
@@ -959,7 +959,7 @@ def purchase(request):
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_token
-def prepare_authorization(request):
+def prepare_authorization(request, **kwargs):
     body = _read_body(request)
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
@@ -1029,7 +1029,7 @@ def prepare_authorization(request):
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_token
-def execute_transfer(request):
+def execute_transfer(request, **kwargs):
     body = _read_body(request)
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
@@ -1413,7 +1413,7 @@ def _x402_verify_and_finalize(
 @csrf_exempt
 @require_http_methods(['POST'])
 @require_pretix_token
-def verify(request):
+def verify(request, **kwargs):
     body = _read_body(request)
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
