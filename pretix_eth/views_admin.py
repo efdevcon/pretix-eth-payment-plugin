@@ -98,6 +98,7 @@ def _serialize_wc_attempt(
     pretix_testmode: Optional[bool] = None,
     overpaid_usd: Optional[str] = None,
     refunded_amount: Optional[str] = None,
+    refund_tx_hash: Optional[str] = None,
 ) -> dict:
     """Legacy (pre-x402) WalletConnect direct-send flow. Completed row means
     the tx hash was verified on-chain and the Pretix order confirmed.
@@ -134,6 +135,7 @@ def _serialize_wc_attempt(
         'pretixTotal': str(total) if total is not None else None,
         'overpaidUsd': overpaid_usd,
         'refundedAmount': refunded_amount,
+        'refundTxHash': refund_tx_hash,
     }
 
 
@@ -281,6 +283,12 @@ def admin_orders(request: HttpRequest):
             # refund-owed computation. Same shape as the x402 fetch above.
             wc_overpaid_by_code: dict = {}
             wc_refunded_by_code: dict = {}
+            # Mirror of refund_tx_hash for wc_attempt rows so the admin UI
+            # can render the explorer link on the Refunded badge. The tx
+            # hash is stored on `OrderRefund.info` JSON by
+            # `record_pretix_refund`; we extract the most recent DONE
+            # refund's hash here (typical case: one refund per order).
+            wc_refund_tx_by_code: dict = {}
             orders_by_code = {}
             if wc_codes:
                 for porder in (
@@ -300,6 +308,20 @@ def admin_orders(request: HttpRequest):
                         for r in porder.refunds.all():
                             if getattr(r, 'state', None) == OrderRefund.REFUND_STATE_DONE:
                                 refunded_out += Decimal(r.amount or 0)
+                                # Extract the on-chain refund tx hash from the
+                                # OrderRefund.info JSON (set by
+                                # record_pretix_refund). Last-wins captures
+                                # the most recently DONE refund's hash, which
+                                # is the right one to surface in the UI when
+                                # multiple refunds exist on the same order.
+                                try:
+                                    info_raw = r.info or ''
+                                    info_obj = json.loads(info_raw) if isinstance(info_raw, str) and info_raw else (r.info_data or {})
+                                    tx = info_obj.get('refund_tx_hash')
+                                    if tx:
+                                        wc_refund_tx_by_code[porder.code] = tx
+                                except (ValueError, TypeError):
+                                    pass
                     except Exception as e:
                         log.warning('[wc admin] payment/refund agg failed for %s: %s', porder.code, e)
                     net_paid = paid_in - refunded_out
@@ -339,6 +361,7 @@ def admin_orders(request: HttpRequest):
                     pretix_testmode=bool(orders_by_code[w.order_code].testmode) if w.order_code in orders_by_code else None,
                     overpaid_usd=wc_overpaid_by_code.get(w.order_code),
                     refunded_amount=wc_refunded_by_code.get(w.order_code),
+                    refund_tx_hash=wc_refund_tx_by_code.get(w.order_code),
                 )
                 for w in wc_attempts if w.order_code in orders_by_code
             ]
