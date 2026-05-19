@@ -110,7 +110,7 @@ def _x402_enabled_or_404(event):
 
 @csrf_exempt
 @require_http_methods(['GET'])
-def settings(request: HttpRequest):
+def settings(request: HttpRequest, **kwargs):
     """Public read-only flags so the storefront can respect per-event toggles
     before it hits a gated endpoint. The storefront polls this to know whether
     `/api/x402/tickets/fiat-purchase` can be called for the event (M18–M22
