@@ -20,12 +20,11 @@ export function SuccessStep({ quote: _quote, txHash }: { quote: Quote; txHash: s
       target = fe
         .replace(/\{code\}/g, encodeURIComponent(config.orderCode))
         .replace(/\{secret\}/g, encodeURIComponent(config.orderSecret))
-    } else {
-      const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)/)
-      if (match) {
-        const [, organizer, event] = match
-        target = `/${organizer}/${event}/order/${config.orderCode}/${config.orderSecret}/`
-      }
+    } else if (config.pretixOrderUrl) {
+      // Pretix-native order URL, computed server-side via build_absolute_uri
+      // — already respects the event's custom-domain config, so this works
+      // for both /{org}/{event}/... and root-mounted custom domains.
+      target = config.pretixOrderUrl
     }
     if (target) {
       const dest = target  // capture for the closure

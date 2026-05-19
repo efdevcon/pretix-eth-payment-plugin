@@ -17,12 +17,6 @@ export interface WalletBalancesResponse {
   balances: BalanceEntry[]
 }
 
-function parseOrgAndEvent(): { organizer: string; event: string } {
-  const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)/)
-  if (!match) throw new Error('Could not parse organizer/event from URL')
-  return { organizer: match[1], event: match[2] }
-}
-
 /** Fetches per-(chain, token) balances for the connected wallet from the
  *  plugin's `/plugin/wc/wallet-balances/` endpoint. The plugin tries Zapper
  *  first and falls back to RPC if Zapper fails — same engine x402 uses.
@@ -32,10 +26,9 @@ export function useWalletBalances(config: WCConfig, wallet: string | undefined) 
     queryKey: ['wc-wallet-balances', config.orderCode, wallet],
     enabled: !!wallet,
     queryFn: async () => {
-      const { organizer, event } = parseOrgAndEvent()
       const url = new URL(`${config.urlPrefix}/wallet-balances/`, window.location.origin)
-      url.searchParams.set('organizer', organizer)
-      url.searchParams.set('event', event)
+      url.searchParams.set('organizer', config.organizer)
+      url.searchParams.set('event', config.event)
       url.searchParams.set('wallet', wallet!)
       // Buyer auth — see usePaymentOptions for details. WCConfig has both.
       url.searchParams.set('order_code', config.orderCode)

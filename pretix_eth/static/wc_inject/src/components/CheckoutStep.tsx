@@ -145,12 +145,6 @@ type Status =
   | 'success'
   | 'error'
 
-function parseOrgAndEvent(): { organizer: string; event: string } {
-  const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)/)
-  if (!match) throw new Error('Could not parse organizer/event from URL')
-  return { organizer: match[1], event: match[2] }
-}
-
 /** Format a raw onchain integer (wei for ETH, base units for stables) at
  *  full precision via BigInt division. The previous `Number(BigInt(...)) / 1e18`
  *  + `.toFixed(6)` path lost both arithmetic precision (Number caps at ~15 sig
@@ -692,7 +686,7 @@ export function CheckoutStep({
   // a chain-scoped hook captured at render time would query the wrong RPC.
   const wagmiConfig = useConfig()
 
-  const { organizer, event } = parseOrgAndEvent()
+  const { organizer, event } = { organizer: config.organizer, event: config.event }
 
   // ── Challenge prefetch ──
   // Fire-and-forget on connect so `handlePay`'s first await can be
@@ -1495,12 +1489,8 @@ export function CheckoutStep({
       target = fe
         .replace(/\{code\}/g, encodeURIComponent(config.orderCode))
         .replace(/\{secret\}/g, encodeURIComponent(config.orderSecret))
-    } else {
-      const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)/)
-      if (match) {
-        const [, organizer, event] = match
-        target = `/${organizer}/${event}/order/${config.orderCode}/${config.orderSecret}/`
-      }
+    } else if (config.pretixOrderUrl) {
+      target = config.pretixOrderUrl
     }
     const t = setTimeout(() => {
       if (target) window.location.href = target

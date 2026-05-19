@@ -340,9 +340,29 @@ class WalletConnectPayment(BasePaymentProvider):
             # Payment retry/continue — order exists, show full crypto checkout UI
             from pretix_eth import __version__ as _plugin_version
             tpl = get_template('pretix_eth/checkout_payment_confirm.html')
+
+            # Custom-domain support: the wc_inject bundle used to derive the
+            # organizer/event slugs by parsing `window.location.pathname` for
+            # `/{org}/{event}/...`, which breaks when the event is served from
+            # a custom domain (e.g. tickets.devcon.org/, no slug in path).
+            # Inject them directly from the server — and also the Pretix-native
+            # order URL, computed via `build_absolute_uri` so it respects the
+            # event's custom-domain configuration when set.
+            try:
+                from pretix.multidomain.urlreverse import build_absolute_uri
+                pretix_order_url = build_absolute_uri(
+                    order.event, 'presale:event.order',
+                    kwargs={'order': order.code, 'secret': order.secret},
+                )
+            except Exception:
+                pretix_order_url = ''
+
             ctx = {
                 'wc_project_id': self.settings.get('wc_project_id'),
                 'url_prefix': '/plugin/wc',
+                'organizer_slug': order.event.organizer.slug,
+                'event_slug': order.event.slug,
+                'pretix_order_url': pretix_order_url,
                 'order_code': order.code,
                 'order_secret': order.secret,
                 # Used by the wc_inject UI to gate insufficient-balance rows

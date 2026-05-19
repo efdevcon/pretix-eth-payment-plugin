@@ -19,6 +19,17 @@ export interface WCConfig {
    *  no email recorded (rare). */
   buyerEmail?: string
   urlPrefix: string
+  /** Pretix organizer slug. Injected server-side because the bundle can't
+   *  derive it from `window.location.pathname` when the event runs on a
+   *  custom domain (e.g. tickets.devcon.org/, no /{org}/{event}/ prefix). */
+  organizer: string
+  /** Pretix event slug. Same rationale as `organizer`. */
+  event: string
+  /** Pretix-native order detail URL, computed server-side via
+   *  `build_absolute_uri` so it respects custom-domain configuration. Used
+   *  as the post-payment redirect fallback when `frontendOrderUrlTemplate`
+   *  is not configured. */
+  pretixOrderUrl: string
   csrfToken: string
   /** Optional support email set in the plugin admin. Shown in a fallback
    *  contact block if the buyer's payment gets stuck; empty string hides it. */

@@ -20,21 +20,13 @@ export interface PaymentOptionsResponse {
   chain_metadata: Record<string, { name: string; explorer_url: string }>
 }
 
-function parseOrgAndEvent(): { organizer: string; event: string } {
-  // Pretix checkout URLs: /{organizer}/{event}/... or /{organizer}/{event}/checkout/...
-  const match = window.location.pathname.match(/^\/([^/]+)\/([^/]+)/)
-  if (!match) throw new Error('Could not parse organizer/event from URL')
-  return { organizer: match[1], event: match[2] }
-}
-
 export function usePaymentOptions(config: WCConfig) {
   return useQuery<PaymentOptionsResponse>({
     queryKey: ['wc-payment-options', config.orderCode],
     queryFn: async () => {
-      const { organizer, event } = parseOrgAndEvent()
       const url = new URL(`${config.urlPrefix}/payment-options/`, window.location.origin)
-      url.searchParams.set('organizer', organizer)
-      url.searchParams.set('event', event)
+      url.searchParams.set('organizer', config.organizer)
+      url.searchParams.set('event', config.event)
       // Buyer auth: the plugin validates order_code + order_secret against
       // the Order record. Both are injected into WCConfig by Pretix's
       // checkout template, so we always have them on hand.
