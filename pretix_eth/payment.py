@@ -349,17 +349,33 @@ class WalletConnectPayment(BasePaymentProvider):
             # order URL, computed via `build_absolute_uri` so it respects the
             # event's custom-domain configuration when set.
             try:
-                from pretix.multidomain.urlreverse import build_absolute_uri
+                from pretix.multidomain.urlreverse import build_absolute_uri, eventreverse
                 pretix_order_url = build_absolute_uri(
                     order.event, 'presale:event.order',
                     kwargs={'order': order.code, 'secret': order.secret},
                 )
             except Exception:
                 pretix_order_url = ''
+                eventreverse = None  # type: ignore
+
+            # Resolve the plugin's event-scoped URL prefix. `eventreverse`
+            # returns the right path on every domain mode:
+            #   main domain → /devcon/8/plugin/wc/payment-options/
+            #   custom domain → /plugin/wc/payment-options/
+            # Strip the per-endpoint suffix to leave the prefix the wc_inject
+            # bundle concatenates `/{endpoint}/` onto.
+            url_prefix = '/plugin/wc'
+            if eventreverse is not None:
+                try:
+                    sample = eventreverse(order.event, 'plugins:pretix_eth:wc_payment_options')
+                    if sample.endswith('/payment-options/'):
+                        url_prefix = sample[: -len('/payment-options/')]
+                except Exception:
+                    pass
 
             ctx = {
                 'wc_project_id': self.settings.get('wc_project_id'),
-                'url_prefix': '/plugin/wc',
+                'url_prefix': url_prefix,
                 'organizer_slug': order.event.organizer.slug,
                 'event_slug': order.event.slug,
                 'pretix_order_url': pretix_order_url,
@@ -416,10 +432,24 @@ class WalletConnectPayment(BasePaymentProvider):
     def execute_payment(self, request: HttpRequest, payment):
         # Redirect directly to the payment confirm page where our React UI loads.
         # This skips the default Pretix flow (thanks page → pay/change → pay/confirm).
+        # Use `eventreverse` so the URL respects the event's custom-domain
+        # configuration — on `tickets.devcon.org`, the path is `/order/.../pay/.../confirm`
+        # (no /{org}/{event}/ prefix); on the main domain it's the full path.
+        from pretix.multidomain.urlreverse import eventreverse
         order = payment.order
-        org = order.event.organizer.slug
-        evt = order.event.slug
-        return f'/{org}/{evt}/order/{order.code}/{order.secret}/pay/{payment.pk}/confirm'
+        try:
+            return eventreverse(order.event, 'presale:event.order.pay.confirm', kwargs={
+                'order': order.code,
+                'secret': order.secret,
+                'payment': payment.pk,
+            })
+        except Exception:
+            # Fallback to the legacy hardcoded path. Only reachable when reverse
+            # fails (URL conf misconfiguration); the legacy path 404s on custom
+            # domains so this is a best-effort shim, not a real fallback.
+            org = order.event.organizer.slug
+            evt = order.event.slug
+            return f'/{org}/{evt}/order/{order.code}/{order.secret}/pay/{payment.pk}/confirm'
 
     def payment_pending_render(self, request: HttpRequest, payment) -> str:
         tpl = get_template('pretix_eth/pending.html')

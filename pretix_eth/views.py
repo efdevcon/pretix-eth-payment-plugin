@@ -201,7 +201,7 @@ def _get_provider_for_event(request: HttpRequest):
 
 @csrf_exempt
 @require_http_methods(['GET', 'POST'])
-def payment_options(request):
+def payment_options(request, **kwargs):
     # Buyer auth + per-IP rate limit. Both endpoints used to be unauthenticated
     # and unrate-limited (strictly worse than V33). The wc_inject bundle has
     # `orderCode` + `orderSecret` injected into WCConfig by Pretix's checkout
@@ -294,7 +294,7 @@ def _is_address(s: str) -> bool:
 
 @csrf_exempt
 @require_http_methods(['GET'])
-def wallet_balances(request):
+def wallet_balances(request, **kwargs):
     """Return per-(chain, token) balances for `wallet`, scoped to chains/tokens
     enabled in the event's plugin settings. Used by the wc_inject UI to gate
     the network/token picker on actual holdings, same as /plugin/x402's
@@ -361,7 +361,7 @@ CHALLENGE_TTL = 600  # 10 min
 
 @csrf_exempt
 @require_http_methods(['POST'])
-def challenge(request):
+def challenge(request, **kwargs):
     """Issue a signed-message challenge that the user's wallet must sign,
     proving ownership of the address that will pay."""
     from hmac import compare_digest
@@ -434,7 +434,7 @@ def challenge(request):
 
 @csrf_exempt
 @require_http_methods(['POST'])
-def create_quote(request):
+def create_quote(request, **kwargs):
     """Recover the payer from a SIWE-lite signature, validate the challenge,
     build a quote, and persist it to the pending payment's info_data."""
     from hmac import compare_digest
@@ -673,7 +673,7 @@ def _verify_bad(reason: str, status: int = 400, **extra):
 
 @csrf_exempt
 @require_http_methods(['POST'])
-def verify(request):
+def verify(request, **kwargs):
     """Full verification chain:
     1. Input validation
     2. One-time tx_hash check
