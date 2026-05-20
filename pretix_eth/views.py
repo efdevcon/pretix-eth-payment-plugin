@@ -131,12 +131,12 @@ def _check_buyer_order_access(request, event):
 
 
 def _wc_buyer_rate_limit(client_ip: str, kind: str) -> bool:
-    """Per-IP rate limit (30/min) for buyer-facing WC endpoints. `kind` keys
+    """Per-IP rate limit (300/min) for buyer-facing WC endpoints. `kind` keys
     a separate bucket per endpoint so a chatty payment-options call doesn't
     starve wallet-balances (and vice versa). Returns False when exhausted."""
     key = f'wc_buyer_rl:{kind}:{client_ip}'
     count = cache.get(key, 0)
-    if count >= 30:
+    if count >= 300:
         return False
     cache.set(key, count + 1, timeout=60)
     return True
