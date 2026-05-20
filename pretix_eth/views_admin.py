@@ -26,6 +26,8 @@ _CAMEL_TO_SNAKE_ADMIN = {
     'txHash': 'tx_hash',
     'chainId': 'chain_id',
     'ethPayerSignature': 'eth_payer_signature',
+    'orderCode': 'order_code',
+    'orderSecret': 'order_secret',
 }
 
 
@@ -374,6 +376,60 @@ def admin_orders(request: HttpRequest, **kwargs):
             reverse=True,
         )
 
+        # Unpaid wc_inject orders: Pretix orders in 'pending' state with a
+        # walletconnect OrderPayment in `created` state and NO completed
+        # WCPaymentAttempt yet. These are the candidates for manual verify
+        # (admin pastes a recovered tx hash). Excludes orders the auto-flow
+        # already finished — those land in `completed` via wc_attempt above.
+        wc_unpaid: list = []
+        try:
+            already_completed_codes = {w.order_code for w in wc_attempts}
+            wc_unpaid_qs = (
+                Order.objects
+                .filter(
+                    event=event,
+                    status=Order.STATUS_PENDING,
+                    payments__provider='walletconnect',
+                    payments__state='created',
+                )
+                .distinct()
+                .prefetch_related('payments')
+                .only('code', 'secret', 'email', 'total', 'datetime', 'status', 'testmode')
+                .order_by('-datetime')[:200]
+            )
+            for porder in wc_unpaid_qs:
+                if porder.code in already_completed_codes:
+                    continue
+                # Surface the most recent quote (if any) so the manual-verify
+                # modal can pre-fill chain + symbol + payer from what the
+                # buyer originally signed. Admin can override any of these.
+                quote_info = None
+                for p in porder.payments.all():
+                    if p.provider != 'walletconnect' or p.state != 'created':
+                        continue
+                    q = (p.info_data or {}).get('quote') or {}
+                    if q:
+                        quote_info = {
+                            'chainId': q.get('chain_id'),
+                            'symbol': q.get('symbol'),
+                            'intendedPayer': q.get('intended_payer'),
+                            'amountRaw': q.get('amount_raw'),
+                            'createdAt': q.get('created_at'),
+                            'expiresAt': q.get('expires_at'),
+                        }
+                        break
+                wc_unpaid.append({
+                    'orderCode': porder.code,
+                    'orderSecret': porder.secret,
+                    'email': porder.email,
+                    'total': str(porder.total),
+                    'createdAt': int(porder.datetime.timestamp()) if porder.datetime else None,
+                    'testmode': bool(porder.testmode),
+                    'quote': quote_info,
+                })
+        except (ProgrammingError, Exception):
+            log.exception('[admin_orders] wc_unpaid list failed; returning empty')
+
         agg = completed_qs.aggregate(total=Sum('total_usd'), count=Count('payment_reference'))
         total_usd = agg['total'] or Decimal('0')
         stats = {
@@ -381,6 +437,7 @@ def admin_orders(request: HttpRequest, **kwargs):
             'completed': len(completed),
             'x402Count': agg['count'] or 0,
             'legacyCount': len(legacy_wc),
+            'wcUnpaidCount': len(wc_unpaid),
             'totalUsd': str(total_usd.quantize(Decimal('0.01'))),
         }
 
@@ -389,6 +446,7 @@ def admin_orders(request: HttpRequest, **kwargs):
         'stats': stats,
         'completed': completed,
         'pending': pending,
+        'wcUnpaid': wc_unpaid,
     })
 
 
@@ -638,3 +696,213 @@ def admin_verify(request: HttpRequest, **kwargs):
         eth_payer_signature=body.get('eth_payer_signature'),
         skip_eth_payer_signature=True,
     )
+
+
+@csrf_exempt
+@require_http_methods(['POST'])
+@require_pretix_admin_token('can_change_orders')
+def admin_wc_verify(request: HttpRequest, **kwargs):
+    """Admin manual verification for the legacy WC (wc_inject) flow — the
+    counterpart of `admin_verify` for the x402 flow. Used when a buyer's
+    auto-verify call didn't complete (closed browser, RPC blip, slow
+    wallet broadcast) and the operator wants to confirm payment using a
+    tx hash recovered out of band (block explorer, support ticket, etc.).
+
+    Identifies the order by `order_code` rather than x402's
+    `payment_reference` (wc_inject has no payment_reference — the buyer
+    flow keys off the Pretix order + walletconnect OrderPayment in the
+    `created` state).
+
+    The admin chooses (chain_id, symbol, payer) — these may differ from
+    the original quote stored on `payment.info_data` (e.g. buyer paid
+    USDC on Base when their quote was for ETH on mainnet). The plugin
+    computes the expected on-chain amount from `order.total` (USD) using
+    the chosen symbol — for stables 1:1 USD, for ETH using the live dual-
+    oracle price (NOT the quote-time price, since the admin is overriding
+    the quote). On-chain verification then enforces recipient + amount
+    + tx.from = payer + confirmations.
+
+    Skipped vs the buyer flow:
+      - The SIWE-lite signature (admin can't recover the in-session sig)
+      - The IP rate limit (admin endpoint is token-auth-gated)
+      - The quote freshness window (admin recovery may happen days later;
+        the tx_hash uniqueness check + on-chain payer match are still
+        enforced, so this is safe)
+    Still enforced:
+      - tx_hash uniqueness (no completed WCPaymentAttempt with this hash)
+      - payer = on-chain tx.from
+      - amount = expected (per admin's chosen symbol + order.total)
+      - recipient = provider.receive_address
+      - min_confirmations
+    """
+    import asyncio
+    from decimal import Decimal
+    from django.db import IntegrityError, transaction
+    from django.utils.timezone import now as tz_now
+    from pretix.base.models import Order
+    from pretix_eth.chains import is_supported, get_token_contract
+    from pretix_eth.models import WCPaymentAttempt
+    from pretix_eth.payment import WalletConnectPayment
+    from pretix_eth.pricing import fetch_eth_price_usd, usd_to_token_raw
+    from pretix_eth.verification import verify_erc20_transfer, verify_native_eth
+    from pretix_eth.views import _get_web3, _wc_config_or_403
+
+    body = _read_body(request)
+    event = _get_event(body.get('organizer', ''), body.get('event', ''))
+    if not event:
+        return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
+
+    required = ('order_code', 'order_secret', 'tx_hash', 'chain_id', 'symbol', 'payer')
+    missing = [k for k in required if not body.get(k)]
+    if missing:
+        return JsonResponse({'success': False, 'error': f'missing fields: {missing}'}, status=400)
+
+    tx_hash = body['tx_hash']
+    if not _TX_HASH_RE.match(tx_hash):
+        return JsonResponse({'success': False, 'error': 'invalid tx_hash format'}, status=400)
+    tx_hash = tx_hash.lower()
+    try:
+        chain_id = int(body['chain_id'])
+    except (TypeError, ValueError):
+        return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
+    symbol = body['symbol']
+    if not is_supported(chain_id, symbol):
+        return JsonResponse({'success': False, 'error': 'unsupported chain/token combination'}, status=400)
+
+    with scopes_disabled():
+        # Constant-time secret compare, same as the buyer endpoint
+        from hmac import compare_digest
+        try:
+            order = Order.objects.get(code=body['order_code'], event=event)
+        except Order.DoesNotExist:
+            return JsonResponse({'success': False, 'error': 'order not found'}, status=404)
+        if not compare_digest(order.secret, body['order_secret']):
+            return JsonResponse({'success': False, 'error': 'order secret mismatch'}, status=403)
+
+        payment = order.payments.filter(provider='walletconnect', state='created').first()
+        if payment is None:
+            return JsonResponse({
+                'success': False,
+                'error': 'no walletconnect payment in created state on this order',
+            }, status=404)
+
+        # V46 parity: re-check WC enabled + per-chain + per-token toggles
+        _, err = _wc_config_or_403(event, chain_id=chain_id, symbol=symbol)
+        if err is not None:
+            return err
+
+        # Fail fast on one-time tx_hash check
+        if WCPaymentAttempt.objects.filter(tx_hash=tx_hash, state='completed').exists():
+            return JsonResponse({
+                'success': False, 'error': 'tx already used for a completed order',
+            }, status=409)
+
+        # Compute the expected amount in raw base units from order.total + chosen symbol.
+        # Stables are 1:1 USD; ETH needs the oracle. We use the LIVE price (not the
+        # quote-time price) because the admin may be overriding the quote's symbol.
+        try:
+            if symbol == 'ETH':
+                price_result = asyncio.run(fetch_eth_price_usd())
+                if price_result is None:
+                    return JsonResponse({
+                        'success': False, 'error': 'ETH oracle unavailable; retry later',
+                    }, status=503)
+                amount_raw = usd_to_token_raw(
+                    Decimal(str(order.total)), 'ETH', chain_id, price_result.price,
+                )
+            else:
+                amount_raw = usd_to_token_raw(
+                    Decimal(str(order.total)), symbol, chain_id, eth_price=None,
+                )
+        except Exception as e:
+            log.exception('[wc admin verify] amount computation failed for %s', order.code)
+            return JsonResponse({'success': False, 'error': f'amount computation failed: {e}'}, status=500)
+
+        provider = WalletConnectPayment(event)
+        receive_address = provider.settings.get('receive_address')
+        if not receive_address:
+            return JsonResponse({'success': False, 'error': 'receive_address not configured'}, status=500)
+        alchemy_key = provider.settings.get('alchemy_api_key', default=None)
+        min_conf = int(provider.settings.get('min_confirmations', default=1))
+        w3 = _get_web3(chain_id, alchemy_key)
+
+        if symbol == 'ETH':
+            vr = verify_native_eth(
+                w3=w3, tx_hash=tx_hash,
+                expected_from=body['payer'],
+                expected_to=receive_address,
+                expected_amount_wei=amount_raw,
+                min_confirmations=min_conf,
+            )
+        else:
+            token_contract = get_token_contract(chain_id, symbol)
+            if token_contract is None:
+                return JsonResponse({'success': False, 'error': f'no contract for {symbol} on chain {chain_id}'}, status=400)
+            vr = verify_erc20_transfer(
+                w3=w3, chain_id=chain_id, tx_hash=tx_hash,
+                expected_from=body['payer'],
+                expected_to=receive_address,
+                expected_token=token_contract['address'],
+                expected_amount=amount_raw,
+                min_confirmations=min_conf,
+            )
+
+        if not vr.verified:
+            log.warning(
+                '[wc admin verify] on-chain verify failed order=%s tx=%s err=%s',
+                order.code, tx_hash, vr.error,
+            )
+            return JsonResponse({
+                'success': False,
+                'error': vr.error,
+                'confirmations': vr.confirmations,
+                'confirmations_required': vr.min_confirmations,
+            }, status=400)
+
+        log.warning(
+            '[wc admin verify] BYPASS — buyer signature skipped for order=%s tx=%s (auth: admin token)',
+            order.code, tx_hash,
+        )
+
+        try:
+            with transaction.atomic():
+                order = Order.objects.select_for_update().get(pk=order.pk)
+                if order.status != Order.STATUS_PENDING:
+                    return JsonResponse({
+                        'success': False, 'error': f'order is not in pending state (status={order.status})',
+                    }, status=410)
+
+                WCPaymentAttempt.objects.create(
+                    tx_hash=tx_hash,
+                    quote_id=(payment.info_data or {}).get('quote', {}).get('quote_id', f'admin_{tx_hash[:16]}'),
+                    order_code=order.code, payer=body['payer'],
+                    chain_id=chain_id, state='completed',
+                )
+
+                info = payment.info_data or {}
+                info['tx_hash'] = tx_hash
+                info['chain_id'] = chain_id
+                info['token_symbol'] = symbol
+                token_contract = get_token_contract(chain_id, symbol)
+                info['token_address'] = token_contract['address'] if token_contract else None
+                info['payer'] = body['payer']
+                info['amount'] = str(amount_raw)
+                info['block_number'] = vr.block_number
+                info['admin_manual_verify'] = True
+                payment.info_data = info
+                payment.save()
+
+                try:
+                    mail_text = provider.order_pending_mail_render(order, payment)
+                except Exception as e:
+                    log.warning('[wc admin verify] failed to render mail_text for %s: %s', order.code, e)
+                    mail_text = ''
+                payment.confirm(mail_text=mail_text)
+        except IntegrityError:
+            return JsonResponse({'success': False, 'error': 'tx already used (race)'}, status=409)
+
+    return JsonResponse({
+        'success': True,
+        'order': {'code': order.code, 'secret': order.secret},
+        'block_number': vr.block_number,
+    })
