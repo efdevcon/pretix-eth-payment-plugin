@@ -738,7 +738,6 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
     import asyncio
     from decimal import Decimal
     from django.db import IntegrityError, transaction
-    from django.utils.timezone import now as tz_now
     from pretix.base.models import Order
     from pretix_eth.chains import is_supported, get_token_contract
     from pretix_eth.models import WCPaymentAttempt
