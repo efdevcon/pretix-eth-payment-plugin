@@ -8,7 +8,7 @@ import {
   useConfig,
 } from 'wagmi'
 import { useWalletInfo } from '@reown/appkit/react'
-import { classifyConnection, walletLocationPhrase } from '../walletConnection'
+import { classifyConnection, connectionTypeLabel, walletLocationPhrase } from '../walletConnection'
 import {
   waitForTransactionReceipt,
   getTransaction,
@@ -487,6 +487,11 @@ export function CheckoutStep({
   const [status, setStatus] = useState<Status>('idle')
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
+  // Subject + body of the support email displayed in a copy-paste popup
+  // when any "Contact support" / "Email the event organizer" link is
+  // clicked. Set alongside opening the mailto so users without a
+  // configured mail client still have a path to send the message.
+  const [supportPopup, setSupportPopup] = useState<{ subject: string; body: string; mailto: string } | null>(null)
   // Tx hash captured when verify succeeds — drives the inline success card.
   // We render the success view inside CheckoutStep (not via a separate
   // SuccessStep swap) so the buyer stays in the same visual frame the whole
@@ -2031,6 +2036,8 @@ export function CheckoutStep({
           "",
           `Email: ${fill(config.buyerEmail || '')}`,
           `Order code: ${config.orderCode}`,
+          `Wallet: ${fill(connectedWalletName || '')}`,
+          `Connection: ${connectionTypeLabel(connectionKind)}`,
           `Wallet address: ${fill(address || '')}`,
           `Network: ${fill(networkValue)}`,
           `Token: ${fill(tokenValue)}`,
@@ -2040,14 +2047,14 @@ export function CheckoutStep({
           // Include the last in-page error string when present so the
           // operator has the exact failure context the buyer saw \u2014 no
           // need to ask "what error did you get?" in a follow-up.
-          ...(error ? ['', `Error shown to me: ${error}`] : []),
+          ...(error ? ['', `Error: ${error}`] : []),
           "",
           "Thanks!",
         ]
+        const errSubject = `Payment issue for order ${config.orderCode}`
+        const errBody = lines.join('\n')
         const mailtoHref = config.supportEmail
-          ? `mailto:${config.supportEmail}?subject=${encodeURIComponent(
-              `Payment issue for order ${config.orderCode}`,
-            )}&body=${encodeURIComponent(lines.join('\n'))}`
+          ? `mailto:${config.supportEmail}?subject=${encodeURIComponent(errSubject)}&body=${encodeURIComponent(errBody)}`
           : null
         return (
           <div className="wc-support-block" style={{ marginTop: 16, padding: 12, background: '#f7f5ff', borderRadius: 8 }}>
@@ -2057,7 +2064,10 @@ export function CheckoutStep({
               {' '}
               {mailtoHref ? (
                 <>
-                  <a href={mailtoHref}>Email the event organizer</a> — we've pre-filled everything we know; just add your transaction hash and send.
+                  <a
+                    href={mailtoHref}
+                    onClick={() => setSupportPopup({ subject: errSubject, body: errBody, mailto: mailtoHref })}
+                  >Email the event organizer</a> — we've pre-filled everything we know; just add your transaction hash and send.
                 </>
               ) : (
                 <>Contact the event organizer with your order code <code>{config.orderCode}</code>, the transaction hash, and the wallet address you paid from.</>
@@ -2087,6 +2097,8 @@ export function CheckoutStep({
           '',
           `Email: ${fill(config.buyerEmail || '')}`,
           `Order code: ${config.orderCode}`,
+          `Wallet: ${fill(connectedWalletName || '')}`,
+          `Connection: ${connectionTypeLabel(connectionKind)}`,
           `Wallet address: ${fill(address || '')}`,
           `Network: ${fill(networkValue)}`,
           `Token: ${fill(tokenValue)}`,
@@ -2100,18 +2112,171 @@ export function CheckoutStep({
           'Thanks!',
         ]
         const subject = `Payment help for order ${config.orderCode}`
-        const mailtoHref = `mailto:${config.supportEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(lines.join('\n'))}`
+        const body = lines.join('\n')
+        const mailtoHref = `mailto:${config.supportEmail}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`
         return (
           <div className="wc-support-pill">
             <p>
               Need help?{' '}
-              <a href={mailtoHref}>
+              <a
+                href={mailtoHref}
+                onClick={() => setSupportPopup({ subject, body, mailto: mailtoHref })}
+              >
                 <strong>Contact support</strong>
               </a>
             </p>
           </div>
         )
       })()}
+      {supportPopup && config.supportEmail && (
+        <SupportCopyPopup
+          subject={supportPopup.subject}
+          body={supportPopup.body}
+          mailto={supportPopup.mailto}
+          supportEmail={config.supportEmail}
+          onClose={() => setSupportPopup(null)}
+        />
+      )}
+    </div>
+  )
+}
+
+// Popup that mirrors the contact-support mailto in copy-pasteable form.
+// Opens alongside the buyer's mail client when they click any "Contact
+// support" / "Email the event organizer" link — useful when their mail
+// client doesn't auto-fill mailto links (corporate networks, browsers
+// with no default handler, or when the body is long enough that the
+// mailto URL gets truncated).
+function SupportCopyPopup({
+  subject,
+  body,
+  mailto,
+  supportEmail,
+  onClose,
+}: {
+  subject: string
+  body: string
+  mailto: string
+  supportEmail: string
+  onClose: () => void
+}) {
+  const [copiedField, setCopiedField] = useState<'subject' | 'body' | 'email' | null>(null)
+  const copy = async (text: string, field: 'subject' | 'body' | 'email') => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedField(field)
+      setTimeout(() => setCopiedField(null), 1500)
+    } catch {
+      // older browsers / insecure contexts: silently no-op.
+    }
+  }
+  const field = (label: string, value: string, key: 'subject' | 'body' | 'email', multiline?: boolean) => (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#555', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          {label}
+        </span>
+        <button
+          type="button"
+          onClick={() => copy(value, key)}
+          style={{
+            padding: '2px 10px', fontSize: 12, fontWeight: 600,
+            background: copiedField === key ? '#1a7f37' : '#f3f3f3',
+            color: copiedField === key ? '#fff' : '#333',
+            border: '1px solid ' + (copiedField === key ? '#1a7f37' : '#ccc'),
+            borderRadius: 4, cursor: 'pointer',
+          }}
+        >
+          {copiedField === key ? 'Copied!' : 'Copy'}
+        </button>
+      </div>
+      {multiline ? (
+        <textarea
+          readOnly
+          value={value}
+          rows={Math.min(14, Math.max(6, value.split('\n').length))}
+          style={{
+            width: '100%', padding: 10, fontFamily: 'ui-monospace, monospace',
+            fontSize: 12.5, lineHeight: 1.5, border: '1px solid #ddd',
+            borderRadius: 6, resize: 'vertical', boxSizing: 'border-box',
+          }}
+          onFocus={e => e.currentTarget.select()}
+        />
+      ) : (
+        <input
+          readOnly
+          value={value}
+          style={{
+            width: '100%', padding: '8px 10px', fontFamily: 'ui-monospace, monospace',
+            fontSize: 13, border: '1px solid #ddd', borderRadius: 6, boxSizing: 'border-box',
+          }}
+          onFocus={e => e.currentTarget.select()}
+        />
+      )}
+    </div>
+  )
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        zIndex: 10000, padding: 16,
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#fff', borderRadius: 12, padding: 20,
+          maxWidth: 640, width: '100%', maxHeight: '90vh', overflow: 'auto',
+          boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <h3 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>Contact support</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              background: 'transparent', border: 'none', cursor: 'pointer',
+              padding: 4, fontSize: 20, lineHeight: 1,
+            }}
+          >
+            ×
+          </button>
+        </div>
+        <p style={{ fontSize: 14, color: '#555', margin: '0 0 16px' }}>
+          Your mail client should open automatically. If it doesn&apos;t, copy the fields
+          below and send them to <strong>{supportEmail}</strong>.
+        </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {field('To', supportEmail, 'email')}
+          {field('Subject', subject, 'subject')}
+          {field('Message', body, 'body', true)}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 18 }}>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{
+              padding: '8px 16px', border: '1px solid #ccc', background: '#fff',
+              borderRadius: 6, cursor: 'pointer', fontSize: 14,
+            }}
+          >
+            Close
+          </button>
+          <a
+            href={mailto}
+            style={{
+              padding: '8px 16px', background: '#000', color: '#fff',
+              borderRadius: 6, textDecoration: 'none', fontSize: 14, fontWeight: 600,
+            }}
+          >
+            Open in mail app
+          </a>
+        </div>
+      </div>
     </div>
   )
 }
