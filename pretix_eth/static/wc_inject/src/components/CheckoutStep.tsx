@@ -543,6 +543,22 @@ export function CheckoutStep({
   // `confirmations_required` fields. Used to render "Confirming onchain
   // (X/N)" instead of an opaque spinner during the verify poll.
   const [confirmProgress, setConfirmProgress] = useState<{ current: number; required: number } | null>(null)
+  // Timestamp (ms) until which the verify poll is in rate-limit backoff.
+  // Drives the calm "Network's busy — retrying in Ns" cooldown copy so a
+  // rate-limited (but already-paid) buyer sees a countdown, not a spinner
+  // that looks stuck. Null when not cooling down. `nowMs` ticks every
+  // second while a cooldown is active so the countdown actually counts.
+  const [verifyCooldownUntil, setVerifyCooldownUntil] = useState<number | null>(null)
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() => {
+    if (verifyCooldownUntil == null) return
+    setNowMs(Date.now())
+    const id = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [verifyCooldownUntil])
+  const cooldownRemaining = verifyCooldownUntil
+    ? Math.max(0, Math.ceil((verifyCooldownUntil - nowMs) / 1000))
+    : 0
 
   // Safe (multisig) detection state — populated by the post-`useAccount`
   // effect below. Declared here so the recovery / picker render paths
@@ -703,7 +719,10 @@ export function CheckoutStep({
   // Pull per-(chain, token) balances for the connected wallet so we can show
   // them in the picker and grey out rows the user can't afford. Plugin uses
   // Zapper-first / RPC-fallback (same engine the x402 endpoint uses).
-  const balancesQuery = useWalletBalances(config, address)
+  // Poll only while the buyer is choosing (idle) or retrying (error); once
+  // they commit to pay we stop the interval to avoid needless 429 pressure
+  // (the manual refresh button still works via .refetch()).
+  const balancesQuery = useWalletBalances(config, address, status === 'idle' || status === 'error')
 
   // For each option, compute the raw amount expected at the order's USD total.
   // Stables: total_usd × 10^6 (both USDC and USDT0 are 6-dec USD-pegged).
@@ -844,79 +863,91 @@ export function CheckoutStep({
     // backoff wait so rate-limit time doesn't eat the confirmation budget
     // and strand a paid buyer on a "timed out" error.
     let rlBackoff = 0
-    while (Date.now() - startedAt < budget) {
-      await new Promise((r) => setTimeout(r, interval))
 
-      // DEBUG: synthesize a 429 without touching the server so QA can watch
-      // the backoff + verify-only recovery under sustained rate limiting.
-      // Toggle live via `wcSimulateRateLimit(true|false)` or the debug
-      // panel checkbox. No-op in prod (ref only set by the dev helper).
-      if (simulateRateLimitRef.current) {
-        const wait = Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
-        rlBackoff += 1
-        dbgWarn('verify:rate-limited (SIMULATED)', { wait, attempt: rlBackoff })
-        budget += wait
-        await new Promise((r) => setTimeout(r, wait))
-        continue
-      }
+    // Default exponential backoff (2s → 4s → 8s …, capped 30s) with jitter.
+    const backoffMs = () => Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
 
-      const r = await fetch(`${config.urlPrefix}/verify/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({
-          quote_id: q.quote_id, tx_hash: txHash, chain_id: q.chain_id,
-          organizer, event,
-        }),
-      })
-      if (r.ok) {
-        rlBackoff = 0
-        const body = await r.json()
-        if (body.verified) {
-          setConfirmProgress(null)
-          return
-        }
-      } else if (r.status === 429) {
-        // Rate limited. Honor Retry-After if present, else exponential
-        // backoff (2s → 4s → 8s …, capped at 30s) with jitter. Keep
-        // looping; do not throw.
-        const retryAfterHeader = parseInt(r.headers.get('Retry-After') || '', 10)
-        const wait = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
-          ? retryAfterHeader * 1000
-          : Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
-        rlBackoff += 1
-        dbgWarn('verify:rate-limited', { wait, attempt: rlBackoff })
-        budget += wait // don't let rate-limit waiting consume the conf budget
-        await new Promise((r) => setTimeout(r, wait))
-      } else {
-        rlBackoff = 0
-        const body = await r.json().catch(() => ({} as { error?: string; confirmations?: number | null; confirmations_required?: number | null }))
-        const errMsg = (body.error as string | undefined) || `verify HTTP ${r.status}`
-        // Defensive: some deployments surface the rate limit as a string
-        // body rather than a 429 status — treat that as retryable too.
-        const isRateLimit = errMsg.toLowerCase().includes('rate limit')
-        if (!isRateLimit && !RETRYABLE_ERROR_SUBSTRINGS.some((s) => errMsg.includes(s))) {
-          setConfirmProgress(null)
-          throw new Error(errMsg)
-        }
-        if (isRateLimit) {
-          const wait = Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
-          rlBackoff += 1
-          budget += wait
-          await new Promise((r) => setTimeout(r, wait))
+    // Shared rate-limit cooldown: surface a countdown to the UI, extend the
+    // budget so the wait doesn't consume the confirmation window, sleep,
+    // then clear the cooldown. The tx is already mined, so a 429 here is
+    // never fatal — we just wait for a verify slot.
+    const cooldownSleep = async (wait: number) => {
+      rlBackoff += 1
+      budget += wait
+      setVerifyCooldownUntil(Date.now() + wait)
+      await new Promise((r) => setTimeout(r, wait))
+      setVerifyCooldownUntil(null)
+    }
+
+    try {
+      while (Date.now() - startedAt < budget) {
+        await new Promise((r) => setTimeout(r, interval))
+
+        // DEBUG: synthesize a 429 without touching the server so QA can watch
+        // the backoff + cooldown UI under sustained rate limiting. Toggle live
+        // via `wcSimulateRateLimit(true|false)` or the debug panel checkbox.
+        // No-op in prod (ref only set by the dev helper).
+        if (simulateRateLimitRef.current) {
+          const wait = backoffMs()
+          dbgWarn('verify:rate-limited (SIMULATED)', { wait, attempt: rlBackoff + 1 })
+          await cooldownSleep(wait)
           continue
         }
-        // Update progress + recompute budget once we know the chain's threshold.
-        const cur = typeof body.confirmations === 'number' ? body.confirmations : null
-        const req = typeof body.confirmations_required === 'number' ? body.confirmations_required : null
-        if (cur !== null && req !== null) {
-          setConfirmProgress({ current: cur, required: req })
-          budget = pollMaxDurationMs(q.chain_id, req) + (budget - initialBudget)
+
+        const r = await fetch(`${config.urlPrefix}/verify/`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          body: JSON.stringify({
+            quote_id: q.quote_id, tx_hash: txHash, chain_id: q.chain_id,
+            organizer, event,
+          }),
+        })
+        if (r.ok) {
+          rlBackoff = 0
+          const body = await r.json()
+          if (body.verified) {
+            setConfirmProgress(null)
+            return
+          }
+        } else if (r.status === 429) {
+          // Honor server Retry-After if present, else exponential backoff.
+          const retryAfterHeader = parseInt(r.headers.get('Retry-After') || '', 10)
+          const wait = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+            ? retryAfterHeader * 1000
+            : backoffMs()
+          dbgWarn('verify:rate-limited', { wait, attempt: rlBackoff + 1 })
+          await cooldownSleep(wait)
+        } else {
+          const body = await r.json().catch(() => ({} as { error?: string; confirmations?: number | null; confirmations_required?: number | null }))
+          const errMsg = (body.error as string | undefined) || `verify HTTP ${r.status}`
+          // Defensive: some deployments surface the rate limit as a string
+          // body rather than a 429 status — treat that as retryable too.
+          const isRateLimit = errMsg.toLowerCase().includes('rate limit')
+          if (isRateLimit) {
+            await cooldownSleep(backoffMs())
+            continue
+          }
+          rlBackoff = 0
+          if (!RETRYABLE_ERROR_SUBSTRINGS.some((s) => errMsg.includes(s))) {
+            setConfirmProgress(null)
+            throw new Error(errMsg)
+          }
+          // Update progress + recompute budget once we know the chain's threshold.
+          const cur = typeof body.confirmations === 'number' ? body.confirmations : null
+          const req = typeof body.confirmations_required === 'number' ? body.confirmations_required : null
+          if (cur !== null && req !== null) {
+            setConfirmProgress({ current: cur, required: req })
+            budget = pollMaxDurationMs(q.chain_id, req) + (budget - initialBudget)
+          }
         }
       }
+      setConfirmProgress(null)
+      throw new Error('Verification timed out. Try submitting the transaction hash manually below.')
+    } finally {
+      // Never leave a stale cooldown countdown on screen after the poll ends.
+      setVerifyCooldownUntil(null)
     }
-    setConfirmProgress(null)
-    throw new Error('Verification timed out. Try submitting the transaction hash manually below.')
   }
 
   // ── Send-with-recovery ──
@@ -1659,6 +1690,12 @@ export function CheckoutStep({
       case 'switching': return 'Switching chain\u2026'
       case 'signing-tx': return `Confirm payment ${where}\u2026`
       case 'verifying':
+        // During a rate-limit cooldown, show the countdown so the buyer
+        // knows we're waiting deliberately (not stuck) \u2014 and crucially the
+        // tx is already paid, we're only re-checking it.
+        if (cooldownRemaining > 0) {
+          return `Network busy \u2014 retrying in ${cooldownRemaining}s\u2026`
+        }
         // Friendly copy, no bare "0/1" \u2014 that fraction reads as a stalled
         // counter to non-technical buyers. Show plain "Confirming\u2026" while
         // we're at zero confirmations, and only surface a progress count
@@ -1748,6 +1785,9 @@ export function CheckoutStep({
       case 'switching':         return `Switch network ${where}…`
       case 'signing-tx':        return `Confirm payment ${where}…`
       case 'verifying':
+        if (cooldownRemaining > 0) {
+          return `Network busy — retrying in ${cooldownRemaining}s`
+        }
         // See `buttonLabel` for rationale — skip the fraction when we're
         // at 0 or the chain only needs a single block (avoids the noisy
         // "0/1" reading), and frame the progress in natural language
@@ -1787,6 +1827,11 @@ export function CheckoutStep({
       case 'signing-tx':
         return 'This is the onchain payment'
       case 'verifying':
+        if (cooldownRemaining > 0) {
+          // Reassure: their payment is already on-chain; we're just waiting
+          // out a busy-network throttle before re-checking it. No re-pay.
+          return 'Your payment is sent — waiting to re-check it. No need to pay again.'
+        }
         // Ethereum L1's ~12 s block time means a single confirmation is
         // ~12 s; the default 3-conf setup is ~36 s — long enough buyers
         // wonder if it's stuck. Surface the per-block expectation only

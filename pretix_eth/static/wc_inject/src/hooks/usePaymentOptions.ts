@@ -38,7 +38,13 @@ export function usePaymentOptions(config: WCConfig) {
       }
       return r.json()
     },
-    staleTime: 60_000, // options are stable within a session; don't refetch on focus
+    staleTime: 60_000, // options are stable within a session
+    // Options don't change mid-session; suppress the focus/reconnect
+    // refetches React Query does by default. Cuts redundant
+    // payment-options calls (a notable share of first-launch 429s came
+    // from focus-triggered refetches when buyers tabbed back and forth).
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: 1,
   })
 }

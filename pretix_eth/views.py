@@ -36,6 +36,19 @@ from pretix_eth.x402.auth import get_client_ip
 
 log = logging.getLogger(__name__)
 
+
+def _rate_limited(error='rate limit exceeded', *, retry_after=10, **extra):
+    """429 JsonResponse with a `Retry-After` header (seconds) so the client
+    backs off for a precise window instead of guessing. Buyer-facing rate
+    limits use a short window (the cache buckets reset in <=60s and verify
+    polling wants to resume promptly), so 10s is a sane default; callers can
+    override per-endpoint. `extra` is merged into the JSON body to preserve
+    existing fields (e.g. ip / quote_id) some callers include."""
+    resp = JsonResponse({'error': error, **extra}, status=429)
+    resp['Retry-After'] = str(int(retry_after))
+    return resp
+
+
 RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_RATE_LIMIT_PER_MIN', '10'))
 # V52: primary per-IP-per-event cap. Attacker-controlled `quote_id` was
 # rotating to bypass the per-quote bucket and burn merchant RPC quota; the
@@ -209,7 +222,7 @@ def payment_options(request, **kwargs):
     # gates per-IP at 30/min.
     client_ip = get_client_ip(request)
     if not _wc_buyer_rate_limit(client_ip, 'payment_options'):
-        return JsonResponse({'error': 'rate limit exceeded'}, status=429)
+        return _rate_limited()
 
     org_slug = (request.GET.get('organizer') or '').strip()
     ev_slug = (request.GET.get('event') or '').strip()
@@ -308,7 +321,7 @@ def wallet_balances(request, **kwargs):
 
     client_ip = get_client_ip(request)
     if not _wc_buyer_rate_limit(client_ip, 'wallet_balances'):
-        return JsonResponse({'error': 'rate limit exceeded'}, status=429)
+        return _rate_limited()
 
     org_slug = (request.GET.get('organizer') or '').strip()
     ev_slug = (request.GET.get('event') or '').strip()
@@ -462,7 +475,7 @@ def create_quote(request, **kwargs):
     client_ip = get_client_ip(request)
     if not _check_wc_create_quote_ip_rate_limit(body['organizer'], body['event'], client_ip):
         log.warning('wc_create_quote rejected: ip rate limit exceeded ip=%s', client_ip)
-        return JsonResponse({'error': 'rate limit exceeded'}, status=429)
+        return _rate_limited()
 
     with scopes_disabled():
         try:
@@ -695,9 +708,13 @@ def verify(request, **kwargs):
     # quote — but the per-IP one is what bounds the cost of attackers who
     # rotate fresh quote_ids to escape the per-quote bucket.
     if not _check_wc_verify_ip_rate_limit(body['organizer'], body['event'], client_ip):
-        return _verify_bad('rate limit exceeded (ip)', status=429, ip=client_ip)
+        # 5s Retry-After: the tx is already mined, blocks come fast, and we
+        # want the buyer's poll to resume promptly once a slot frees up.
+        log.warning('wc_verify rejected: rate limit exceeded (ip) ip=%s', client_ip)
+        return _rate_limited('rate limit exceeded (ip)', retry_after=5, ip=client_ip)
     if not _check_rate_limit(body['quote_id'], client_ip):
-        return _verify_bad('rate limit exceeded', status=429, quote_id=body.get('quote_id'), ip=client_ip)
+        log.warning('wc_verify rejected: rate limit exceeded quote_id=%s ip=%s', body.get('quote_id'), client_ip)
+        return _rate_limited('rate limit exceeded', retry_after=5, quote_id=body.get('quote_id'), ip=client_ip)
 
     tx_hash = body['tx_hash']
     if not _TX_HASH_RE.match(tx_hash):

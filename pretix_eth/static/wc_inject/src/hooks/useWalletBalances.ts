@@ -21,7 +21,15 @@ export interface WalletBalancesResponse {
  *  plugin's `/plugin/wc/wallet-balances/` endpoint. The plugin tries Zapper
  *  first and falls back to RPC if Zapper fails — same engine x402 uses.
  *  Returns an empty `balances` list if the wallet isn't connected. */
-export function useWalletBalances(config: WCConfig, wallet: string | undefined) {
+/**
+ * @param pollingActive When false, stops the background interval + focus
+ *   refetch. The caller passes `false` once the buyer commits to paying
+ *   (status leaves idle/error) so we don't keep hammering the endpoint —
+ *   balances aren't needed mid-flow, and the chatty polling across tabs
+ *   behind one Cloudflare IP was a major source of rate-limit 429s at
+ *   the first launch. Manual `.refetch()` (the refresh button) still works.
+ */
+export function useWalletBalances(config: WCConfig, wallet: string | undefined, pollingActive = true) {
   return useQuery<WalletBalancesResponse>({
     queryKey: ['wc-wallet-balances', config.orderCode, wallet],
     enabled: !!wallet,
@@ -39,9 +47,15 @@ export function useWalletBalances(config: WCConfig, wallet: string | undefined) 
       }
       return r.json()
     },
-    // Balances change when the wallet sends/receives — refetch on focus + every minute.
+    // Balances change when the wallet sends/receives — refetch on focus +
+    // every minute, but ONLY while polling is active (buyer is choosing).
+    // React Query already pauses the interval when the tab is hidden
+    // (refetchIntervalInBackground defaults false), so we don't poll a
+    // backgrounded tab. Gating on `pollingActive` additionally stops it
+    // once the buyer commits to pay.
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: pollingActive ? 60_000 : false,
+    refetchOnWindowFocus: pollingActive,
     retry: 1,
   })
 }
