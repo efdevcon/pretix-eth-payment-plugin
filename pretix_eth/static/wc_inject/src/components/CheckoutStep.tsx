@@ -400,6 +400,22 @@ export function CheckoutStep({
   // never leaks across orders and clears with the tab.
   const pickStorageKey = `wc-pick:${config.orderCode}`
 
+  // Persist the broadcast tx (hash + the quote it was paid against) the
+  // instant the wallet returns a hash, keyed by orderCode. If the tab
+  // reloads/crashes between broadcast and verify (common when the buyer
+  // thinks it's stuck and refreshes), we recover this on mount and resume
+  // verification of the EXISTING tx instead of landing them on a fresh
+  // Pay button — the double-pay trap. Cleared on verified success.
+  const txStorageKey = `wc-tx:${config.orderCode}`
+  const persistTx = (q: Quote, hash: string) => {
+    try {
+      window.sessionStorage.setItem(txStorageKey, JSON.stringify({ txHash: hash, quote: q }))
+    } catch { /* storage unavailable — best effort */ }
+  }
+  const clearPersistedTx = () => {
+    try { window.sessionStorage.removeItem(txStorageKey) } catch { /* ignore */ }
+  }
+
   // Combined hydrate-or-default: try restoring from sessionStorage first,
   // and only fall back to ETH auto-select if no saved pick matches a
   // currently-offered option. Replaces the original auto-select effect;
@@ -558,6 +574,20 @@ export function CheckoutStep({
   const [simulateMode, setSimulateMode] = useState<'normal' | 'no-hash' | 'no-hash-no-discovery'>('normal')
   const [debugEnabled, setDebugEnabled] = useState(false)
 
+  // ── DEBUG: rate-limit simulation ──
+  // When on, `pollVerify` synthesizes a 429 on every iteration WITHOUT
+  // hitting the server, so QA can watch the backoff + verify-only recovery
+  // behave under sustained rate limiting. Toggle live (mid-verify) from the
+  // debug panel checkbox or the console: `wcSimulateRateLimit(true|false)`.
+  // A ref backs it so an in-flight pollVerify loop sees the change without
+  // being re-created; the state mirror just drives the checkbox.
+  const [simulateRateLimit, setSimulateRateLimit] = useState(false)
+  const simulateRateLimitRef = useRef(false)
+  const setSimRateLimit = (on: boolean) => {
+    simulateRateLimitRef.current = on
+    setSimulateRateLimit(on)
+  }
+
   // Expose the toggle on the window so devs can flip the panel from
   // DevTools without a page reload. Two aliases (`wcDebug` and `wcdebug`)
   // for ergonomics — different muscle memory between developers.
@@ -566,17 +596,29 @@ export function CheckoutStep({
   // utility — typing `debug` alone there resolves to Chrome's version,
   // not anything we set on window.
   useEffect(() => {
-    type WinWithDebug = Window & { wcDebug?: () => string; wcdebug?: () => string }
+    type WinWithDebug = Window & {
+      wcDebug?: () => string
+      wcdebug?: () => string
+      wcSimulateRateLimit?: (on?: boolean) => string
+    }
     const w = window as unknown as WinWithDebug
     const toggle = () => {
       setDebugEnabled((prev) => !prev)
       return '[wc_inject] debug panel toggled'
     }
+    // `wcSimulateRateLimit()` flips, `wcSimulateRateLimit(true/false)` sets.
+    const simRl = (on?: boolean) => {
+      const next = typeof on === 'boolean' ? on : !simulateRateLimitRef.current
+      setSimRateLimit(next)
+      return `[wc_inject] simulate rate limit: ${next ? 'ON' : 'OFF'}`
+    }
     w.wcDebug = toggle
     w.wcdebug = toggle
+    w.wcSimulateRateLimit = simRl
     return () => {
       delete w.wcDebug
       delete w.wcdebug
+      delete w.wcSimulateRateLimit
     }
   }, [])
 
@@ -795,8 +837,29 @@ export function CheckoutStep({
     const startedAt = Date.now()
     let budget = initialBudget
 
+    // Rate-limit backoff: grows on consecutive 429s, resets on any non-429
+    // response. The tx is already mined and immutable at this point, so a
+    // 429 here is NEVER a reason to bail to the error/Retry-pay state — we
+    // just need to wait for a verify slot. We also extend `budget` by the
+    // backoff wait so rate-limit time doesn't eat the confirmation budget
+    // and strand a paid buyer on a "timed out" error.
+    let rlBackoff = 0
     while (Date.now() - startedAt < budget) {
       await new Promise((r) => setTimeout(r, interval))
+
+      // DEBUG: synthesize a 429 without touching the server so QA can watch
+      // the backoff + verify-only recovery under sustained rate limiting.
+      // Toggle live via `wcSimulateRateLimit(true|false)` or the debug
+      // panel checkbox. No-op in prod (ref only set by the dev helper).
+      if (simulateRateLimitRef.current) {
+        const wait = Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
+        rlBackoff += 1
+        dbgWarn('verify:rate-limited (SIMULATED)', { wait, attempt: rlBackoff })
+        budget += wait
+        await new Promise((r) => setTimeout(r, wait))
+        continue
+      }
+
       const r = await fetch(`${config.urlPrefix}/verify/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -807,24 +870,48 @@ export function CheckoutStep({
         }),
       })
       if (r.ok) {
+        rlBackoff = 0
         const body = await r.json()
         if (body.verified) {
           setConfirmProgress(null)
           return
         }
+      } else if (r.status === 429) {
+        // Rate limited. Honor Retry-After if present, else exponential
+        // backoff (2s → 4s → 8s …, capped at 30s) with jitter. Keep
+        // looping; do not throw.
+        const retryAfterHeader = parseInt(r.headers.get('Retry-After') || '', 10)
+        const wait = Number.isFinite(retryAfterHeader) && retryAfterHeader > 0
+          ? retryAfterHeader * 1000
+          : Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
+        rlBackoff += 1
+        dbgWarn('verify:rate-limited', { wait, attempt: rlBackoff })
+        budget += wait // don't let rate-limit waiting consume the conf budget
+        await new Promise((r) => setTimeout(r, wait))
       } else {
+        rlBackoff = 0
         const body = await r.json().catch(() => ({} as { error?: string; confirmations?: number | null; confirmations_required?: number | null }))
         const errMsg = (body.error as string | undefined) || `verify HTTP ${r.status}`
-        if (!RETRYABLE_ERROR_SUBSTRINGS.some((s) => errMsg.includes(s))) {
+        // Defensive: some deployments surface the rate limit as a string
+        // body rather than a 429 status — treat that as retryable too.
+        const isRateLimit = errMsg.toLowerCase().includes('rate limit')
+        if (!isRateLimit && !RETRYABLE_ERROR_SUBSTRINGS.some((s) => errMsg.includes(s))) {
           setConfirmProgress(null)
           throw new Error(errMsg)
+        }
+        if (isRateLimit) {
+          const wait = Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
+          rlBackoff += 1
+          budget += wait
+          await new Promise((r) => setTimeout(r, wait))
+          continue
         }
         // Update progress + recompute budget once we know the chain's threshold.
         const cur = typeof body.confirmations === 'number' ? body.confirmations : null
         const req = typeof body.confirmations_required === 'number' ? body.confirmations_required : null
         if (cur !== null && req !== null) {
           setConfirmProgress({ current: cur, required: req })
-          budget = pollMaxDurationMs(q.chain_id, req)
+          budget = pollMaxDurationMs(q.chain_id, req) + (budget - initialBudget)
         }
       }
     }
@@ -1463,11 +1550,16 @@ export function CheckoutStep({
       }
 
       // Step 7: Verify
+      // Persist the broadcast tx BEFORE verifying so a reload during the
+      // verify wait recovers into verify-only mode (never a fresh Pay).
+      persistTx(q, minedHash)
       setPendingTxHash(minedHash)
       setStatus('verifying')
       dbg('verify:start', { minedHash, chainId: q.chain_id })
       await pollVerify(q, minedHash)
       dbg('verify:done', { minedHash })
+      // Verified — safe to drop the recovery record.
+      clearPersistedTx()
       // Render the inline success card and start the redirect. We still
       // call `onConfirmed` so the parent can observe completion (today it's
       // unused; kept for future hooks). The actual redirect runs from this
@@ -1487,6 +1579,60 @@ export function CheckoutStep({
       setStatus('error')
     }
   }
+
+  // ── Verify-only recovery ──
+  // Re-runs verification of an ALREADY-broadcast tx without touching the
+  // wallet — no re-sign, no re-send, no new on-chain tx. This is the safe
+  // recovery path whenever we hold a broadcast hash (after a verify
+  // rate-limit, a timeout, or a reload). It's deliberately separate from
+  // handlePay so a paid buyer can never be funneled back into paying again.
+  async function runVerifyOnly(q: Quote, hash: string) {
+    setError(null)
+    setQuote(q)
+    setPendingTxHash(hash)
+    setStatus('verifying')
+    dbg('verify-only:start', { hash, chainId: q.chain_id })
+    try {
+      await pollVerify(q, hash)
+      clearPersistedTx()
+      setConfirmedTxHash(hash)
+      setStatus('success')
+      onConfirmed(hash, q)
+    } catch (e) {
+      const err = e as { shortMessage?: string; message?: string }
+      dbgErr('verify-only:caught', { message: err.message })
+      setError(err.shortMessage || err.message || String(e))
+      setStatus('error')
+    }
+  }
+
+  // Bound to the "Check payment status" button shown in the error state
+  // when a tx was already broadcast (see button render below).
+  function retryVerifyOnly() {
+    if (!quote || !pendingTxHash) return
+    runVerifyOnly(quote, pendingTxHash)
+  }
+
+  // Mount recovery: if a broadcast tx for this order is persisted (tab
+  // reload / crash mid-verify), resume verification of that exact tx
+  // rather than letting the buyer restart payment. Runs once.
+  const recoveredTxRef = useRef(false)
+  useEffect(() => {
+    if (recoveredTxRef.current) return
+    recoveredTxRef.current = true
+    try {
+      const raw = window.sessionStorage.getItem(txStorageKey)
+      if (!raw) return
+      const saved = JSON.parse(raw) as { txHash?: string; quote?: Quote }
+      if (saved?.txHash && saved?.quote) {
+        dbg('verify-only:recovered-from-storage', { hash: saved.txHash })
+        runVerifyOnly(saved.quote, saved.txHash)
+      }
+    } catch {
+      // malformed / storage unavailable — ignore, normal flow proceeds
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Build the "Pay: 0.000004 ETH on Arbitrum" label dynamically from the
   // currently-picked option. Pre-quote we use:
@@ -1678,6 +1824,11 @@ export function CheckoutStep({
   // same option or switch tokens/networks and try again. Pay button
   // label flips to "Retry" automatically (see buttonLabel switch).
   const showPicker = status === 'idle' || status === 'error'
+  // True when we're in the error state but a tx was already broadcast.
+  // In this case the recovery action must be verify-only — re-paying
+  // would double-charge the buyer — so the primary button re-verifies
+  // the existing hash instead of calling handlePay.
+  const hasBroadcastTx = status === 'error' && !!pendingTxHash && !!quote
 
   return (
     <div className="wc-root">
@@ -1781,6 +1932,17 @@ export function CheckoutStep({
               </label>
             ))}
           </div>
+          {/* Rate-limit toggle. Safe to flip mid-verify (ref-backed) — turn
+              on to watch the backoff hold the buyer in "verifying" with no
+              re-pay button, turn off to see verification recover. */}
+          <label className="wc-debug-option" style={{ marginTop: 8 }}>
+            <input
+              type="checkbox"
+              checked={simulateRateLimit}
+              onChange={(e) => setSimRateLimit(e.target.checked)}
+            />
+            <span>Simulate rate limit on verify (429)</span>
+          </label>
         </div>
       )}
 
@@ -1988,15 +2150,28 @@ export function CheckoutStep({
           </a>
         </div>
       ) : (
-        <button
-          type="button"
-          className="btn btn-primary btn-lg btn-block wc-pay-btn"
-          disabled={!picked || busy || pickedInsufficient}
-          onClick={handlePay}
-          title={pickedInsufficient ? `Insufficient ${picked?.symbol ?? 'token'} balance on ${picked?.chain_name ?? 'this network'}` : undefined}
-        >
-          {pickedInsufficient ? `Insufficient ${displaySymbol(picked?.symbol ?? '')} balance` : buttonLabel}
-        </button>
+        hasBroadcastTx ? (
+          // Safe recovery: re-verify the already-broadcast tx. Never
+          // re-enters handlePay, so a paid buyer can't be charged twice.
+          <button
+            type="button"
+            className="btn btn-primary btn-lg btn-block wc-pay-btn"
+            disabled={busy}
+            onClick={retryVerifyOnly}
+          >
+            Check payment status
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="btn btn-primary btn-lg btn-block wc-pay-btn"
+            disabled={!picked || busy || pickedInsufficient}
+            onClick={handlePay}
+            title={pickedInsufficient ? `Insufficient ${picked?.symbol ?? 'token'} balance on ${picked?.chain_name ?? 'this network'}` : undefined}
+          >
+            {pickedInsufficient ? `Insufficient ${displaySymbol(picked?.symbol ?? '')} balance` : buttonLabel}
+          </button>
+        )
       ))}
 
       {/* Helper link when ETH balance is insufficient on the picked option.
