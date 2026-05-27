@@ -50,14 +50,19 @@ def _rate_limited(error='rate limit exceeded', *, retry_after=10, **extra):
 
 
 RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_RATE_LIMIT_PER_MIN', '10'))
-# V52: primary per-IP-per-event cap. Attacker-controlled `quote_id` was
-# rotating to bypass the per-quote bucket and burn merchant RPC quota; the
-# IP-only cap forecloses that path. Default 20/min — a real buyer retrying
-# through a flaky wallet session burns ~1-3 verifies (initial + manual hash
-# fallback), so 20 leaves an order-of-magnitude headroom. Bumped down from
-# 60/min after V52 verification showed the looser cap let a 12-quote
-# rotation walk through unbounded.
-WC_VERIFY_IP_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_IP_RATE_LIMIT_PER_MIN', '20'))
+# Primary per-IP-per-event cap. Attacker-controlled `quote_id` was rotating
+# to bypass the per-quote bucket and burn merchant RPC quota; the IP-only
+# cap forecloses that path.
+#
+# Default 120/min. The original 20 assumed ~1-3 verifies per buyer, but the
+# bundle polls verify across the whole confirmation window: at the new 6 s
+# mainnet cadence one buyer does ~6-7 polls, so 20 was tripped by just 2-3
+# concurrent buyers behind one NAT (a shared office IP). 120 covers ~17
+# concurrent mainnet buyers per IP while still bounding quote-rotation abuse
+# — and the real abuse chokepoints remain the per-quote cap (10/min) and
+# the signature-gated create-quote cap (20/min/IP), which an attacker must
+# pass to mint each fresh quote_id in the first place.
+WC_VERIFY_IP_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_VERIFY_IP_RATE_LIMIT_PER_MIN', '120'))
 
 # V53: pre-signature limits on /plugin/wc/create-quote/. The smart-wallet
 # (ERC-1271) signature path verifies via an on-chain `isValidSignature`
@@ -143,13 +148,24 @@ def _check_buyer_order_access(request, event):
     return order, None
 
 
+# Per-IP-per-endpoint cap for the cheap, chatty buyer endpoints
+# (payment-options, wallet-balances, client-info). 300 was set when the IP
+# always resolved to the shared 'unknown' bucket (so it had to absorb the
+# whole event); now that get_client_ip yields real per-IP buckets and P2
+# polling discipline cut the call volume, a normal buyer uses only a handful
+# per minute. 120/min keeps generous headroom for a large NAT'd office
+# (~40 concurrent buyers at ~3 calls/min each) while not letting one IP
+# drive 300 Zapper-backed balance lookups a minute.
+WC_BUYER_RATE_LIMIT_PER_MIN = int(os.environ.get('WC_BUYER_RATE_LIMIT_PER_MIN', '120'))
+
+
 def _wc_buyer_rate_limit(client_ip: str, kind: str) -> bool:
-    """Per-IP rate limit (300/min) for buyer-facing WC endpoints. `kind` keys
-    a separate bucket per endpoint so a chatty payment-options call doesn't
+    """Per-IP rate limit for buyer-facing WC endpoints. `kind` keys a
+    separate bucket per endpoint so a chatty payment-options call doesn't
     starve wallet-balances (and vice versa). Returns False when exhausted."""
     key = f'wc_buyer_rl:{kind}:{client_ip}'
     count = cache.get(key, 0)
-    if count >= 300:
+    if count >= WC_BUYER_RATE_LIMIT_PER_MIN:
         return False
     cache.set(key, count + 1, timeout=60)
     return True

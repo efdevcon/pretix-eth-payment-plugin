@@ -49,14 +49,22 @@ const BLOCK_TIME_MS: Record<number, number> = {
   42161: 250,   // Arbitrum
 }
 
-/** Poll at 2 s on Ethereum L1 (so we don't sit idle for ~6 s after the
- *  block lands while waiting on receipt indexing) and 1.5 s on faster
- *  chains. Cap at 2 s upper bound — RPC indexer lag is the real latency
- *  source on L1, not block time itself, so polling more often than once
- *  per block actually pays off. */
+/** Verify-poll cadence, aligned to block time so we don't generate far
+ *  more verify calls than there is new information to fetch.
+ *
+ *  Ethereum L1: 6 s (half the ~12 s block time). The old flat 2 s tripled
+ *  verify volume with no benefit — a new confirmation only lands once per
+ *  block — and at NAT'd offices the shared per-IP verify cap was being
+ *  blown by a couple of concurrent buyers. 6 s keeps post-block receipt-
+ *  indexing latency low while cutting mainnet verify volume ~3x.
+ *
+ *  L2s: poll at block time, floored at 2 s. Arbitrum's ~250 ms block would
+ *  otherwise drive ~4 polls/sec for nothing (confirmations are near-instant
+ *  and 1-conf windows are tiny). */
 function pollIntervalMs(chainId: number): number {
+  if (chainId === 1) return 6_000
   const blockTime = BLOCK_TIME_MS[chainId] ?? 4_000
-  return Math.max(1_500, Math.min(2_000, Math.floor(blockTime / 2)))
+  return Math.max(2_000, blockTime)
 }
 
 /** Total poll budget = enough to wait for the confirmation requirement
