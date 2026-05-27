@@ -588,6 +588,15 @@ export function CheckoutStep({
   const [manualHashError, setManualHashError] = useState<string | null>(null)
   const [manualHashSubmitting, setManualHashSubmitting] = useState(false)
   const manualHashResolverRef = useRef<((hash: `0x${string}`) => void) | null>(null)
+  // Separate manual-hash entry for the VERIFY-ONLY recovery state (distinct
+  // from the in-flow one above, which feeds a live sendWithRecovery promise).
+  // Covers the case where the buyer replaced/sped-up the tx out of band
+  // (e.g. between closing and reopening the page): the hash we persisted is
+  // the original, now-dropped one, so they paste the real (replacement)
+  // hash here. Also a catch-all for any tx we never managed to persist.
+  const [recoveryHashInput, setRecoveryHashInput] = useState('')
+  const [recoveryHashError, setRecoveryHashError] = useState<string | null>(null)
+  const [recoveryHashSubmitting, setRecoveryHashSubmitting] = useState(false)
   // Captured at recovery start so submitManualHash can validate the pasted
   // hash against the right payer + expected nonce before accepting it.
   const expectedTxRef = useRef<{ payer: string; chainId: number; expectedNonce: number | undefined } | null>(null)
@@ -1144,6 +1153,40 @@ export function CheckoutStep({
     }
   }
 
+  // Verify-only recovery using a hash the buyer pastes (replacement/bumped
+  // tx, or a tx we never persisted). The backend re-binds payer + amount +
+  // recipient to the stored quote, so a wrong hash is rejected on-chain; the
+  // client `from` check below is just for a friendlier early error.
+  async function submitRecoveryHash() {
+    const raw = recoveryHashInput.trim()
+    setRecoveryHashError(null)
+    if (!/^0x[0-9a-fA-F]{64}$/.test(raw)) {
+      setRecoveryHashError('That doesn’t look like a transaction hash. It should be 0x followed by 64 hex characters.')
+      return
+    }
+    if (!quote) {
+      setRecoveryHashError('No payment to recover. Please start a new payment.')
+      return
+    }
+    setRecoveryHashSubmitting(true)
+    try {
+      // Best-effort client check that the tx came from this order's payer.
+      // RPC lookup may lag/fail — the backend verify is the real authority.
+      try {
+        const tx = await getTransaction(wagmiConfig, { hash: raw as `0x${string}`, chainId: quote.chain_id })
+        if (tx && (tx.from ?? '').toLowerCase() !== quote.intended_payer.toLowerCase()) {
+          setRecoveryHashError('That transaction was sent from a different wallet than this order’s payment.')
+          return
+        }
+      } catch { /* lookup best-effort */ }
+      setRecoveryHashInput('')
+      persistTx(quote, raw)
+      runVerifyOnly(quote, raw)
+    } finally {
+      setRecoveryHashSubmitting(false)
+    }
+  }
+
   async function handlePay() {
     if (!picked || !address) return
     setError(null)
@@ -1686,6 +1729,8 @@ export function CheckoutStep({
     setQuote(null)
     setPendingTxHash(null)
     setConfirmProgress(null)
+    setRecoveryHashInput('')
+    setRecoveryHashError(null)
     setStatus('idle')
   }
 
@@ -2256,6 +2301,37 @@ export function CheckoutStep({
             >
               Check payment status
             </button>
+
+            {/* Replacement / bumped / never-persisted tx: let the buyer
+                paste the real hash from their wallet history. Backend
+                re-binds it to the quote's payer + amount + recipient. */}
+            <div className="wc-recovery-manual" style={{ marginTop: 12 }}>
+              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
+                Sped up or replaced the transaction? Paste the new hash:
+              </label>
+              <input
+                type="text"
+                inputMode="text"
+                placeholder="0x…"
+                value={recoveryHashInput}
+                onChange={e => setRecoveryHashInput(e.target.value)}
+                disabled={recoveryHashSubmitting}
+                style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 13 }}
+              />
+              {recoveryHashError && (
+                <div className="wc-recovery-error" style={{ marginTop: 4 }}>{recoveryHashError}</div>
+              )}
+              <button
+                type="button"
+                className="btn btn-secondary btn-block"
+                style={{ marginTop: 6 }}
+                onClick={submitRecoveryHash}
+                disabled={recoveryHashSubmitting || !recoveryHashInput.trim()}
+              >
+                {recoveryHashSubmitting ? 'Checking…' : 'Verify this transaction'}
+              </button>
+            </div>
+
             <button
               type="button"
               className="wc-find-wallet"
