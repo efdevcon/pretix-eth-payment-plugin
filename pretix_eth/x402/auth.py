@@ -144,27 +144,36 @@ def noop_auth(view_func):
 
 
 def get_client_ip(request) -> str:
-    """Return the buyer's IP, honoring `X-Forwarded-For` only when the request
-    arrived through a caller we already authenticated via TeamAPIToken.
+    """Return the buyer's IP for per-IP rate limiting.
 
-    The unsafe pattern (read XFF unconditionally) is a classic rate-limit
-    bypass — any client can spoof a unique XFF on every request and walk
-    around per-IP throttles. The mitigation is to trust XFF only from a
-    known proxy.
+    Two trust paths:
 
-    Rather than allowlisting proxy IPs (brittle on Netlify and other PaaS
-    edges where egress IPs aren't stable), we use the existing trust
-    boundary: `@require_pretix_token` sets `request._pretix_team` to a
-    valid TeamAPIToken's team. If that attribute is present, the request
-    came from a backend that already proved it's *our* proxy (it has a
-    token nobody else does), so we honor XFF. If it's absent, the request
-    is unauthenticated — typically a buyer's browser calling the legacy WC
-    flow directly — and any XFF on it is attacker-controlled, so we ignore
-    XFF and use the socket peer.
+    1) Token-authenticated callers (our Next.js proxy, `has_token=True`):
+       prefer the `X-Pretix-Buyer-Ip` header `pluginFetch` injects, then
+       its `X-Forwarded-For`. These are trustworthy because the caller
+       proved it's our backend by presenting a valid TeamAPIToken.
 
-    The monorepo's `pluginFetch` adds both `Authorization: Token …` and
-    `X-Forwarded-For: <buyer-ip>` to every plugin call, so this works
-    end-to-end with no new config on either side.
+    2) Direct buyer-browser calls to `/plugin/wc/*` (`has_token=False`):
+       these come THROUGH Cloudflare (our known front edge), which sets
+       `CF-Connecting-IP` and normalizes `X-Real-IP` / `X-Forwarded-For`.
+       We trust those, in that order, falling back to the socket peer.
+
+    Why this is safe — and why the previous "socket-only for tokenless"
+    rule was actively harmful: behind the Cloudflare → host chain the
+    socket peer (`REMOTE_ADDR`) is empty, so every buyer resolved to the
+    literal string 'unknown'. That collapsed ALL buyers into a single
+    shared rate-limit bucket — the per-IP limit wasn't per-IP at all, and
+    at launch the whole event's verify polls summed into one bucket and
+    tripped the limit almost immediately (see the launch retro: every
+    `rate limit exceeded (ip)` rejection logged `ip=unknown`).
+
+    The spoofing concern that motivated socket-only is real but moot here:
+    an attacker who can forge `CF-Connecting-IP`/`X-Real-IP` would have to
+    reach the origin *bypassing Cloudflare*. If the origin is locked to
+    Cloudflare's ranges (infra-level), these headers can't be forged; if
+    it isn't, the attacker could already evade the limit (and the old
+    behavior gave them an unlimited shared bucket anyway). Trusting CF's
+    headers strictly improves fairness for legitimate buyers.
     """
     import logging
     log = logging.getLogger('pretix_eth.client_ip')
@@ -177,6 +186,13 @@ def get_client_ip(request) -> str:
     pretix_buyer_ip = request.META.get('HTTP_X_PRETIX_BUYER_IP', '').strip()
     xff_raw = request.META.get('HTTP_X_FORWARDED_FOR', '')
     xff_first = xff_raw.split(',')[0].strip() if xff_raw else ''
+    # Cloudflare-set headers for direct buyer calls. `CF-Connecting-IP` is
+    # CF's canonical client-IP header (overwrites any client value);
+    # `X-Real-IP` is what the host proxy populates in this deployment (the
+    # launch logs showed it carrying the real IP while CF-Connecting-IP was
+    # absent), so we keep it as a fallback.
+    cf_connecting_ip = request.META.get('HTTP_CF_CONNECTING_IP', '').strip()
+    x_real_ip = request.META.get('HTTP_X_REAL_IP', '').strip()
 
     # Truthy = decorator validated a TeamAPIToken; this caller is one of
     # our trusted backends. None / missing = unauthenticated buyer call.
@@ -186,6 +202,15 @@ def get_client_ip(request) -> str:
     elif has_token and xff_first:
         resolved = xff_first
         path = 'token+xff'
+    elif cf_connecting_ip:
+        resolved = cf_connecting_ip
+        path = 'cf_connecting_ip'
+    elif x_real_ip:
+        resolved = x_real_ip
+        path = 'x_real_ip'
+    elif xff_first:
+        resolved = xff_first
+        path = 'xff'
     else:
         resolved = socket_ip
         path = 'socket'
