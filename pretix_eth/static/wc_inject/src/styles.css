@@ -441,11 +441,30 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   text-decoration: none;
   text-align: center;
   transition: color 0.15s;
+  /* Render identically whether used on an <a> (ConnectStep) or a <button>
+     (the recovery "start over" action) — strip native button chrome. */
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
 }
 .wc-find-wallet:hover {
   color: var(--pretix-brand-primary, #0066cc);
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+.wc-find-wallet:disabled {
+  opacity: 0.5;
+  cursor: default;
+  text-decoration: none;
+}
+
+/* Subtle, centered link sitting below the recovery box. */
+.wc-recovery-startover {
+  display: block;
+  margin: 14px auto 0;
+  width: fit-content;
 }
 /* When the helper appears inline below the Pay button (insufficient
    ETH balance case), give it a bit of breathing room from the button

@@ -892,11 +892,11 @@ export function CheckoutStep({
     // Cap consecutive rate-limit cooldowns. Without this the budget grows by
     // exactly the time we then sleep, so under sustained 429s the loop would
     // never exit and a buyer behind a throttled IP would sit in "Network
-    // busy" forever, never reaching the recovery options. After ~6 cooldowns
-    // (2+4+8+16+30+30 ≈ 90s of "busy") we give up the poll and throw, landing
+    // busy" forever, never reaching the recovery options. After 5 cooldowns
+    // (2+4+8+16+30 ≈ 60s of "busy") we give up the poll and throw, landing
     // the buyer on the error state (check status / paste hash / support) —
     // their tx is already on-chain, so this is safe, not a payment failure.
-    const MAX_RATE_LIMIT_COOLDOWNS = 6
+    const MAX_RATE_LIMIT_COOLDOWNS = 5
 
     // Shared rate-limit cooldown: surface a countdown to the UI, extend the
     // budget so the wait doesn't consume the confirmation window, sleep,
@@ -2320,42 +2320,44 @@ export function CheckoutStep({
 
             {/* Replacement / bumped / never-persisted tx: let the buyer
                 paste the real hash from their wallet history. Backend
-                re-binds it to the quote's payer + amount + recipient. */}
-            <div className="wc-recovery-manual" style={{ marginTop: 12 }}>
-              <label style={{ display: 'block', fontSize: 13, marginBottom: 4 }}>
-                Sped up or replaced the transaction? Paste the new hash:
-              </label>
-              <input
-                type="text"
-                inputMode="text"
-                placeholder="0x…"
-                value={recoveryHashInput}
-                onChange={e => setRecoveryHashInput(e.target.value)}
-                disabled={recoveryHashSubmitting}
-                style={{ width: '100%', boxSizing: 'border-box', fontFamily: 'monospace', fontSize: 13 }}
-              />
-              {recoveryHashError && (
-                <div className="wc-recovery-error" style={{ marginTop: 4 }}>{recoveryHashError}</div>
-              )}
-              <button
-                type="button"
-                className="btn btn-secondary btn-block"
-                style={{ marginTop: 6 }}
-                onClick={submitRecoveryHash}
-                disabled={recoveryHashSubmitting || !recoveryHashInput.trim()}
-              >
-                {recoveryHashSubmitting ? 'Checking…' : 'Verify this transaction'}
-              </button>
+                re-binds it to the quote's payer + amount + recipient.
+                Reuses the in-flow recovery-prompt styling so it matches the
+                rest of the checkout. */}
+            <div className="wc-recovery-prompt">
+              <div className="wc-recovery-message">
+                Sped up or replaced the transaction? Paste the new hash from
+                your wallet and we’ll verify it.
+              </div>
+              <div className="wc-recovery-row">
+                <input
+                  type="text"
+                  className="wc-recovery-input"
+                  placeholder="0x…"
+                  value={recoveryHashInput}
+                  onChange={e => setRecoveryHashInput(e.target.value)}
+                  disabled={recoveryHashSubmitting}
+                  spellCheck={false}
+                  autoComplete="off"
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary wc-recovery-submit"
+                  onClick={submitRecoveryHash}
+                  disabled={recoveryHashSubmitting || !recoveryHashInput.trim()}
+                >
+                  {recoveryHashSubmitting ? 'Verifying payment…' : 'Verify payment'}
+                </button>
+              </div>
+              {recoveryHashError && <div className="wc-recovery-error">{recoveryHashError}</div>}
             </div>
 
             <button
               type="button"
-              className="wc-find-wallet"
+              className="wc-find-wallet wc-recovery-startover"
               onClick={startOver}
               disabled={busy}
-              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
             >
-              My payment didn&apos;t go through — start a new one
+              My payment didn’t go through — start a new one
             </button>
           </>
         ) : (
