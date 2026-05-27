@@ -1448,6 +1448,8 @@ export function CheckoutStep({
           throw new Error('Wallet completed payment but did not return a transaction hash. Refresh and check your wallet history before retrying — your funds may already be on the way.')
         }
         minedHash = hash
+        // Persist as soon as we have the hash (5792 returns it post-mine).
+        persistTx(q, hash)
       } else if (isSafePath) {
         // ── Safe (multisig) path ──
         //
@@ -1483,6 +1485,10 @@ export function CheckoutStep({
         dbg('safe:tx:poll-start', { chainId: q.chain_id, safeTxHash })
         minedHash = await pollSafeTxService(q.chain_id, safeTxHash)
         dbg('safe:tx:poll-done', { safeTxHash, onChainHash: minedHash })
+        // Persist once we have the real on-chain hash (the Safe only
+        // executes after the co-signer threshold is met; before that no
+        // funds have moved, so there's nothing to recover).
+        persistTx(q, minedHash)
       } else {
         // ── Legacy path (EOA wallets, older WC sessions) ──
         //
@@ -1559,6 +1565,13 @@ export function CheckoutStep({
           expectedNonce,
         })
         dbg('legacy:walletSend:returned', { txHash })
+
+        // Persist immediately — the moment the wallet hands us a hash, the
+        // tx is (or is about to be) on-chain. Saving here, BEFORE the
+        // mining wait below, means a buyer who closes the tab during that
+        // wait still recovers into verify-only on return. Step 7 re-persists
+        // if a replacement hash supersedes this one.
+        persistTx(q, txHash)
 
         // Wait for the tx to actually be mined before telling the backend
         // to verify. Races viem's onReplaced-aware waitForTransactionReceipt
