@@ -889,12 +889,28 @@ export function CheckoutStep({
     // Default exponential backoff (2s → 4s → 8s …, capped 30s) with jitter.
     const backoffMs = () => Math.min(30_000, 2_000 * Math.pow(2, rlBackoff)) + Math.floor(Math.random() * 1_000)
 
+    // Cap consecutive rate-limit cooldowns. Without this the budget grows by
+    // exactly the time we then sleep, so under sustained 429s the loop would
+    // never exit and a buyer behind a throttled IP would sit in "Network
+    // busy" forever, never reaching the recovery options. After ~6 cooldowns
+    // (2+4+8+16+30+30 ≈ 90s of "busy") we give up the poll and throw, landing
+    // the buyer on the error state (check status / paste hash / support) —
+    // their tx is already on-chain, so this is safe, not a payment failure.
+    const MAX_RATE_LIMIT_COOLDOWNS = 6
+
     // Shared rate-limit cooldown: surface a countdown to the UI, extend the
     // budget so the wait doesn't consume the confirmation window, sleep,
     // then clear the cooldown. The tx is already mined, so a 429 here is
     // never fatal — we just wait for a verify slot.
     const cooldownSleep = async (wait: number) => {
       rlBackoff += 1
+      if (rlBackoff > MAX_RATE_LIMIT_COOLDOWNS) {
+        throw new Error(
+          'The network is busy and we couldn’t confirm your payment yet. '
+          + 'Your transaction may already be on its way — tap "Check payment status", '
+          + 'paste your transaction hash below, or contact support.'
+        )
+      }
       budget += wait
       setVerifyCooldownUntil(Date.now() + wait)
       await new Promise((r) => setTimeout(r, wait))
