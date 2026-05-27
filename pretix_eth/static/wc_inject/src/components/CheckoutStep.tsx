@@ -409,19 +409,24 @@ export function CheckoutStep({
   const pickStorageKey = `wc-pick:${config.orderCode}`
 
   // Persist the broadcast tx (hash + the quote it was paid against) the
-  // instant the wallet returns a hash, keyed by orderCode. If the tab
-  // reloads/crashes between broadcast and verify (common when the buyer
-  // thinks it's stuck and refreshes), we recover this on mount and resume
-  // verification of the EXISTING tx instead of landing them on a fresh
-  // Pay button — the double-pay trap. Cleared on verified success.
+  // instant the wallet returns a hash, keyed by orderCode. On the next
+  // load we recover this and resume verification of the EXISTING tx
+  // instead of landing the buyer on a fresh Pay button — the double-pay
+  // trap. Cleared on verified success, or via the "start over" escape if
+  // the tx never actually landed (reverted / abandoned).
+  //
+  // localStorage (not sessionStorage) so it survives the buyer CLOSING the
+  // tab and returning later in a new session — the most common real
+  // recovery case. Only ever written at broadcast time, so a buyer who
+  // never paid has nothing stored and always starts fresh on refresh.
   const txStorageKey = `wc-tx:${config.orderCode}`
   const persistTx = (q: Quote, hash: string) => {
     try {
-      window.sessionStorage.setItem(txStorageKey, JSON.stringify({ txHash: hash, quote: q }))
+      window.localStorage.setItem(txStorageKey, JSON.stringify({ txHash: hash, quote: q }))
     } catch { /* storage unavailable — best effort */ }
   }
   const clearPersistedTx = () => {
-    try { window.sessionStorage.removeItem(txStorageKey) } catch { /* ignore */ }
+    try { window.localStorage.removeItem(txStorageKey) } catch { /* ignore */ }
   }
 
   // Combined hydrate-or-default: try restoring from sessionStorage first,
@@ -1652,15 +1657,35 @@ export function CheckoutStep({
     runVerifyOnly(quote, pendingTxHash)
   }
 
+  // Escape hatch: discard the recovered/broadcast tx and return to a clean
+  // picker. For the buyer whose previous tx never actually landed (reverted
+  // on-chain, or they abandoned it) so verify-only can't ever succeed —
+  // without this they'd be stuck re-checking a dead tx forever. Guarded by
+  // a confirm() since "start over" after a real payment would double-charge.
+  function startOver() {
+    if (!window.confirm(
+      'Only start a new payment if your previous transaction did NOT go through.\n\n'
+      + 'If you already sent the payment, do NOT pay again — use "Check payment status" '
+      + 'or contact support instead, or you may be charged twice.\n\nStart a new payment?'
+    )) return
+    clearPersistedTx()
+    setError(null)
+    setQuote(null)
+    setPendingTxHash(null)
+    setConfirmProgress(null)
+    setStatus('idle')
+  }
+
   // Mount recovery: if a broadcast tx for this order is persisted (tab
-  // reload / crash mid-verify), resume verification of that exact tx
-  // rather than letting the buyer restart payment. Runs once.
+  // reload / crash mid-verify, or the buyer closed the tab and came back),
+  // resume verification of that exact tx rather than letting the buyer
+  // restart payment. Runs once.
   const recoveredTxRef = useRef(false)
   useEffect(() => {
     if (recoveredTxRef.current) return
     recoveredTxRef.current = true
     try {
-      const raw = window.sessionStorage.getItem(txStorageKey)
+      const raw = window.localStorage.getItem(txStorageKey)
       if (!raw) return
       const saved = JSON.parse(raw) as { txHash?: string; quote?: Quote }
       if (saved?.txHash && saved?.quote) {
@@ -2206,14 +2231,28 @@ export function CheckoutStep({
         hasBroadcastTx ? (
           // Safe recovery: re-verify the already-broadcast tx. Never
           // re-enters handlePay, so a paid buyer can't be charged twice.
-          <button
-            type="button"
-            className="btn btn-primary btn-lg btn-block wc-pay-btn"
-            disabled={busy}
-            onClick={retryVerifyOnly}
-          >
-            Check payment status
-          </button>
+          // The secondary "start a new payment" link is the escape for a
+          // buyer whose tx never landed (reverted/abandoned) — guarded by
+          // a confirm() so it can't be used to accidentally double-pay.
+          <>
+            <button
+              type="button"
+              className="btn btn-primary btn-lg btn-block wc-pay-btn"
+              disabled={busy}
+              onClick={retryVerifyOnly}
+            >
+              Check payment status
+            </button>
+            <button
+              type="button"
+              className="wc-find-wallet"
+              onClick={startOver}
+              disabled={busy}
+              style={{ background: 'none', border: 'none', cursor: 'pointer' }}
+            >
+              My payment didn&apos;t go through — start a new one
+            </button>
+          </>
         ) : (
           <button
             type="button"
