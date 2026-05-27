@@ -403,10 +403,21 @@ def admin_orders(request: HttpRequest, **kwargs):
                 # Surface the most recent quote (if any) so the manual-verify
                 # modal can pre-fill chain + symbol + payer from what the
                 # buyer originally signed. Admin can override any of these.
+                #
+                # The quote lives per-OrderPayment. When a buyer retries,
+                # Pretix cancels the old payment and creates a fresh
+                # `created` one — which often has only a challenge nonce and
+                # no quote yet. So we scan ALL walletconnect payments
+                # (created + canceled), newest first, and take the first
+                # one carrying a quote. That recovers the buyer's last real
+                # selection even when it lives on a now-superseded payment.
                 quote_info = None
-                for p in porder.payments.all():
-                    if p.provider != 'walletconnect' or p.state != 'created':
-                        continue
+                wc_payments = sorted(
+                    (p for p in porder.payments.all() if p.provider == 'walletconnect'),
+                    key=lambda p: p.created or porder.datetime,
+                    reverse=True,
+                )
+                for p in wc_payments:
                     q = (p.info_data or {}).get('quote') or {}
                     if q:
                         quote_info = {

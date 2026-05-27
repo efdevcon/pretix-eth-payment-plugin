@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   useAccount,
   useSignMessage,
@@ -732,6 +732,56 @@ export function CheckoutStep({
     return () => { cancelled = true }
   }, [address, config.urlPrefix, config.orderCode, config.orderSecret, organizer, event])
 
+  // ── Client-info telemetry beacon ──
+  // Reports which wallet brand + connection type buyers use, in two
+  // phases (greppable separately as `[wc-client] phase=connect` and
+  // `phase=pay`): once when a wallet connects, and once when the buyer
+  // initiates payment. sendBeacon is fire-and-forget and survives the
+  // user navigating away; params ride in the URL query so they land in
+  // both the access log and the app log (server reads request.GET on the
+  // POST beacon). Telemetry must never break checkout, so everything is
+  // wrapped and failures are swallowed.
+  const sendClientInfo = useCallback((phase: 'connect' | 'pay') => {
+    if (!address) return
+    try {
+      const params = new URLSearchParams({
+        phase,
+        organizer,
+        event,
+        order_code: config.orderCode,
+        wallet_name: connectedWalletName || '',
+        connection_kind: connectionKind,
+        // Wallet's currently-active chain vs the chain the buyer picked to
+        // pay on. A mismatch is the tell-tale of a needed chain switch,
+        // the most common "internal error" cause for mobile wallets.
+        wallet_chain: walletChainId != null ? String(walletChainId) : '',
+        picked_chain: picked ? String(picked.chain_id) : '',
+        picked_token: picked ? picked.symbol : '',
+        is_safe: isSafePath ? '1' : '0',
+        plugin_version: config.pluginVersion || '',
+        address,
+        ua: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+      })
+      const url = `${config.urlPrefix}/client-info/?${params.toString()}`
+      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        navigator.sendBeacon(url)
+      } else {
+        fetch(url, { method: 'POST', credentials: 'same-origin', keepalive: true }).catch(() => {})
+      }
+    } catch {
+      // swallow — telemetry is best-effort
+    }
+  }, [address, connectedWalletName, connectionKind, walletChainId, picked, isSafePath, config.urlPrefix, config.orderCode, config.pluginVersion, organizer, event])
+
+  // phase=connect: once per connected address (account switch re-logs).
+  const clientInfoConnectRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!address) return
+    if (clientInfoConnectRef.current === address) return
+    clientInfoConnectRef.current = address
+    sendClientInfo('connect')
+  }, [address, sendClientInfo])
+
   // Pretix's native submit button is hidden via `body.wc-full-checkout`, which
   // is now owned by WCPaymentApp (covers all stages, not just checkout).
 
@@ -966,6 +1016,9 @@ export function CheckoutStep({
   async function handlePay() {
     if (!picked || !address) return
     setError(null)
+    // phase=pay telemetry — fired here (not on every status change) so it
+    // marks an actual payment attempt, distinct from phase=connect.
+    sendClientInfo('pay')
     // Clear any hash from a previous attempt so the in-progress UI doesn't
     // show a stale "View transaction" link until this attempt has its own.
     setPendingTxHash(null)

@@ -36,6 +36,7 @@ def _wc_routes():
         path('plugin/wc/challenge/',       views.challenge,        name='wc_challenge'),
         path('plugin/wc/create-quote/',    views.create_quote,     name='wc_create_quote'),
         path('plugin/wc/verify/',          views.verify,           name='wc_verify'),
+        path('plugin/wc/client-info/',     views.client_info,      name='wc_client_info'),
     ]
 
 

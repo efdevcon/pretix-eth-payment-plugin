@@ -11,7 +11,7 @@ from typing import Optional
 
 from django.core.cache import cache
 from django.db import IntegrityError, transaction
-from django.http import JsonResponse, HttpRequest
+from django.http import JsonResponse, HttpRequest, HttpResponse
 from django.utils.timezone import now as tz_now
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -891,3 +891,71 @@ def verify(request, **kwargs):
         'block_number': vr.block_number,
         'order_code': order.code,
     })
+
+
+@csrf_exempt
+@require_http_methods(['GET', 'POST'])
+def client_info(request, **kwargs):
+    """Fire-and-forget telemetry beacon from the wc_inject bundle.
+
+    The bundle calls this once per wallet connection (via
+    navigator.sendBeacon) so we can see, from the server logs, which
+    wallets and connection types buyers actually use. There's no
+    server-side state change: we emit a single structured log line and
+    return 204.
+
+    Two phases are emitted, each greppable on its own:
+      - phase=connect : fired once when a wallet connects
+      - phase=pay     : fired when the buyer initiates the payment
+    so you can compare "who connected" vs "who actually tried to pay":
+      grep '\\[wc-client\\] phase=connect' app.log | grep -o 'wallet=[^ ]*' | sort | uniq -c
+      grep '\\[wc-client\\] phase=pay'     app.log | grep -o 'wallet=[^ ]*' | sort | uniq -c
+
+    Values are buyer-supplied (client-side wallet name / connection
+    kind), so they're truncated and treated as untrusted display strings
+    only; nothing here is used for authz or persisted. The endpoint is
+    per-IP rate limited like the other buyer endpoints to stop a client
+    spamming the log."""
+    client_ip = get_client_ip(request)
+    if not _wc_buyer_rate_limit(client_ip, 'client_info'):
+        # Quietly accept-and-drop: a beacon isn't worth a visible error,
+        # and the caller (sendBeacon) ignores the response anyway.
+        return HttpResponse(status=204)
+
+    def _clip(k, n=64):
+        # Read from query string first then POST body. navigator.sendBeacon
+        # issues a POST but the bundle puts the fields in the URL query,
+        # so GET-first covers both the beacon and a manual GET/POST.
+        v = request.GET.get(k) or request.POST.get(k) or ''
+        return v.strip().replace('\n', ' ').replace('\r', ' ')[:n]
+
+    # `phase` leads the line (right after the tag) so each event type is a
+    # fixed-prefix grep: `grep '[wc-client] phase=pay'`.
+    #
+    # Fields chosen for debugging the failure modes we actually see:
+    #   wallet_chain vs picked_chain  → reveals a needed chain switch
+    #     (the classic "internal error" cause when a mobile wallet is on
+    #     the wrong network)
+    #   is_safe                       → smart-account / Safe path, which
+    #     has a different signing + confirmation flow
+    #   ver                           → plugin version, to correlate a
+    #     spike of failures with a deploy
+    #   ua                            → browser/OS for platform-specific
+    #     wallet quirks (iOS Safari popup blocking, in-wallet browsers)
+    phase = _clip('phase', 16) or 'unknown'
+    log.info(
+        '[wc-client] phase=%s order=%s wallet=%s conn=%s wallet_chain=%s '
+        'picked_chain=%s picked_token=%s is_safe=%s ver=%s addr=%s ua=%s',
+        phase,
+        _clip('order_code', 16),
+        _clip('wallet_name'),
+        _clip('connection_kind', 24),
+        _clip('wallet_chain', 12),
+        _clip('picked_chain', 12),
+        _clip('picked_token', 16),
+        _clip('is_safe', 5),
+        _clip('plugin_version', 24),
+        _clip('address', 42),
+        _clip('ua', 180),
+    )
+    return HttpResponse(status=204)
