@@ -67,12 +67,17 @@ function pollIntervalMs(chainId: number): number {
   return Math.max(2_000, blockTime)
 }
 
-/** Total poll budget = enough to wait for the confirmation requirement
- *  plus one extra block of slack. Bounded at 90 s so a stuck chain
- *  surfaces as an error rather than hanging forever. */
+/** Total poll budget. Sized to cover the confirmation requirement *plus*
+ *  real-world RPC indexer lag, which often runs 5–25 s past block
+ *  production on mainnet — the old `blockTime * (req + 1) + 4 s` formula
+ *  gave only 52 s for a 3-conf mainnet wait, so buyers whose tx confirmed
+ *  in 50–60 s (very normal) were getting "Verification timed out" while
+ *  their payment had actually landed. Two extra blocks + 10 s indexer
+ *  slack covers that variance; ceiling raised to 120 s so a genuinely
+ *  stuck chain still surfaces an error in a reasonable window. */
 function pollMaxDurationMs(chainId: number, requiredConfs: number): number {
   const blockTime = BLOCK_TIME_MS[chainId] ?? 4_000
-  return Math.min(90_000, blockTime * (requiredConfs + 1) + 4_000)
+  return Math.min(120_000, blockTime * (requiredConfs + 2) + 10_000)
 }
 
 // Centralized debug logger. All wc_inject runtime logs share the same
@@ -981,7 +986,11 @@ export function CheckoutStep({
         }
       }
       setConfirmProgress(null)
-      throw new Error('Verification timed out. Try submitting the transaction hash manually below.')
+      // Reach this when the chain hasn't reported enough confirmations
+      // within the budget. Point the buyer at the in-app recovery, not
+      // a manual paste — we already have the hash, they just need to
+      // re-check it after the network catches up.
+      throw new Error('Your transaction is still confirming on the network. Tap "Check payment status" to keep watching, or refresh the page to resume — your payment will be picked up automatically.')
     } finally {
       // Never leave a stale cooldown countdown on screen after the poll ends.
       setVerifyCooldownUntil(null)
