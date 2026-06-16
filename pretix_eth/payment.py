@@ -327,6 +327,27 @@ class WalletConnectPayment(BasePaymentProvider):
             widget=_ChecklistOverHiddenField(choices=item_choices),
             required=False,
         )
+        # Per-item markup exemption. When a cart/order contains items from
+        # this list, the Stripe additional-fee (`_fee_percent` / `_fee_abs`)
+        # is applied only to the NON-exempt subtotal. Implemented in
+        # apps.py via a thread-local + monkey-patch on
+        # `StripeMethod.calculate_fee`. Same storage shape as
+        # `fiat_blocked_items` so the widget round-trips identically.
+        base['fiat_markup_exempt_items'] = forms.CharField(
+            label=_('Items exempt from Stripe markup'),
+            help_text=_(
+                'Tick the items that should NOT contribute to the Stripe '
+                'additional-fee base. Stripe is still available, but the '
+                'markup is applied only to the non-exempt portion of the '
+                'cart. Use for tiers where the fee would be misleading '
+                '(e.g. a $0 community pass that picked up a +20% fee on '
+                'an upstream paid item). Leave all unchecked to apply '
+                'the Stripe fee to the full cart. (Stored internally as '
+                'a comma-separated list of Pretix item IDs.)'
+            ),
+            widget=_ChecklistOverHiddenField(choices=item_choices),
+            required=False,
+        )
         # wc_inject's Safe-multisig support is opt-in per event. When ON, the
         # bundle un-excludes Safe from the AppKit picker, detects Safes via
         # Safe Transaction Service at connect time, surfaces a multi-signer

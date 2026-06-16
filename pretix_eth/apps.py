@@ -21,6 +21,7 @@ class EthApp(AppConfig):
         _install_order_placed_email_suppressor()
         _install_fiat_provider_restrictor()
         _install_fiat_fee_name_decoration()
+        _install_fiat_markup_exemption()
 
 
 def _install_order_placed_email_suppressor():
@@ -285,3 +286,168 @@ def _install_fiat_fee_name_decoration():
             _patch_class(cls)
         except Exception as e:
             log.warning('pretix_eth: failed to decorate %s.public_name: %s', cls.__name__, e)
+
+
+def _install_fiat_markup_exemption():
+    """Make Pretix's Stripe additional-fee opt out of selected items.
+
+    Pretix's `BasePaymentProvider.calculate_fee(price)` only sees a
+    scalar — it has no cart breakdown — so to give it per-item context
+    we stash the current cart positions in a thread-local at the two
+    call sites that already have them (`pretix.base.services.cart.get_fees`
+    for the buyer-side checkout view, `pretix.base.services.orders._get_fees`
+    for order placement) and consult that thread-local from the patched
+    `StripeMethod.calculate_fee`. The patched fee subtracts the exempt
+    subtotal from `price` before delegating to the original calc, so
+    the Stripe markup is applied only to non-exempt items.
+
+    Best-effort: less common fee-calc paths (admin re-pay, OrderChange
+    re-calc, ad-hoc PayPal2 prints) don't go through the wrapped call
+    sites, so the original full markup still applies there. That's fine
+    — the goal is to fix the buyer-facing cart/checkout flow.
+
+    Stripe-only: hooks `StripeMethod` and its loaded subclasses. Other
+    fiat providers (bank transfer, etc.) keep their original fees.
+    """
+    import logging
+    import threading
+    from decimal import Decimal
+    log = logging.getLogger(__name__)
+    try:
+        from pretix.plugins.stripe.payment import StripeMethod
+    except (ImportError, AttributeError) as e:
+        log.warning(
+            'pretix_eth: Stripe payment plugin not importable (%s); '
+            'fiat-markup exemption disabled.',
+            e,
+        )
+        return
+    try:
+        from pretix.base.services import cart as cart_svc, orders as orders_svc
+    except ImportError as e:
+        log.warning(
+            'pretix_eth: pretix services not importable (%s); '
+            'fiat-markup exemption disabled.',
+            e,
+        )
+        return
+
+    ctx = threading.local()
+
+    def _exempt_ids(event):
+        raw = event.settings.get(
+            'payment_walletconnect_fiat_markup_exempt_items',
+            as_type=str,
+            default='',
+        ) or ''
+        ids = set()
+        for tok in raw.split(','):
+            tok = tok.strip()
+            if not tok:
+                continue
+            try:
+                ids.add(int(tok))
+            except (TypeError, ValueError):
+                continue
+        return ids
+
+    def _exempt_subtotal_for(event):
+        positions = getattr(ctx, 'positions', None)
+        if not positions:
+            return Decimal('0')
+        ids = _exempt_ids(event)
+        if not ids:
+            return Decimal('0')
+        total = Decimal('0')
+        for p in positions:
+            item_id = getattr(p, 'item_id', None)
+            if item_id is None:
+                continue
+            if item_id not in ids:
+                continue
+            try:
+                # CartPosition / OrderPosition expose `.price` (gross).
+                total += Decimal(str(getattr(p, 'price', 0) or 0))
+            except (TypeError, ValueError):
+                continue
+        return total
+
+    def _make_wrapped_calc(orig):
+        def _wrapped(self, price):
+            try:
+                exempt = _exempt_subtotal_for(self.event)
+            except Exception as e:
+                log.debug('pretix_eth: fee-exempt calc failed: %s', e)
+                return orig(self, price)
+            if exempt <= Decimal('0'):
+                return orig(self, price)
+            try:
+                price_d = price if isinstance(price, Decimal) else Decimal(str(price))
+            except Exception:
+                return orig(self, price)
+            adjusted = max(Decimal('0'), price_d - exempt)
+            log.debug(
+                'pretix_eth: stripe fee adjusted for exempt items '
+                'price=%s exempt=%s adjusted=%s',
+                price_d, exempt, adjusted,
+            )
+            return orig(self, adjusted)
+        return _wrapped
+
+    # Patch the base + every loaded subclass. Same reasoning as the
+    # public_name decorator above: concrete Stripe methods can override.
+    targets = [StripeMethod] + list(StripeMethod.__subclasses__())
+    for cls in targets:
+        try:
+            own = cls.__dict__.get('calculate_fee')
+            orig = own if callable(own) else cls.calculate_fee
+            cls.calculate_fee = _make_wrapped_calc(orig)
+        except Exception as e:
+            log.warning('pretix_eth: failed to wrap %s.calculate_fee: %s', cls.__name__, e)
+
+    # Wrap the two call sites that have `positions` so the wrapped
+    # `calculate_fee` can see them via thread-local. The order-side
+    # helper has been called `_apply_rounding_and_fees` since the
+    # Pretix release that renamed it from `_get_fees`; if the name
+    # ever changes again the lookup falls through to a warning rather
+    # than crashing.
+    orig_cart_get_fees = cart_svc.get_fees
+    orig_orders_fn = getattr(orders_svc, '_apply_rounding_and_fees', None) or getattr(orders_svc, '_get_fees', None)
+    if orig_orders_fn is None:
+        log.warning(
+            'pretix_eth: neither orders._apply_rounding_and_fees nor '
+            'orders._get_fees found; markup exemption will only apply '
+            'on the cart-side flow.'
+        )
+
+    def _wrapped_cart_get_fees(*args, **kwargs):
+        # cart.get_fees(event, request, _total_ignored_=None,
+        #               invoice_address=None, payments=None, positions=None)
+        positions = kwargs.get('positions')
+        if positions is None and len(args) >= 6:
+            positions = args[5]
+        ctx.positions = positions
+        try:
+            return orig_cart_get_fees(*args, **kwargs)
+        finally:
+            ctx.positions = None
+
+    def _wrapped_orders_fn(*args, **kwargs):
+        # _apply_rounding_and_fees(positions, payment_requests, address,
+        #                          meta_info, event, require_approval=False)
+        # positions is consistently the first positional argument.
+        positions = kwargs.get('positions')
+        if positions is None and args:
+            positions = args[0]
+        ctx.positions = positions
+        try:
+            return orig_orders_fn(*args, **kwargs)
+        finally:
+            ctx.positions = None
+
+    cart_svc.get_fees = _wrapped_cart_get_fees
+    if orig_orders_fn is not None:
+        if hasattr(orders_svc, '_apply_rounding_and_fees'):
+            orders_svc._apply_rounding_and_fees = _wrapped_orders_fn
+        else:
+            orders_svc._get_fees = _wrapped_orders_fn
