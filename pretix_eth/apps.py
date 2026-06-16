@@ -166,9 +166,13 @@ def _install_fiat_provider_restrictor():
             except Exception:
                 cart_id = None
 
+        # Ignore add-on positions (addon_to NOT NULL) so a buyer adding a
+        # restricted add-on to an unrelated main item doesn't change the
+        # available payment methods. Add-ons follow their parent's rules.
         if cart_id:
             matched = CartPosition.objects.filter(
                 cart_id=cart_id, event=event, item_id__in=blocked_ids,
+                addon_to__isnull=True,
             ).values_list('item_id', flat=True)
             matched_list = list(matched)
             if matched_list:
@@ -187,6 +191,7 @@ def _install_fiat_provider_restrictor():
         if order_code:
             matched = OrderPosition.objects.filter(
                 order__code=order_code, order__event=event, item_id__in=blocked_ids,
+                addon_to__isnull=True,
             ).values_list('item_id', flat=True)
             matched_list = list(matched)
             if matched_list:
@@ -258,11 +263,16 @@ def _current_cart_fully_exempt(event):
         return False
 
     from pretix.base.models import CartPosition
-    positions = CartPosition.objects.filter(cart_id=cart_id, event=event)
+    # Only consider base (non-addon) positions; add-ons inherit their
+    # parent's payment treatment, so a non-exempt add-on shouldn't make
+    # an otherwise-exempt cart look mixed.
+    positions = CartPosition.objects.filter(
+        cart_id=cart_id, event=event, addon_to__isnull=True,
+    )
     item_ids = list(positions.values_list('item_id', flat=True))
     if not item_ids:
         return False
-    # Fully exempt only when EVERY position's item is in the exempt set.
+    # Fully exempt only when EVERY main-item position is in the exempt set.
     return all(iid in exempt_ids for iid in item_ids)
 
 
@@ -449,7 +459,12 @@ def _install_fiat_markup_exemption():
 
         from django.db.models import Sum
         from pretix.base.models import CartPosition
-        qs = CartPosition.objects.filter(cart_id=cart_id, event=event, item_id__in=ids)
+        # Add-ons follow their parent's payment rules, so they don't count
+        # toward the exempt subtotal even when their own item is exempt.
+        qs = CartPosition.objects.filter(
+            cart_id=cart_id, event=event, item_id__in=ids,
+            addon_to__isnull=True,
+        )
         matched_items = list(qs.values_list('item_id', flat=True))
         agg = qs.aggregate(s=Sum('price'))
         total = agg.get('s') or Decimal('0')
