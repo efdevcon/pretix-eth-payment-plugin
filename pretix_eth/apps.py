@@ -150,15 +150,32 @@ def _install_fiat_provider_restrictor():
         from pretix.base.models import CartPosition, OrderPosition
 
         # Cart flow — buyer is in checkout, no order yet.
+        # Pretix's helper is `get_or_create_cart_id(request, create=False)`
+        # (returns None when no cart exists). Falls back to the session key
+        # `current_cart_event_<pk>` if the import path ever changes.
+        cart_id = None
         try:
-            from pretix.presale.views.cart import get_cart_id
-            cart_id = get_cart_id(request, create=False)
-        except Exception:
-            cart_id = None
-        if cart_id and CartPosition.objects.filter(
-            cart_id=cart_id, event=event, item_id__in=blocked_ids,
-        ).exists():
-            return True
+            from pretix.presale.views.cart import get_or_create_cart_id
+            cart_id = get_or_create_cart_id(request, create=False)
+        except Exception as e:
+            log.debug('pretix_eth: get_or_create_cart_id failed (%s); falling back to session key', e)
+        if not cart_id:
+            try:
+                cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
+            except Exception:
+                cart_id = None
+
+        if cart_id:
+            matched = CartPosition.objects.filter(
+                cart_id=cart_id, event=event, item_id__in=blocked_ids,
+            ).values_list('item_id', flat=True)
+            matched_list = list(matched)
+            if matched_list:
+                log.info(
+                    'pretix_eth: fiat blocked for cart=%s event=%s (matched items %s in blocked set %s)',
+                    cart_id, event.slug, matched_list, sorted(blocked_ids),
+                )
+                return True
 
         # Order re-pay flow — order code lives in the URL kwargs.
         try:
@@ -166,10 +183,17 @@ def _install_fiat_provider_restrictor():
             order_code = match.kwargs.get('order') if match else None
         except Exception:
             order_code = None
-        if order_code and OrderPosition.objects.filter(
-            order__code=order_code, order__event=event, item_id__in=blocked_ids,
-        ).exists():
-            return True
+        if order_code:
+            matched = OrderPosition.objects.filter(
+                order__code=order_code, order__event=event, item_id__in=blocked_ids,
+            ).values_list('item_id', flat=True)
+            matched_list = list(matched)
+            if matched_list:
+                log.info(
+                    'pretix_eth: fiat blocked for order=%s event=%s (matched items %s in blocked set %s)',
+                    order_code, event.slug, matched_list, sorted(blocked_ids),
+                )
+                return True
 
         return False
 
