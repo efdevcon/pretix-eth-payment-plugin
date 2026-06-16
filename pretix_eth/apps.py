@@ -470,10 +470,27 @@ def _install_fiat_markup_exemption():
     else:
         orig_csp = CartMixin.current_selected_payments
 
-        def _wrapped_csp(self, positions, fees, invoice_address, **kwargs):
+        def _wrapped_csp(self, *args, **kwargs):
+            # Signature varies across Pretix releases:
+            #   newer: (self, positions, fees, invoice_address, *, warn=False)
+            #   older/current: (self, total)
+            # Try kwargs first, then a list-like first positional, then
+            # fall back to CartMixin's own cart-position attributes.
+            positions = kwargs.get('positions')
+            if positions is None and args:
+                a0 = args[0]
+                # Decimal/int/float/str → it's `total`, not positions.
+                if hasattr(a0, '__iter__') and not isinstance(a0, (str, bytes, Decimal, int, float)):
+                    positions = a0
+            if positions is None:
+                positions = (
+                    getattr(self, 'positions', None)
+                    or getattr(self, 'cart_positions', None)
+                    or None
+                )
             ctx.positions = positions
             try:
-                return orig_csp(self, positions, fees, invoice_address, **kwargs)
+                return orig_csp(self, *args, **kwargs)
             finally:
                 ctx.positions = None
 
