@@ -206,6 +206,66 @@ def _install_fiat_provider_restrictor():
     StripeMethod.is_allowed = _wrapped_is_allowed
 
 
+def _current_cart_fully_exempt(event):
+    """Returns True when every position in the buyer's current cart for
+    `event` is in the event's `payment_walletconnect_fiat_markup_exempt_items`
+    list. Used by the `public_name` decorator to suppress the misleading
+    "+X%" prefix when the actual Stripe fee will be $0.
+
+    Reads the active request from the thread-local that
+    `_install_fiat_markup_exemption` populates via `process_request`.
+    Returns False on any error / when the request or cart isn't available
+    so we fail open (label keeps the prefix, matching the prior behaviour).
+    """
+    from decimal import Decimal
+    ctx = globals().get('_fee_exempt_ctx')
+    if ctx is None:
+        return False
+    request = getattr(ctx, 'request', None)
+    if request is None:
+        return False
+
+    raw = event.settings.get(
+        'payment_walletconnect_fiat_markup_exempt_items',
+        as_type=str,
+        default='',
+    ) or ''
+    exempt_ids = set()
+    for tok in raw.split(','):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            exempt_ids.add(int(tok))
+        except (TypeError, ValueError):
+            continue
+    if not exempt_ids:
+        return False
+
+    # Resolve cart_id the same way the fee patch does.
+    cart_id = None
+    try:
+        from pretix.presale.views.cart import get_or_create_cart_id
+        cart_id = get_or_create_cart_id(request, create=False)
+    except Exception:
+        pass
+    if not cart_id:
+        try:
+            cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
+        except Exception:
+            return False
+    if not cart_id:
+        return False
+
+    from pretix.base.models import CartPosition
+    positions = CartPosition.objects.filter(cart_id=cart_id, event=event)
+    item_ids = list(positions.values_list('item_id', flat=True))
+    if not item_ids:
+        return False
+    # Fully exempt only when EVERY position's item is in the exempt set.
+    return all(iid in exempt_ids for iid in item_ids)
+
+
 def _install_fiat_fee_name_decoration():
     """Append the configured Stripe additional-fee (percentage and/or
     absolute amount) to the buyer-facing payment-method label, so the
@@ -247,6 +307,19 @@ def _install_fiat_fee_name_decoration():
                 fee_abs = self.settings.get('_fee_abs', as_type=Decimal, default=Decimal('0')) or Decimal('0')
             except Exception:
                 return base
+
+            # Suppress the markup prefix when the current cart is fully
+            # exempt — otherwise the buyer sees "+20% · Credit card" but
+            # actually pays $0 markup, which is misleading. We consult
+            # the shared thread-local request set up by the markup
+            # exemption installer; if the cart is fully covered by the
+            # exempt list, skip the prefix.
+            try:
+                if _current_cart_fully_exempt(self.event):
+                    return base
+            except Exception:
+                pass
+
             # Each bit is a bare amount ("20%", "1.50 USD"); we glue them
             # with " + " and prefix the whole block with one "+" so a
             # combined pct+abs fee reads as "+20% + 1.50 USD" rather than
