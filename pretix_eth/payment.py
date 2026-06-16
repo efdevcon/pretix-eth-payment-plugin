@@ -7,6 +7,7 @@ from django import forms
 from django.conf import settings as dj_settings
 from django.http import HttpRequest
 from django.template.loader import get_template
+from django.templatetags.static import static as static_url
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -93,12 +94,16 @@ class _ChecklistOverHiddenField(forms.Widget):
     which round-trips reliably, unlike `MultipleChoiceField` here.
 
     The companion script at `static/pretix_eth/fiat_blocked_items.js`
-    listens for checkbox changes and updates the hidden input. It's
-    pulled in automatically via `class Media` below.
-    """
+    syncs checkbox state to the hidden input on change. We include the
+    `<script src="…">` tag directly in the widget output (rather than
+    relying on `class Media`) because Pretix's payment-settings template
+    doesn't always render form.media for provider sub-forms. The script
+    is idempotent — if it ever loads twice, wiring isn't doubled.
 
-    class Media:
-        js = ('pretix_eth/fiat_blocked_items.js',)
+    Each row is wrapped in a `<div>` so Pretix admin's form-row CSS
+    (which forces `label { display: inline-block }`) can't collapse the
+    checklist back onto one line.
+    """
 
     def __init__(self, choices, attrs=None):
         super().__init__(attrs)
@@ -117,22 +122,27 @@ class _ChecklistOverHiddenField(forms.Widget):
             )
         else:
             def _row(value, label):
-                attrs_str = ' checked' if str(value) in selected else ''
+                checked_attr = mark_safe(' checked') if str(value) in selected else ''
                 return format_html(
-                    '<label style="display:block;margin:2px 0;font-weight:400;cursor:pointer">'
-                    '<input type="checkbox" value="{}" style="margin-right:6px"{}> {}'
-                    '</label>',
-                    str(value), mark_safe(attrs_str), label,
+                    '<div style="display:block;padding:3px 0;line-height:1.5">'
+                    '<label style="font-weight:400;cursor:pointer;margin-bottom:0">'
+                    '<input type="checkbox" value="{}" style="margin-right:8px;vertical-align:middle"{}>'
+                    '<span style="vertical-align:middle">{}</span>'
+                    '</label>'
+                    '</div>',
+                    str(value), checked_attr, label,
                 )
             items_html = mark_safe(''.join(_row(v, l) for v, l in self.choices))
 
         return format_html(
             '<input type="hidden" name="{name}" id="{hid}" value="{val}">'
             '<div data-fiat-cb-group="{hid}" '
-            'style="max-height:260px;overflow:auto;border:1px solid #ddd;'
-            'border-radius:4px;padding:6px 10px;margin-top:4px;background:#fafafa">'
-            '{rows}</div>',
+            'style="max-height:320px;overflow:auto;border:1px solid #ddd;'
+            'border-radius:4px;padding:8px 12px;margin-top:4px;background:#fafafa">'
+            '{rows}</div>'
+            '<script src="{js}"></script>',
             name=name, hid=hidden_id, val=value_str, rows=items_html,
+            js=static_url('pretix_eth/fiat_blocked_items.js'),
         )
 
 

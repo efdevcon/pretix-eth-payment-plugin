@@ -26,6 +26,12 @@
 
   function wire() {
     document.querySelectorAll('[data-fiat-cb-group]').forEach(function (group) {
+      // Idempotency: the widget includes the <script src> inline, so on
+      // some Pretix template paths this file could load twice. Mark each
+      // group on first wiring and skip subsequent passes.
+      if (group.dataset.fiatWired === '1') return
+      group.dataset.fiatWired = '1'
+
       var hiddenId = group.getAttribute('data-fiat-cb-group')
       var hidden = document.getElementById(hiddenId)
       if (!hidden) return
