@@ -349,8 +349,10 @@ def _install_fiat_markup_exemption():
     def _exempt_subtotal_for(event):
         request = getattr(ctx, 'request', None)
         if request is None:
+            log.info('pretix_eth[exempt]: no request in thread-local (signal not firing?)')
             return Decimal('0')
         ids = _exempt_ids(event)
+        log.info('pretix_eth[exempt]: event=%s configured exempt_ids=%s', getattr(event, 'slug', '?'), sorted(ids))
         if not ids:
             return Decimal('0')
 
@@ -360,21 +362,28 @@ def _install_fiat_markup_exemption():
             from pretix.presale.views.cart import get_or_create_cart_id
             cart_id = get_or_create_cart_id(request, create=False)
         except Exception as e:
-            log.debug('pretix_eth: get_or_create_cart_id failed (%s)', e)
+            log.info('pretix_eth[exempt]: get_or_create_cart_id failed (%s)', e)
         if not cart_id:
             try:
                 cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
-            except Exception:
+                log.info('pretix_eth[exempt]: fell back to session key, cart_id=%s', cart_id)
+            except Exception as e:
+                log.info('pretix_eth[exempt]: session lookup failed (%s)', e)
                 cart_id = None
         if not cart_id:
+            log.info('pretix_eth[exempt]: no cart_id resolved for event=%s', getattr(event, 'slug', '?'))
             return Decimal('0')
 
         from django.db.models import Sum
         from pretix.base.models import CartPosition
-        agg = CartPosition.objects.filter(
-            cart_id=cart_id, event=event, item_id__in=ids,
-        ).aggregate(s=Sum('price'))
+        qs = CartPosition.objects.filter(cart_id=cart_id, event=event, item_id__in=ids)
+        matched_items = list(qs.values_list('item_id', flat=True))
+        agg = qs.aggregate(s=Sum('price'))
         total = agg.get('s') or Decimal('0')
+        log.info(
+            'pretix_eth[exempt]: cart=%s matched_items=%s exempt_total=%s',
+            cart_id, matched_items, total,
+        )
         return total
 
     def _make_wrapped_calc(orig):
