@@ -292,22 +292,24 @@ def _install_fiat_markup_exemption():
     """Make Pretix's Stripe additional-fee opt out of selected items.
 
     Pretix's `BasePaymentProvider.calculate_fee(price)` only sees a
-    scalar — it has no cart breakdown — so to give it per-item context
-    we stash the current cart positions in a thread-local at the two
-    call sites that already have them (`pretix.base.services.cart.get_fees`
-    for the buyer-side checkout view, `pretix.base.services.orders._get_fees`
-    for order placement) and consult that thread-local from the patched
-    `StripeMethod.calculate_fee`. The patched fee subtracts the exempt
-    subtotal from `price` before delegating to the original calc, so
-    the Stripe markup is applied only to non-exempt items.
+    scalar — no cart breakdown — and Pretix itself fans the fee
+    calculation across at least four code paths (cart preview,
+    PaymentStep.provider_forms chooser, CartMixin.current_selected_payments,
+    order placement) that don't share a clean hook. Rather than wrap
+    each call site we capture the current presale request via Pretix's
+    `process_request` / `process_response` signals into a thread-local,
+    then have the patched `StripeMethod.calculate_fee` look up the cart
+    positions itself (from `request.session` → cart_id → CartPosition).
+    Single sync point, covers every fee-calc path that runs during a
+    buyer-side request.
 
-    Best-effort: less common fee-calc paths (admin re-pay, OrderChange
-    re-calc, ad-hoc PayPal2 prints) don't go through the wrapped call
-    sites, so the original full markup still applies there. That's fine
-    — the goal is to fix the buyer-facing cart/checkout flow.
+    Order-placement and re-pay paths run inside the same request, so the
+    thread-local is still populated. Admin-side recalculations (no
+    presale request) fall through to the original markup — acceptable
+    since the goal is the buyer experience.
 
     Stripe-only: hooks `StripeMethod` and its loaded subclasses. Other
-    fiat providers (bank transfer, etc.) keep their original fees.
+    fiat providers keep their original fees.
     """
     import logging
     import threading
@@ -322,16 +324,9 @@ def _install_fiat_markup_exemption():
             e,
         )
         return
-    try:
-        from pretix.base.services import cart as cart_svc, orders as orders_svc
-    except ImportError as e:
-        log.warning(
-            'pretix_eth: pretix services not importable (%s); '
-            'fiat-markup exemption disabled.',
-            e,
-        )
-        return
 
+    # Thread-local stash for the current presale request. Set by the
+    # process_request receiver below, cleared by process_response.
     ctx = threading.local()
 
     def _exempt_ids(event):
@@ -352,24 +347,34 @@ def _install_fiat_markup_exemption():
         return ids
 
     def _exempt_subtotal_for(event):
-        positions = getattr(ctx, 'positions', None)
-        if not positions:
+        request = getattr(ctx, 'request', None)
+        if request is None:
             return Decimal('0')
         ids = _exempt_ids(event)
         if not ids:
             return Decimal('0')
-        total = Decimal('0')
-        for p in positions:
-            item_id = getattr(p, 'item_id', None)
-            if item_id is None:
-                continue
-            if item_id not in ids:
-                continue
+
+        # Resolve the active cart for this event.
+        cart_id = None
+        try:
+            from pretix.presale.views.cart import get_or_create_cart_id
+            cart_id = get_or_create_cart_id(request, create=False)
+        except Exception as e:
+            log.debug('pretix_eth: get_or_create_cart_id failed (%s)', e)
+        if not cart_id:
             try:
-                # CartPosition / OrderPosition expose `.price` (gross).
-                total += Decimal(str(getattr(p, 'price', 0) or 0))
-            except (TypeError, ValueError):
-                continue
+                cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
+            except Exception:
+                cart_id = None
+        if not cart_id:
+            return Decimal('0')
+
+        from django.db.models import Sum
+        from pretix.base.models import CartPosition
+        agg = CartPosition.objects.filter(
+            cart_id=cart_id, event=event, item_id__in=ids,
+        ).aggregate(s=Sum('price'))
+        total = agg.get('s') or Decimal('0')
         return total
 
     def _make_wrapped_calc(orig):
@@ -386,16 +391,16 @@ def _install_fiat_markup_exemption():
             except Exception:
                 return orig(self, price)
             adjusted = max(Decimal('0'), price_d - exempt)
-            log.debug(
+            log.info(
                 'pretix_eth: stripe fee adjusted for exempt items '
-                'price=%s exempt=%s adjusted=%s',
-                price_d, exempt, adjusted,
+                'event=%s price=%s exempt=%s adjusted=%s',
+                getattr(self.event, 'slug', '?'), price_d, exempt, adjusted,
             )
             return orig(self, adjusted)
         return _wrapped
 
-    # Patch the base + every loaded subclass. Same reasoning as the
-    # public_name decorator above: concrete Stripe methods can override.
+    # Patch the base + every loaded subclass. Stripe-CC, Stripe-SEPA, etc.
+    # can each define their own calculate_fee; we wrap whichever they have.
     targets = [StripeMethod] + list(StripeMethod.__subclasses__())
     for cls in targets:
         try:
@@ -405,93 +410,26 @@ def _install_fiat_markup_exemption():
         except Exception as e:
             log.warning('pretix_eth: failed to wrap %s.calculate_fee: %s', cls.__name__, e)
 
-    # Wrap the two call sites that have `positions` so the wrapped
-    # `calculate_fee` can see them via thread-local. The order-side
-    # helper has been called `_apply_rounding_and_fees` since the
-    # Pretix release that renamed it from `_get_fees`; if the name
-    # ever changes again the lookup falls through to a warning rather
-    # than crashing.
-    orig_cart_get_fees = cart_svc.get_fees
-    orig_orders_fn = getattr(orders_svc, '_apply_rounding_and_fees', None) or getattr(orders_svc, '_get_fees', None)
-    if orig_orders_fn is None:
-        log.warning(
-            'pretix_eth: neither orders._apply_rounding_and_fees nor '
-            'orders._get_fees found; markup exemption will only apply '
-            'on the cart-side flow.'
-        )
-
-    def _wrapped_cart_get_fees(*args, **kwargs):
-        # cart.get_fees(event, request, _total_ignored_=None,
-        #               invoice_address=None, payments=None, positions=None)
-        positions = kwargs.get('positions')
-        if positions is None and len(args) >= 6:
-            positions = args[5]
-        ctx.positions = positions
-        try:
-            return orig_cart_get_fees(*args, **kwargs)
-        finally:
-            ctx.positions = None
-
-    def _wrapped_orders_fn(*args, **kwargs):
-        # _apply_rounding_and_fees(positions, payment_requests, address,
-        #                          meta_info, event, require_approval=False)
-        # positions is consistently the first positional argument.
-        positions = kwargs.get('positions')
-        if positions is None and args:
-            positions = args[0]
-        ctx.positions = positions
-        try:
-            return orig_orders_fn(*args, **kwargs)
-        finally:
-            ctx.positions = None
-
-    cart_svc.get_fees = _wrapped_cart_get_fees
-    if orig_orders_fn is not None:
-        if hasattr(orders_svc, '_apply_rounding_and_fees'):
-            orders_svc._apply_rounding_and_fees = _wrapped_orders_fn
-        else:
-            orders_svc._get_fees = _wrapped_orders_fn
-
-    # Third sync point: the buyer-facing CartMixin re-computes the fee
-    # ad-hoc on the checkout page (see Pretix's own warning at
-    # presale/views/__init__.py:290 — "algorithm needs to stay in sync
-    # between the following places"). Without this wrap the displayed
-    # markup ignores the exemption even though the saved order would
-    # apply it. Patching the method directly keeps the thread-local set
-    # while Pretix recalculates.
+    # Capture the presale request into the thread-local so calculate_fee
+    # can find the cart. Pretix fires these signals from its presale
+    # middleware on every event-scoped page, including checkout/confirm
+    # POSTs that create orders — so order placement inherits the same
+    # request context.
     try:
-        from pretix.presale.views import CartMixin
+        from django.dispatch import receiver
+        from pretix.presale.signals import process_request, process_response
     except (ImportError, AttributeError) as e:
         log.warning(
-            'pretix_eth: pretix.presale.views.CartMixin not importable (%s); '
-            'buyer-facing checkout will not honour fee exemptions.',
-            e,
+            'pretix_eth: presale signals not importable (%s); '
+            'fiat-markup exemption will not run.', e,
         )
-    else:
-        orig_csp = CartMixin.current_selected_payments
+        return
 
-        def _wrapped_csp(self, *args, **kwargs):
-            # Signature varies across Pretix releases:
-            #   newer: (self, positions, fees, invoice_address, *, warn=False)
-            #   older/current: (self, total)
-            # Try kwargs first, then a list-like first positional, then
-            # fall back to CartMixin's own cart-position attributes.
-            positions = kwargs.get('positions')
-            if positions is None and args:
-                a0 = args[0]
-                # Decimal/int/float/str → it's `total`, not positions.
-                if hasattr(a0, '__iter__') and not isinstance(a0, (str, bytes, Decimal, int, float)):
-                    positions = a0
-            if positions is None:
-                positions = (
-                    getattr(self, 'positions', None)
-                    or getattr(self, 'cart_positions', None)
-                    or None
-                )
-            ctx.positions = positions
-            try:
-                return orig_csp(self, *args, **kwargs)
-            finally:
-                ctx.positions = None
+    @receiver(process_request, dispatch_uid='pretix_eth_fee_exempt_capture')
+    def _capture_request(sender, request, **kwargs):
+        ctx.request = request
 
-        CartMixin.current_selected_payments = _wrapped_csp
+    @receiver(process_response, dispatch_uid='pretix_eth_fee_exempt_release')
+    def _release_request(sender, request, response, **kwargs):
+        ctx.request = None
+        return response
