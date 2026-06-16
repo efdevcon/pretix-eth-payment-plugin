@@ -429,14 +429,57 @@ def _install_fiat_markup_exemption():
                 continue
         return ids
 
+    def _exempt_subtotal_from_positions(event, positions, ids):
+        """Compute exempt subtotal directly from an in-memory positions list.
+        Used when we have positions but no live request (e.g. Celery
+        order placement). Mirrors the DB query logic in
+        `_exempt_subtotal_for`: a position is exempt if it's a main
+        position whose item is in `ids`, OR an add-on attached to such
+        a main position."""
+        from decimal import Decimal as D
+        # Build set of PKs of exempt main positions, by iterating once.
+        exempt_main_pks = set()
+        for p in positions:
+            if getattr(p, 'addon_to_id', None) is None and getattr(p, 'item_id', None) in ids:
+                pk = getattr(p, 'pk', None)
+                if pk is not None:
+                    exempt_main_pks.add(pk)
+        if not exempt_main_pks:
+            return D('0')
+        total = D('0')
+        for p in positions:
+            pk = getattr(p, 'pk', None)
+            addon_to = getattr(p, 'addon_to_id', None)
+            if pk in exempt_main_pks or addon_to in exempt_main_pks:
+                try:
+                    total += D(str(getattr(p, 'price', 0) or 0))
+                except Exception:
+                    continue
+        return total
+
     def _exempt_subtotal_for(event):
+        ids = _exempt_ids(event)
+        if not ids:
+            log.info('pretix_eth[exempt]: event=%s no exempt items configured', getattr(event, 'slug', '?'))
+            return Decimal('0')
+        log.info('pretix_eth[exempt]: event=%s configured exempt_ids=%s', getattr(event, 'slug', '?'), sorted(ids))
+
+        # PRIMARY path: positions stashed by the _apply_rounding_and_fees
+        # wrap below. Works in Celery (order-placement) where no HTTP
+        # request is active. Also covers HTTP paths that pass through
+        # _apply_rounding_and_fees.
+        positions = getattr(ctx, 'positions', None)
+        if positions is not None:
+            total = _exempt_subtotal_from_positions(event, positions, ids)
+            log.info(
+                'pretix_eth[exempt]: from-positions positions_count=%s exempt_total=%s',
+                len(positions), total,
+            )
+            return total
+
         request = getattr(ctx, 'request', None)
         if request is None:
-            log.info('pretix_eth[exempt]: no request in thread-local (signal not firing?)')
-            return Decimal('0')
-        ids = _exempt_ids(event)
-        log.info('pretix_eth[exempt]: event=%s configured exempt_ids=%s', getattr(event, 'slug', '?'), sorted(ids))
-        if not ids:
+            log.info('pretix_eth[exempt]: no request and no positions in thread-local')
             return Decimal('0')
 
         # Resolve the active cart for this event.
@@ -521,6 +564,31 @@ def _install_fiat_markup_exemption():
     orig_calc = StripeMethod.calculate_fee
     StripeMethod.calculate_fee = _make_wrapped_calc(orig_calc)
     log.info('pretix_eth[install]: fiat-markup exemption patched calculate_fee on StripeMethod (subclasses inherit)')
+
+    # ALSO wrap _apply_rounding_and_fees (the function Pretix calls
+    # from both cart preview and order placement). This stashes the
+    # positions list directly so calculate_fee can compute the exempt
+    # subtotal without needing the HTTP request — critical for the
+    # Celery-driven order-placement path where the presale `process_request`
+    # signal never fires and ctx.request would be None.
+    try:
+        from pretix.base.services import orders as orders_svc
+        orig_apply = getattr(orders_svc, '_apply_rounding_and_fees', None)
+    except ImportError:
+        orig_apply = None
+    if orig_apply is not None:
+        def _wrapped_apply(*args, **kwargs):
+            positions = kwargs.get('positions')
+            if positions is None and args:
+                positions = args[0]
+            prev = getattr(ctx, 'positions', None)
+            ctx.positions = positions
+            try:
+                return orig_apply(*args, **kwargs)
+            finally:
+                ctx.positions = prev
+        orders_svc._apply_rounding_and_fees = _wrapped_apply
+        log.info('pretix_eth[install]: wrapped orders._apply_rounding_and_fees for Celery-side fee calc')
 
     # Capture the presale request into the thread-local so calculate_fee
     # can find the cart. Pretix fires these signals from its presale
