@@ -451,3 +451,30 @@ def _install_fiat_markup_exemption():
             orders_svc._apply_rounding_and_fees = _wrapped_orders_fn
         else:
             orders_svc._get_fees = _wrapped_orders_fn
+
+    # Third sync point: the buyer-facing CartMixin re-computes the fee
+    # ad-hoc on the checkout page (see Pretix's own warning at
+    # presale/views/__init__.py:290 — "algorithm needs to stay in sync
+    # between the following places"). Without this wrap the displayed
+    # markup ignores the exemption even though the saved order would
+    # apply it. Patching the method directly keeps the thread-local set
+    # while Pretix recalculates.
+    try:
+        from pretix.presale.views import CartMixin
+    except (ImportError, AttributeError) as e:
+        log.warning(
+            'pretix_eth: pretix.presale.views.CartMixin not importable (%s); '
+            'buyer-facing checkout will not honour fee exemptions.',
+            e,
+        )
+    else:
+        orig_csp = CartMixin.current_selected_payments
+
+        def _wrapped_csp(self, positions, fees, invoice_address, **kwargs):
+            ctx.positions = positions
+            try:
+                return orig_csp(self, positions, fees, invoice_address, **kwargs)
+            finally:
+                ctx.positions = None
+
+        CartMixin.current_selected_payments = _wrapped_csp
