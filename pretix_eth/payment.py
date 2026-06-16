@@ -7,6 +7,8 @@ from django import forms
 from django.conf import settings as dj_settings
 from django.http import HttpRequest
 from django.template.loader import get_template
+from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
 from pretix.base.payment import BasePaymentProvider
 
@@ -81,6 +83,57 @@ def _english_list(items):
     if len(xs) == 2:
         return '{} or {}'.format(*xs)
     return '{}, or {}'.format(', '.join(xs[:-1]), xs[-1])
+
+
+class _ChecklistOverHiddenField(forms.Widget):
+    """Renders a styled checklist whose state is mirrored into a single
+    hidden input (the actual form field) as a comma-separated list of IDs.
+    Used for the "Items that block fiat payment" setting so admins get a
+    checkbox UI while Pretix's HierarkeyForm stores a plain string —
+    which round-trips reliably, unlike `MultipleChoiceField` here.
+
+    The companion script at `static/pretix_eth/fiat_blocked_items.js`
+    listens for checkbox changes and updates the hidden input. It's
+    pulled in automatically via `class Media` below.
+    """
+
+    class Media:
+        js = ('pretix_eth/fiat_blocked_items.js',)
+
+    def __init__(self, choices, attrs=None):
+        super().__init__(attrs)
+        # Iterable of (value, label). Values are stringified for HTML.
+        self.choices = list(choices)
+
+    def render(self, name, value, attrs=None, renderer=None):
+        value_str = value if isinstance(value, str) else (value or '')
+        selected = {tok.strip() for tok in str(value_str).split(',') if tok.strip()}
+        final_attrs = self.build_attrs(self.attrs, attrs or {})
+        hidden_id = final_attrs.get('id') or 'id_{}'.format(name)
+
+        if not self.choices:
+            items_html = mark_safe(
+                '<div style="color:#888;padding:4px">No items in this event yet.</div>'
+            )
+        else:
+            def _row(value, label):
+                attrs_str = ' checked' if str(value) in selected else ''
+                return format_html(
+                    '<label style="display:block;margin:2px 0;font-weight:400;cursor:pointer">'
+                    '<input type="checkbox" value="{}" style="margin-right:6px"{}> {}'
+                    '</label>',
+                    str(value), mark_safe(attrs_str), label,
+                )
+            items_html = mark_safe(''.join(_row(v, l) for v, l in self.choices))
+
+        return format_html(
+            '<input type="hidden" name="{name}" id="{hid}" value="{val}">'
+            '<div data-fiat-cb-group="{hid}" '
+            'style="max-height:260px;overflow:auto;border:1px solid #ddd;'
+            'border-radius:4px;padding:6px 10px;margin-top:4px;background:#fafafa">'
+            '{rows}</div>',
+            name=name, hid=hidden_id, val=value_str, rows=items_html,
+        )
 
 
 class WalletConnectPayment(BasePaymentProvider):
@@ -198,23 +251,31 @@ class WalletConnectPayment(BasePaymentProvider):
         # item in this list, Pretix's Stripe payment provider is hidden via
         # the `is_allowed` monkey-patch in apps.py. Lets us force a tier
         # (e.g. General Admission) to crypto-only without forking Stripe
-        # plugin or shipping a custom sales channel. Choices are populated
-        # dynamically from the event's own item catalogue.
+        # plugin or shipping a custom sales channel.
+        #
+        # Stored as a comma-separated string of IDs (NOT MultipleChoiceField):
+        # Pretix's HierarkeyForm doesn't round-trip a list value through
+        # CheckboxSelectMultiple reliably (the cleaned list lands as
+        # `repr(list)` rather than JSON, then reads back as empty under
+        # `as_type=list`), so we keep the field as a plain CharField and
+        # render a checkbox UI on top via `_ChecklistOverHiddenField`.
+        # The accompanying JS in `static/pretix_eth/fiat_blocked_items.js`
+        # mirrors checkbox state into the hidden input on change.
         item_choices = [
-            (str(i.pk), f'{i.pk} — {i.name}')
+            (str(i.pk), f'{i.pk} - {i.name}')
             for i in self.event.items.all().order_by('position', 'pk')
         ]
-        base['fiat_blocked_items'] = forms.MultipleChoiceField(
+        base['fiat_blocked_items'] = forms.CharField(
             label=_('Items that block fiat payment (Stripe)'),
             help_text=_(
-                'When ANY of these items is in the cart (or in the order, '
-                'on re-pay), Pretix\'s Stripe payment provider is hidden so '
-                'the buyer can only pay in crypto. Use for tiers you want to '
-                'keep crypto-exclusive (e.g. discounted GA). Leave empty to '
-                'allow fiat for every item.'
+                'Tick the items that should be crypto-only. When ANY of '
+                'them is in the cart (or in the order, on re-pay), Pretix\'s '
+                'Stripe payment provider is hidden so the buyer can only '
+                'pay in crypto. Leave all unchecked to allow fiat for every '
+                'item. (Stored internally as a comma-separated list of '
+                'Pretix item IDs.)'
             ),
-            choices=item_choices,
-            widget=forms.CheckboxSelectMultiple,
+            widget=_ChecklistOverHiddenField(choices=item_choices),
             required=False,
         )
         # wc_inject's Safe-multisig support is opt-in per event. When ON, the

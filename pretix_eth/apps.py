@@ -127,15 +127,23 @@ def _install_fiat_provider_restrictor():
 
     def _is_blocked_for_fiat(provider, request):
         event = provider.event
+        # Setting is a CharField holding comma-separated IDs (e.g. "145, 146").
+        # We tolerate stray whitespace / trailing commas; anything non-integer
+        # is silently dropped so a typo doesn't block all fiat.
         raw = event.settings.get(
             'payment_walletconnect_fiat_blocked_items',
-            as_type=list,
-            default=[],
-        ) or []
-        try:
-            blocked_ids = {int(x) for x in raw}
-        except (TypeError, ValueError):
-            return False
+            as_type=str,
+            default='',
+        ) or ''
+        blocked_ids = set()
+        for token in raw.split(','):
+            token = token.strip()
+            if not token:
+                continue
+            try:
+                blocked_ids.add(int(token))
+            except (TypeError, ValueError):
+                continue
         if not blocked_ids:
             return False
 
@@ -176,7 +184,7 @@ def _install_fiat_provider_restrictor():
 def _install_fiat_fee_name_decoration():
     """Append the configured Stripe additional-fee (percentage and/or
     absolute amount) to the buyer-facing payment-method label, so the
-    chooser shows e.g. "Credit Card (+3% fee)" before the buyer commits
+    chooser shows e.g. "+3% · Credit Card" before the buyer commits
     to fiat. The fee values come from Pretix's standard payment-fee
     settings (`_fee_percent`, `_fee_abs`) configured per-method under
     *Event → Settings → Payment → Stripe*.
@@ -214,18 +222,24 @@ def _install_fiat_fee_name_decoration():
                 fee_abs = self.settings.get('_fee_abs', as_type=Decimal, default=Decimal('0')) or Decimal('0')
             except Exception:
                 return base
+            # Each bit is a bare amount ("20%", "1.50 USD"); we glue them
+            # with " + " and prefix the whole block with one "+" so a
+            # combined pct+abs fee reads as "+20% + 1.50 USD" rather than
+            # the awkward "+20% + +1.50 USD".
             bits = []
             if fee_pct > 0:
                 # Strip trailing zeros so "3.00" displays as "3".
                 pct_str = format(fee_pct.normalize(), 'f') if fee_pct == fee_pct.to_integral() else format(fee_pct, 'f').rstrip('0').rstrip('.')
-                bits.append(f'+{pct_str}%')
+                bits.append(f'{pct_str}%')
             if fee_abs > 0:
                 currency = (getattr(self.event, 'currency', '') or '').strip()
                 abs_str = format(fee_abs, 'f').rstrip('0').rstrip('.')
-                bits.append(f'+{abs_str} {currency}'.strip())
+                bits.append(f'{abs_str} {currency}'.strip())
             if not bits:
                 return base
-            return f'{base} ({" + ".join(bits)} fee)'
+            # Front-place the markup so Stripe's auto-appended wallet
+            # list ("…, Google Pay") doesn't end up after our suffix.
+            return f'+{" + ".join(bits)} · {base}'
         return _decorated
 
     def _patch_class(cls):
