@@ -17,6 +17,15 @@ class EthApp(AppConfig):
         version = __version__
 
     def ready(self):
+        import logging
+        import os
+        import sys
+        # Marker log line: one entry per process that booted pretix_eth.
+        # Includes argv so we can tell web (gunicorn) from celery worker.
+        logging.getLogger(__name__).info(
+            'pretix_eth[boot]: AppConfig.ready() running pid=%s argv=%s',
+            os.getpid(), ' '.join(sys.argv[:3]),
+        )
         from . import signals  # noqa
         _install_order_placed_email_suppressor()
         _install_fiat_provider_restrictor()
@@ -529,8 +538,9 @@ def _install_fiat_markup_exemption():
 
     def _make_wrapped_calc(orig):
         def _wrapped(self, price):
+            import os
             cls_name = type(self).__name__
-            log.info('pretix_eth[calc]: %s.calculate_fee(price=%s) called', cls_name, price)
+            log.info('pretix_eth[calc]: %s.calculate_fee(price=%s) called pid=%s', cls_name, price, os.getpid())
             try:
                 exempt = _exempt_subtotal_for(self.event)
             except Exception as e:
