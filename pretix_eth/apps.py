@@ -431,7 +431,6 @@ def _install_fiat_markup_exemption():
     # POSTs that create orders — so order placement inherits the same
     # request context.
     try:
-        from django.dispatch import receiver
         from pretix.presale.signals import process_request, process_response
     except (ImportError, AttributeError) as e:
         log.warning(
@@ -440,15 +439,37 @@ def _install_fiat_markup_exemption():
         )
         return
 
-    @receiver(process_request, dispatch_uid='pretix_eth_fee_exempt_capture')
+    # weak=False is required: these handlers are defined inside this
+    # install function and would otherwise be garbage-collected the moment
+    # the function returns (Django signals default to weak refs). Without
+    # this, the signal fires correctly but our receiver is no longer
+    # alive to handle it — symptom was an empty thread-local on every
+    # calculate_fee call even though the signal was firing fine.
     def _capture_request(sender, request, **kwargs):
         ctx.request = request
         log.info('pretix_eth[req]: captured request for event=%s path=%s',
                  getattr(sender, 'slug', '?'), getattr(request, 'path', '?'))
 
-    @receiver(process_response, dispatch_uid='pretix_eth_fee_exempt_release')
     def _release_request(sender, request, response, **kwargs):
         ctx.request = None
         return response
 
-    log.info('pretix_eth[install]: process_request/process_response receivers connected')
+    process_request.connect(
+        _capture_request, weak=False,
+        dispatch_uid='pretix_eth_fee_exempt_capture',
+    )
+    process_response.connect(
+        _release_request, weak=False,
+        dispatch_uid='pretix_eth_fee_exempt_release',
+    )
+
+    # Keep strong refs on the module so they survive function return
+    # even if `weak=False` is ignored by some signal variant.
+    globals()['_fee_exempt_capture'] = _capture_request
+    globals()['_fee_exempt_release'] = _release_request
+    globals()['_fee_exempt_ctx'] = ctx
+
+    log.info(
+        'pretix_eth[install]: receivers connected (process_request has %d total receivers)',
+        len(process_request.receivers),
+    )
