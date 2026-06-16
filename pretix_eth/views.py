@@ -992,3 +992,16 @@ def client_info(request, **kwargs):
         _clip('ua', 180),
     )
     return HttpResponse(status=204)
+
+
+def admin_fiat_blocked_items_js(request):
+    """Serves the sync JS for the 'Items that block fiat payment' admin
+    widget. Lives behind a plugin URL (rather than a collected static
+    file) so it works on Pretix deployments using ManifestStaticFilesStorage
+    without requiring `pretix rebuild` after install, and is allowed by
+    strict admin CSP since it loads from the same origin (`'self'`)."""
+    from pretix_eth.payment import _FIAT_BLOCKED_SYNC_JS
+    return HttpResponse(
+        _FIAT_BLOCKED_SYNC_JS,
+        content_type='application/javascript; charset=utf-8',
+    )

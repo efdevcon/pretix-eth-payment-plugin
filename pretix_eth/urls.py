@@ -37,6 +37,8 @@ def _wc_routes():
         path('plugin/wc/create-quote/',    views.create_quote,     name='wc_create_quote'),
         path('plugin/wc/verify/',          views.verify,           name='wc_verify'),
         path('plugin/wc/client-info/',     views.client_info,      name='wc_client_info'),
+        path('plugin/wc/admin/fiat-blocked-items.js',
+             views.admin_fiat_blocked_items_js, name='wc_admin_fiat_blocked_items_js'),
     ]
 
 

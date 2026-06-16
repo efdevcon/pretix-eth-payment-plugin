@@ -139,10 +139,19 @@ class _ChecklistOverHiddenField(forms.Widget):
         self.choices = list(choices)
 
     def render(self, name, value, attrs=None, renderer=None):
+        from django.urls import reverse
         value_str = value if isinstance(value, str) else (value or '')
         selected = {tok.strip() for tok in str(value_str).split(',') if tok.strip()}
         final_attrs = self.build_attrs(self.attrs, attrs or {})
         hidden_id = final_attrs.get('id') or 'id_{}'.format(name)
+        try:
+            js_url = reverse('plugins:pretix_eth:wc_admin_fiat_blocked_items_js')
+        except Exception:
+            # URL conf not loaded for some reason — render without the
+            # sync script. Boxes will be visible but won't update the
+            # hidden field; admin can still type IDs manually if they
+            # inspect the hidden input.
+            js_url = ''
 
         if not self.choices:
             items_html = mark_safe(
@@ -162,15 +171,17 @@ class _ChecklistOverHiddenField(forms.Widget):
                 )
             items_html = mark_safe(''.join(_row(v, l) for v, l in self.choices))
 
+        script_tag = (
+            format_html('<script src="{}"></script>', js_url) if js_url else mark_safe('')
+        )
         return format_html(
             '<input type="hidden" name="{name}" id="{hid}" value="{val}">'
             '<div data-fiat-cb-group="{hid}" '
             'style="max-height:320px;overflow:auto;border:1px solid #ddd;'
             'border-radius:4px;padding:8px 12px;margin-top:4px;background:#fafafa">'
             '{rows}</div>'
-            '<script>{js}</script>',
-            name=name, hid=hidden_id, val=value_str, rows=items_html,
-            js=mark_safe(_FIAT_BLOCKED_SYNC_JS),
+            '{script}',
+            name=name, hid=hidden_id, val=value_str, rows=items_html, script=script_tag,
         )
 
 
