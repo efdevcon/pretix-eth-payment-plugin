@@ -575,41 +575,88 @@ def _install_fiat_markup_exemption():
     StripeMethod.calculate_fee = _make_wrapped_calc(orig_calc)
     log.info('pretix_eth[install]: fiat-markup exemption patched calculate_fee on StripeMethod (subclasses inherit)')
 
-    # ALSO wrap _apply_rounding_and_fees (the function Pretix calls
-    # from both cart preview and order placement). This stashes the
-    # positions list directly so calculate_fee can compute the exempt
-    # subtotal without needing the HTTP request — critical for the
-    # Celery-driven order-placement path where the presale `process_request`
-    # signal never fires and ctx.request would be None.
+    # Wrap the function Pretix uses to compute fees during order placement.
+    # The exact name varies across Pretix versions:
+    #   - newer: `_apply_rounding_and_fees`
+    #   - older: `_get_fees`
+    # Whichever exists, wrap it so it stashes `positions` into a thread-local
+    # for calculate_fee. Without this, the Celery-driven order placement
+    # has no cart context and applies the full markup → mismatch with the
+    # preview total → "order total has changed" error.
+    import os as _os
     try:
         from pretix.base.services import orders as orders_svc
-        orig_apply = getattr(orders_svc, '_apply_rounding_and_fees', None)
+        # Diagnostic: list any fee/rounding callables so we can see what's
+        # actually available in this Pretix version.
+        candidates = sorted(
+            n for n in dir(orders_svc)
+            if ('fee' in n.lower() or 'rounding' in n.lower()) and callable(getattr(orders_svc, n, None))
+        )
+        log.info('pretix_eth[install]: orders module fee-candidates: %s', candidates)
     except ImportError:
-        orig_apply = None
-    if orig_apply is not None:
-        def _wrapped_apply(*args, **kwargs):
+        orders_svc = None
+        candidates = []
+
+    def _make_apply_wrap(name, original):
+        def _wrapped(*args, **kwargs):
             positions = kwargs.get('positions')
             if positions is None and args:
                 positions = args[0]
             log.info(
-                'pretix_eth[apply]: _apply_rounding_and_fees wrap fired with %d positions (pid=%s)',
-                len(positions or []), __import__('os').getpid(),
+                'pretix_eth[apply]: %s wrap fired with %d positions (pid=%s)',
+                name, len(positions or []), _os.getpid(),
             )
             prev = getattr(ctx, 'positions', None)
             ctx.positions = positions
             try:
-                return orig_apply(*args, **kwargs)
+                return original(*args, **kwargs)
             finally:
                 ctx.positions = prev
-        orders_svc._apply_rounding_and_fees = _wrapped_apply
-        log.info(
-            'pretix_eth[install]: wrapped orders._apply_rounding_and_fees (pid=%s)',
-            __import__('os').getpid(),
-        )
-    else:
+        return _wrapped
+
+    wrapped_any = False
+    if orders_svc is not None:
+        for cand in ('_apply_rounding_and_fees', '_get_fees', '_apply_fees_and_rounding'):
+            original = getattr(orders_svc, cand, None)
+            if callable(original):
+                setattr(orders_svc, cand, _make_apply_wrap(cand, original))
+                log.info(
+                    'pretix_eth[install]: wrapped orders.%s (pid=%s)',
+                    cand, _os.getpid(),
+                )
+                wrapped_any = True
+
+        # Also wrap _create_order. This is the canonical entry point for
+        # order placement (called both inline and from the Celery
+        # perform_order task) and has remained stable across recent
+        # Pretix versions. Its signature is
+        # `_create_order(event, *, email, positions, now_dt, ...)`, so
+        # positions is always a keyword argument. Wrapping it sets the
+        # thread-local for the entire duration of order creation —
+        # bullet-proof even if the inner fee helper was renamed.
+        orig_create = getattr(orders_svc, '_create_order', None)
+        if callable(orig_create):
+            def _wrapped_create_order(*args, **kwargs):
+                positions = kwargs.get('positions')
+                log.info(
+                    'pretix_eth[create]: _create_order wrap fired with %d positions (pid=%s)',
+                    len(positions or []), _os.getpid(),
+                )
+                prev = getattr(ctx, 'positions', None)
+                ctx.positions = positions
+                try:
+                    return orig_create(*args, **kwargs)
+                finally:
+                    ctx.positions = prev
+            orders_svc._create_order = _wrapped_create_order
+            log.info('pretix_eth[install]: wrapped orders._create_order (pid=%s)', _os.getpid())
+            wrapped_any = True
+
+    if not wrapped_any:
         log.warning(
-            'pretix_eth[install]: orders._apply_rounding_and_fees NOT FOUND — '
-            'order-side fee exemption will not work. Pretix may have renamed it.'
+            'pretix_eth[install]: no known order-side function found '
+            '(tried _apply_rounding_and_fees, _get_fees, _apply_fees_and_rounding, _create_order). '
+            'Inspect the module candidates log above to find the right name.'
         )
 
     # Capture the presale request into the thread-local so calculate_fee
