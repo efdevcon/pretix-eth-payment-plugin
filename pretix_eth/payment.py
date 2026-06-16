@@ -7,7 +7,6 @@ from django import forms
 from django.conf import settings as dj_settings
 from django.http import HttpRequest
 from django.template.loader import get_template
-from django.templatetags.static import static as static_url
 from django.utils.html import format_html
 from django.utils.safestring import mark_safe
 from django.utils.translation import gettext_lazy as _
@@ -86,6 +85,36 @@ def _english_list(items):
     return '{}, or {}'.format(', '.join(xs[:-1]), xs[-1])
 
 
+_FIAT_BLOCKED_SYNC_JS = """
+(function () {
+  function syncFromGroup(group, hidden) {
+    var ids = [];
+    group.querySelectorAll('input[type="checkbox"]:checked').forEach(function (cb) {
+      ids.push(cb.value);
+    });
+    hidden.value = ids.join(', ');
+  }
+  function wire() {
+    document.querySelectorAll('[data-fiat-cb-group]').forEach(function (group) {
+      if (group.dataset.fiatWired === '1') return;
+      group.dataset.fiatWired = '1';
+      var hidden = document.getElementById(group.getAttribute('data-fiat-cb-group'));
+      if (!hidden) return;
+      group.querySelectorAll('input[type="checkbox"]').forEach(function (cb) {
+        cb.addEventListener('change', function () { syncFromGroup(group, hidden); });
+      });
+      syncFromGroup(group, hidden);
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wire);
+  } else {
+    wire();
+  }
+})();
+"""
+
+
 class _ChecklistOverHiddenField(forms.Widget):
     """Renders a styled checklist whose state is mirrored into a single
     hidden input (the actual form field) as a comma-separated list of IDs.
@@ -93,12 +122,11 @@ class _ChecklistOverHiddenField(forms.Widget):
     checkbox UI while Pretix's HierarkeyForm stores a plain string —
     which round-trips reliably, unlike `MultipleChoiceField` here.
 
-    The companion script at `static/pretix_eth/fiat_blocked_items.js`
-    syncs checkbox state to the hidden input on change. We include the
-    `<script src="…">` tag directly in the widget output (rather than
-    relying on `class Media`) because Pretix's payment-settings template
-    doesn't always render form.media for provider sub-forms. The script
-    is idempotent — if it ever loads twice, wiring isn't doubled.
+    The sync JS is inlined into the widget output (rather than served as
+    a static asset) so this works on Pretix deployments that use
+    ManifestStaticFilesStorage without requiring `collectstatic` to
+    expose a new file. The script is idempotent — re-running it doesn't
+    double-wire the listeners.
 
     Each row is wrapped in a `<div>` so Pretix admin's form-row CSS
     (which forces `label { display: inline-block }`) can't collapse the
@@ -140,9 +168,9 @@ class _ChecklistOverHiddenField(forms.Widget):
             'style="max-height:320px;overflow:auto;border:1px solid #ddd;'
             'border-radius:4px;padding:8px 12px;margin-top:4px;background:#fafafa">'
             '{rows}</div>'
-            '<script src="{js}"></script>',
+            '<script>{js}</script>',
             name=name, hid=hidden_id, val=value_str, rows=items_html,
-            js=static_url('pretix_eth/fiat_blocked_items.js'),
+            js=mark_safe(_FIAT_BLOCKED_SYNC_JS),
         )
 
 
