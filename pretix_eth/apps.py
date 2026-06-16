@@ -447,8 +447,8 @@ def _install_fiat_markup_exemption():
     # calculate_fee call even though the signal was firing fine.
     def _capture_request(sender, request, **kwargs):
         ctx.request = request
-        log.info('pretix_eth[req]: captured request for event=%s path=%s',
-                 getattr(sender, 'slug', '?'), getattr(request, 'path', '?'))
+        log.debug('pretix_eth[req]: captured request for event=%s path=%s',
+                  getattr(sender, 'slug', '?'), getattr(request, 'path', '?'))
 
     def _release_request(sender, request, response, **kwargs):
         ctx.request = None
