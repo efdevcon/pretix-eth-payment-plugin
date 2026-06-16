@@ -87,6 +87,10 @@ class WalletConnectPayment(BasePaymentProvider):
     identifier = 'walletconnect'
     verbose_name = _('Ethereum payment')
     abort_pending_allowed = True
+    # Pretix sorts providers by (-priority, verbose_name); default is 100.
+    # Bump above the default so ETH lists ahead of Stripe & friends on the
+    # native payment chooser.
+    priority = 1000
 
     def _enabled_symbols(self):
         """Symbols this event has actually enabled, in canonical display
