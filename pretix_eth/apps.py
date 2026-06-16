@@ -19,6 +19,8 @@ class EthApp(AppConfig):
     def ready(self):
         from . import signals  # noqa
         _install_order_placed_email_suppressor()
+        _install_fiat_provider_restrictor()
+        _install_fiat_fee_name_decoration()
 
 
 def _install_order_placed_email_suppressor():
@@ -89,3 +91,159 @@ def _install_order_placed_email_suppressor():
 
     _orders._order_placed_email = _wrapped_buyer
     _orders._order_placed_email_attendee = _wrapped_attendee
+
+
+def _install_fiat_provider_restrictor():
+    """Monkey-patch `pretix.plugins.stripe.payment.StripeMethod.is_allowed`
+    so that Stripe (and every concrete payment method that inherits from it
+    — card, SEPA, etc.) is hidden whenever the current cart or order
+    contains an item listed in the event's `payment_walletconnect_fiat_blocked_items`
+    setting.
+
+    Why monkey-patch: Pretix has no first-class "this item bans this
+    payment method" config. Sales-channels could express it but would
+    force buyers onto a separate URL. Overriding `is_allowed` covers
+    BOTH checkout flows (cart → pay, and order → change payment method)
+    with one hook that runs server-side, so the rule can't be bypassed
+    by hand-crafting a URL.
+
+    If Stripe's plugin is missing or has been renamed in a future Pretix
+    version, the import fails cleanly and the admin checklist becomes a
+    no-op (we log a warning) rather than crashing the worker.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from pretix.plugins.stripe.payment import StripeMethod
+    except (ImportError, AttributeError) as e:
+        log.warning(
+            'pretix_eth: Stripe payment plugin not importable (%s); '
+            'the "Items that block fiat payment" admin checklist will have no effect.',
+            e,
+        )
+        return
+
+    orig_is_allowed = StripeMethod.is_allowed
+
+    def _is_blocked_for_fiat(provider, request):
+        event = provider.event
+        raw = event.settings.get(
+            'payment_walletconnect_fiat_blocked_items',
+            as_type=list,
+            default=[],
+        ) or []
+        try:
+            blocked_ids = {int(x) for x in raw}
+        except (TypeError, ValueError):
+            return False
+        if not blocked_ids:
+            return False
+
+        from pretix.base.models import CartPosition, OrderPosition
+
+        # Cart flow — buyer is in checkout, no order yet.
+        try:
+            from pretix.presale.views.cart import get_cart_id
+            cart_id = get_cart_id(request, create=False)
+        except Exception:
+            cart_id = None
+        if cart_id and CartPosition.objects.filter(
+            cart_id=cart_id, event=event, item_id__in=blocked_ids,
+        ).exists():
+            return True
+
+        # Order re-pay flow — order code lives in the URL kwargs.
+        try:
+            match = getattr(request, 'resolver_match', None)
+            order_code = match.kwargs.get('order') if match else None
+        except Exception:
+            order_code = None
+        if order_code and OrderPosition.objects.filter(
+            order__code=order_code, order__event=event, item_id__in=blocked_ids,
+        ).exists():
+            return True
+
+        return False
+
+    def _wrapped_is_allowed(self, request, total=None):
+        if _is_blocked_for_fiat(self, request):
+            return False
+        return orig_is_allowed(self, request, total)
+
+    StripeMethod.is_allowed = _wrapped_is_allowed
+
+
+def _install_fiat_fee_name_decoration():
+    """Append the configured Stripe additional-fee (percentage and/or
+    absolute amount) to the buyer-facing payment-method label, so the
+    chooser shows e.g. "Credit Card (+3% fee)" before the buyer commits
+    to fiat. The fee values come from Pretix's standard payment-fee
+    settings (`_fee_percent`, `_fee_abs`) configured per-method under
+    *Event → Settings → Payment → Stripe*.
+
+    The patch walks every concrete subclass of `StripeMethod` because
+    Pretix-Stripe defines `public_name` per-method (card vs SEPA vs
+    iDEAL …). For each class we wrap whatever `public_name` it inherits
+    or defines, so the original label is preserved when no fee is set.
+
+    No-op for methods with both fee fields at 0. Fails closed on
+    import errors — original labels remain unchanged.
+    """
+    import inspect
+    import logging
+    from decimal import Decimal
+    log = logging.getLogger(__name__)
+    try:
+        from pretix.plugins.stripe.payment import StripeMethod
+    except (ImportError, AttributeError) as e:
+        log.warning(
+            'pretix_eth: Stripe payment plugin not importable (%s); '
+            'fiat-fee label decoration disabled.',
+            e,
+        )
+        return
+
+    def _make_decorated(original_getter):
+        def _decorated(self):
+            try:
+                base = original_getter(self)
+            except Exception:
+                base = str(self.verbose_name)
+            try:
+                fee_pct = self.settings.get('_fee_percent', as_type=Decimal, default=Decimal('0')) or Decimal('0')
+                fee_abs = self.settings.get('_fee_abs', as_type=Decimal, default=Decimal('0')) or Decimal('0')
+            except Exception:
+                return base
+            bits = []
+            if fee_pct > 0:
+                # Strip trailing zeros so "3.00" displays as "3".
+                pct_str = format(fee_pct.normalize(), 'f') if fee_pct == fee_pct.to_integral() else format(fee_pct, 'f').rstrip('0').rstrip('.')
+                bits.append(f'+{pct_str}%')
+            if fee_abs > 0:
+                currency = (getattr(self.event, 'currency', '') or '').strip()
+                abs_str = format(fee_abs, 'f').rstrip('0').rstrip('.')
+                bits.append(f'+{abs_str} {currency}'.strip())
+            if not bits:
+                return base
+            return f'{base} ({" + ".join(bits)} fee)'
+        return _decorated
+
+    def _patch_class(cls):
+        own = cls.__dict__.get('public_name')
+        if isinstance(own, property) and own.fget:
+            getter = own.fget
+        else:
+            # Inherited property — resolve via MRO.
+            inherited = inspect.getattr_static(cls, 'public_name', None)
+            getter = inherited.fget if isinstance(inherited, property) and inherited.fget else (lambda self: str(self.verbose_name))
+        cls.public_name = property(_make_decorated(getter))
+
+    # Patch the base + every subclass currently loaded. Subclasses can
+    # define their own `public_name`, so patching the base alone isn't
+    # enough.
+    targets = [StripeMethod] + list(StripeMethod.__subclasses__())
+    for cls in targets:
+        try:
+            _patch_class(cls)
+        except Exception as e:
+            log.warning('pretix_eth: failed to decorate %s.public_name: %s', cls.__name__, e)

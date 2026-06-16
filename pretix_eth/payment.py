@@ -194,6 +194,29 @@ class WalletConnectPayment(BasePaymentProvider):
             required=False,
             initial=False,
         )
+        # Per-item fiat lockout. When any cart/order position references an
+        # item in this list, Pretix's Stripe payment provider is hidden via
+        # the `is_allowed` monkey-patch in apps.py. Lets us force a tier
+        # (e.g. General Admission) to crypto-only without forking Stripe
+        # plugin or shipping a custom sales channel. Choices are populated
+        # dynamically from the event's own item catalogue.
+        item_choices = [
+            (str(i.pk), f'{i.pk} — {i.name}')
+            for i in self.event.items.all().order_by('position', 'pk')
+        ]
+        base['fiat_blocked_items'] = forms.MultipleChoiceField(
+            label=_('Items that block fiat payment (Stripe)'),
+            help_text=_(
+                'When ANY of these items is in the cart (or in the order, '
+                'on re-pay), Pretix\'s Stripe payment provider is hidden so '
+                'the buyer can only pay in crypto. Use for tiers you want to '
+                'keep crypto-exclusive (e.g. discounted GA). Leave empty to '
+                'allow fiat for every item.'
+            ),
+            choices=item_choices,
+            widget=forms.CheckboxSelectMultiple,
+            required=False,
+        )
         # wc_inject's Safe-multisig support is opt-in per event. When ON, the
         # bundle un-excludes Safe from the AppKit picker, detects Safes via
         # Safe Transaction Service at connect time, surfaces a multi-signer
