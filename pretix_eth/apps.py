@@ -581,6 +581,10 @@ def _install_fiat_markup_exemption():
             positions = kwargs.get('positions')
             if positions is None and args:
                 positions = args[0]
+            log.info(
+                'pretix_eth[apply]: _apply_rounding_and_fees wrap fired with %d positions (pid=%s)',
+                len(positions or []), __import__('os').getpid(),
+            )
             prev = getattr(ctx, 'positions', None)
             ctx.positions = positions
             try:
@@ -588,7 +592,15 @@ def _install_fiat_markup_exemption():
             finally:
                 ctx.positions = prev
         orders_svc._apply_rounding_and_fees = _wrapped_apply
-        log.info('pretix_eth[install]: wrapped orders._apply_rounding_and_fees for Celery-side fee calc')
+        log.info(
+            'pretix_eth[install]: wrapped orders._apply_rounding_and_fees (pid=%s)',
+            __import__('os').getpid(),
+        )
+    else:
+        log.warning(
+            'pretix_eth[install]: orders._apply_rounding_and_fees NOT FOUND — '
+            'order-side fee exemption will not work. Pretix may have renamed it.'
+        )
 
     # Capture the presale request into the thread-local so calculate_fee
     # can find the cart. Pretix fires these signals from its presale
