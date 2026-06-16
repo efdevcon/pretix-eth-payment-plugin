@@ -457,20 +457,30 @@ def _install_fiat_markup_exemption():
             log.info('pretix_eth[exempt]: no cart_id resolved for event=%s', getattr(event, 'slug', '?'))
             return Decimal('0')
 
-        from django.db.models import Sum
+        from django.db.models import Q, Sum
         from pretix.base.models import CartPosition
-        # Add-ons follow their parent's payment rules, so they don't count
-        # toward the exempt subtotal even when their own item is exempt.
-        qs = CartPosition.objects.filter(
-            cart_id=cart_id, event=event, item_id__in=ids,
-            addon_to__isnull=True,
+        # Add-ons inherit their parent's payment treatment. Find the PK
+        # of every exempt MAIN position, then sum prices of (those mains
+        # + their attached add-ons). Without this, an exempt main with
+        # paid add-ons under-counts as exempt and the Stripe fee comes
+        # out non-zero — which mismatches the chooser preview and
+        # triggers Pretix's "order total has changed" error at confirm.
+        qs = CartPosition.objects.filter(cart_id=cart_id, event=event)
+        exempt_main_pks = list(qs.filter(
+            addon_to__isnull=True, item_id__in=ids,
+        ).values_list('pk', flat=True))
+        if not exempt_main_pks:
+            log.info('pretix_eth[exempt]: cart=%s no exempt main items', cart_id)
+            return Decimal('0')
+        exempt_qs = qs.filter(
+            Q(pk__in=exempt_main_pks) | Q(addon_to_id__in=exempt_main_pks)
         )
-        matched_items = list(qs.values_list('item_id', flat=True))
-        agg = qs.aggregate(s=Sum('price'))
+        matched_items = list(exempt_qs.values_list('item_id', flat=True))
+        agg = exempt_qs.aggregate(s=Sum('price'))
         total = agg.get('s') or Decimal('0')
         log.info(
-            'pretix_eth[exempt]: cart=%s matched_items=%s exempt_total=%s',
-            cart_id, matched_items, total,
+            'pretix_eth[exempt]: cart=%s exempt_main_pks=%s matched_items=%s exempt_total=%s',
+            cart_id, exempt_main_pks, matched_items, total,
         )
         return total
 
