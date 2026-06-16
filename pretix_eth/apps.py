@@ -388,36 +388,42 @@ def _install_fiat_markup_exemption():
 
     def _make_wrapped_calc(orig):
         def _wrapped(self, price):
+            cls_name = type(self).__name__
+            log.info('pretix_eth[calc]: %s.calculate_fee(price=%s) called', cls_name, price)
             try:
                 exempt = _exempt_subtotal_for(self.event)
             except Exception as e:
-                log.debug('pretix_eth: fee-exempt calc failed: %s', e)
+                log.warning('pretix_eth[calc]: fee-exempt calc failed: %s', e)
                 return orig(self, price)
             if exempt <= Decimal('0'):
+                log.info('pretix_eth[calc]: %s no exempt items, original fee applies', cls_name)
                 return orig(self, price)
             try:
                 price_d = price if isinstance(price, Decimal) else Decimal(str(price))
             except Exception:
                 return orig(self, price)
             adjusted = max(Decimal('0'), price_d - exempt)
+            result = orig(self, adjusted)
             log.info(
-                'pretix_eth: stripe fee adjusted for exempt items '
-                'event=%s price=%s exempt=%s adjusted=%s',
-                getattr(self.event, 'slug', '?'), price_d, exempt, adjusted,
+                'pretix_eth[calc]: %s adjusted price=%s exempt=%s adjusted=%s -> fee=%s',
+                cls_name, price_d, exempt, adjusted, result,
             )
-            return orig(self, adjusted)
+            return result
         return _wrapped
 
     # Patch the base + every loaded subclass. Stripe-CC, Stripe-SEPA, etc.
     # can each define their own calculate_fee; we wrap whichever they have.
     targets = [StripeMethod] + list(StripeMethod.__subclasses__())
+    patched = []
     for cls in targets:
         try:
             own = cls.__dict__.get('calculate_fee')
             orig = own if callable(own) else cls.calculate_fee
             cls.calculate_fee = _make_wrapped_calc(orig)
+            patched.append(cls.__name__)
         except Exception as e:
             log.warning('pretix_eth: failed to wrap %s.calculate_fee: %s', cls.__name__, e)
+    log.info('pretix_eth[install]: fiat-markup exemption patched calculate_fee on %s', patched)
 
     # Capture the presale request into the thread-local so calculate_fee
     # can find the cart. Pretix fires these signals from its presale
@@ -437,8 +443,12 @@ def _install_fiat_markup_exemption():
     @receiver(process_request, dispatch_uid='pretix_eth_fee_exempt_capture')
     def _capture_request(sender, request, **kwargs):
         ctx.request = request
+        log.info('pretix_eth[req]: captured request for event=%s path=%s',
+                 getattr(sender, 'slug', '?'), getattr(request, 'path', '?'))
 
     @receiver(process_response, dispatch_uid='pretix_eth_fee_exempt_release')
     def _release_request(sender, request, response, **kwargs):
         ctx.request = None
         return response
+
+    log.info('pretix_eth[install]: process_request/process_response receivers connected')
