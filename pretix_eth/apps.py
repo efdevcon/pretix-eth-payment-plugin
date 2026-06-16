@@ -499,19 +499,18 @@ def _install_fiat_markup_exemption():
             return result
         return _wrapped
 
-    # Patch the base + every loaded subclass. Stripe-CC, Stripe-SEPA, etc.
-    # can each define their own calculate_fee; we wrap whichever they have.
-    targets = [StripeMethod] + list(StripeMethod.__subclasses__())
-    patched = []
-    for cls in targets:
-        try:
-            own = cls.__dict__.get('calculate_fee')
-            orig = own if callable(own) else cls.calculate_fee
-            cls.calculate_fee = _make_wrapped_calc(orig)
-            patched.append(cls.__name__)
-        except Exception as e:
-            log.warning('pretix_eth: failed to wrap %s.calculate_fee: %s', cls.__name__, e)
-    log.info('pretix_eth[install]: fiat-markup exemption patched calculate_fee on %s', patched)
+    # CRITICAL: only patch the base class. Pretix-Stripe subclasses
+    # (StripeCC, StripeSEPADirectDebit, …) all inherit calculate_fee
+    # from StripeMethod without overriding it. If we ALSO patched each
+    # subclass, the orig we captured for subclass N would already be the
+    # wrapped version from N-1, causing the cart-exempt subtraction to
+    # run twice on a single call — which broke mixed carts (e.g. an OSS
+    # exempt + a non-exempt GA returned fee=0 instead of fee on the GA
+    # portion, triggering Pretix's "order total has changed" mismatch
+    # at confirm).
+    orig_calc = StripeMethod.calculate_fee
+    StripeMethod.calculate_fee = _make_wrapped_calc(orig_calc)
+    log.info('pretix_eth[install]: fiat-markup exemption patched calculate_fee on StripeMethod (subclasses inherit)')
 
     # Capture the presale request into the thread-local so calculate_fee
     # can find the cart. Pretix fires these signals from its presale
