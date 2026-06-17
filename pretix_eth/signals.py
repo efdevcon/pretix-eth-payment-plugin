@@ -109,6 +109,37 @@ def register_url_override(sender, **kwargs):
     )
 
 
+@receiver(register_text_placeholders, dispatch_uid='wc_pretix_url_placeholder')
+def register_pretix_url_placeholder(sender, **kwargs):
+    """Register a `{pretix_url}` placeholder that always resolves to the
+    Pretix-native order URL (e.g. https://dcdev2.ticketh.xyz/<org>/<event>/
+    order/<code>/<secret>/), regardless of whether `{url}` is overridden
+    to point at the storefront/frontend (devcon.org).
+
+    Use case: emails that link to the storefront via `{url}` (for the
+    buyer's primary action) AND want a separate "view on Pretix" link
+    (admin-style fallback, raw invoice download, etc.) need a
+    placeholder that doesn't follow the override.
+
+    Pretix doesn't ship `{pretix_url}` natively — this is plugin-provided.
+    The same placeholder applies to every payment method (crypto, Stripe,
+    bank transfer, etc.) since it just resolves an event-relative URL.
+    """
+    from pretix.multidomain.urlreverse import build_absolute_uri
+    return SimpleFunctionalTextPlaceholder(
+        'pretix_url',
+        ['order', 'event'],
+        lambda order, event: build_absolute_uri(
+            event, 'presale:event.order',
+            kwargs={'order': order.code, 'secret': order.secret},
+        ),
+        sample=lambda event: build_absolute_uri(
+            event, 'presale:event.order',
+            kwargs={'order': 'CODEX1', 'secret': 'a1b2c3d4e5f6g7h8'},
+        ),
+    )
+
+
 try:
     from pretix.base.signals import periodic_task
 
