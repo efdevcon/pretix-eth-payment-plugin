@@ -31,6 +31,7 @@ class EthApp(AppConfig):
         _install_fiat_provider_restrictor()
         _install_fiat_fee_name_decoration()
         _install_fiat_markup_exemption()
+        _install_stripe_mail_render()
 
 
 def _install_order_placed_email_suppressor():
@@ -71,12 +72,21 @@ def _install_order_placed_email_suppressor():
 
     def _should_suppress(event, order):
         # Single-payment short-circuit: walletconnect orders have exactly one
-        # OrderPayment row at placement time.
+        # OrderPayment row at placement time. Stripe also settles within
+        # seconds (card capture, gpay, etc.) so the placed+paid email pair
+        # is redundant for those too — gate via the same toggle.
         try:
             payment = order.payments.first()
         except Exception:
             return False
-        if not payment or payment.provider != 'walletconnect':
+        if not payment:
+            return False
+        provider = (getattr(payment, 'provider', '') or '')
+        is_fast_settling = (
+            provider == 'walletconnect' or
+            provider.startswith('stripe')  # stripe_cc, stripe_sepa_debit, etc.
+        )
+        if not is_fast_settling:
             return False
         return bool(event.settings.get(
             'payment_walletconnect_suppress_order_placed_email',
@@ -707,3 +717,98 @@ def _install_fiat_markup_exemption():
         'pretix_eth[install]: receivers connected (process_request has %d total receivers)',
         len(process_request.receivers),
     )
+
+
+def _install_stripe_mail_render():
+    """Add a default `order_pending_mail_render` on Pretix's StripeMethod
+    so the `{payment_info}` placeholder in the order-paid email is
+    populated for Stripe orders the same way it is for crypto orders.
+
+    Pretix's `BasePaymentProvider.order_pending_mail_render` returns an
+    empty string, and Pretix-Stripe doesn't override it — which leaves
+    the `{payment_info}` block empty in Stripe order emails. This patch
+    fills it with a small recap (method name, amount, Stripe reference)
+    so buyers get the same email shape regardless of how they paid.
+
+    Skipped if Stripe isn't installed, or if the operator's email
+    template doesn't include `{payment_info}` (in which case this just
+    becomes a no-op renderer).
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from pretix.plugins.stripe.payment import StripeMethod
+    except (ImportError, AttributeError) as e:
+        log.warning(
+            'pretix_eth: Stripe payment plugin not importable (%s); '
+            'order-paid email payment-info recap disabled for Stripe.',
+            e,
+        )
+        return
+
+    # Don't double-patch if a real implementation exists. `BasePaymentProvider`
+    # provides a no-op; we replace that, but if a concrete subclass already
+    # has its own implementation we respect it.
+    own_impl = StripeMethod.__dict__.get('order_pending_mail_render')
+    if own_impl is not None:
+        log.info('pretix_eth[install]: StripeMethod already implements '
+                 'order_pending_mail_render — leaving it alone')
+        return
+
+    def _stripe_order_pending_mail_render(self, order, payment):
+        # Build a minimal recap mirroring the shape of the crypto recap
+        # (one fact per line, blank line between, since Pretix's email
+        # markdown collapses single newlines).
+        info = payment.info_data or {}
+        lines = []
+
+        # Friendly method name — "Credit Card via Stripe", "SEPA Direct
+        # Debit", etc. — falls back to verbose_name.
+        try:
+            method = str(getattr(self, 'method_name', None) or self.verbose_name)
+            if method:
+                lines.append('Payment method: {}'.format(method))
+        except Exception:
+            pass
+
+        # Amount + currency
+        try:
+            from pretix.base.templatetags.money import money_filter
+            lines.append('Amount: {}'.format(money_filter(payment.amount, order.event.currency)))
+        except Exception:
+            try:
+                lines.append('Amount: {} {}'.format(payment.amount, order.event.currency))
+            except Exception:
+                pass
+
+        # Card last4 if present (helps buyers identify the charge on their
+        # statement); Stripe stores this under various keys depending on
+        # API version, so we check a few.
+        card = info.get('source') or info.get('charges') or {}
+        if isinstance(card, dict):
+            last4 = (
+                card.get('last4') or
+                ((card.get('card') or {}).get('last4')) or
+                ((card.get('payment_method_details') or {}).get('card') or {}).get('last4')
+            )
+            brand = (
+                card.get('brand') or
+                ((card.get('card') or {}).get('brand')) or
+                ((card.get('payment_method_details') or {}).get('card') or {}).get('brand')
+            )
+            if last4:
+                bits = []
+                if brand:
+                    bits.append(str(brand).title())
+                bits.append('ending in {}'.format(last4))
+                lines.append('Card: {}'.format(' '.join(bits)))
+
+        # Stripe reference (PaymentIntent / charge ID) for support lookup.
+        ref = info.get('id') or info.get('payment_intent') or info.get('charge')
+        if ref:
+            lines.append('Stripe reference: {}'.format(ref))
+
+        return '\n\n'.join(lines)
+
+    StripeMethod.order_pending_mail_render = _stripe_order_pending_mail_render
+    log.info('pretix_eth[install]: added order_pending_mail_render to StripeMethod')
