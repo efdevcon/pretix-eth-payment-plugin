@@ -32,6 +32,7 @@ class EthApp(AppConfig):
         _install_fiat_fee_name_decoration()
         _install_fiat_markup_exemption()
         _install_stripe_mail_render()
+        _install_payment_info_autofill()
 
 
 def _install_order_placed_email_suppressor():
@@ -819,3 +820,71 @@ def _install_stripe_mail_render():
 
     StripeMethod.order_pending_mail_render = _stripe_order_pending_mail_render
     log.info('pretix_eth[install]: added order_pending_mail_render to StripeMethod')
+
+
+def _install_payment_info_autofill():
+    """Make the `{payment_info}` placeholder in the order-paid email work
+    for providers (like Stripe) that don't explicitly pass `mail_text=`
+    when calling `OrderPayment.confirm()`.
+
+    Pretix's `_send_paid_mail` (`base/models/orders.py:2021`) wires the
+    `mail_text` arg from confirm() into `payment_info=` of the email
+    context. Pretix's `{payment_info}` placeholder has two registrations:
+    one that auto-renders from `payments` (only used when `mail_text`
+    isn't in context), and one that returns `mail_text` verbatim. The
+    second wins whenever `mail_text` is in the context, even if it's
+    empty — so the auto-render variant never fires for paid-mail.
+
+    Our existing crypto verify code calls `confirm(mail_text=...)`
+    explicitly. Pretix-Stripe (`plugins/stripe/payment.py:1028`) calls
+    `confirm()` with no mail_text → the placeholder ends up empty in
+    the buyer's email even though we already patched StripeMethod's
+    `order_pending_mail_render`.
+
+    The wrap here computes mail_text from the provider's
+    `order_pending_mail_render` when the caller didn't supply one,
+    closing the gap.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from pretix.base.models.orders import OrderPayment
+    except (ImportError, AttributeError) as e:
+        log.warning(
+            'pretix_eth: OrderPayment not importable (%s); '
+            'payment_info auto-fill disabled.', e,
+        )
+        return
+
+    orig_confirm = OrderPayment.confirm
+
+    def _wrapped_confirm(self, *args, **kwargs):
+        # Only auto-fill when the caller passed nothing (or an empty
+        # string). Crypto already supplies its own mail_text; we don't
+        # want to overwrite it.
+        if not kwargs.get('mail_text'):
+            try:
+                provider = self.payment_provider
+                if provider:
+                    result = ''
+                    try:
+                        result = provider.order_pending_mail_render(self.order, self) or ''
+                    except TypeError:
+                        # Older Pretix signature: (order) only, no payment.
+                        try:
+                            result = provider.order_pending_mail_render(self.order) or ''
+                        except Exception:
+                            result = ''
+                    if result and result.strip():
+                        kwargs['mail_text'] = result
+                        log.info(
+                            'pretix_eth[mail]: auto-filled mail_text on confirm() '
+                            'order=%s payment=%s provider=%s len=%d',
+                            self.order.code, self.pk, self.provider, len(result),
+                        )
+            except Exception as e:
+                log.debug('pretix_eth[mail]: auto-fill skipped: %s', e)
+        return orig_confirm(self, *args, **kwargs)
+
+    OrderPayment.confirm = _wrapped_confirm
+    log.info('pretix_eth[install]: wrapped OrderPayment.confirm for {payment_info} auto-fill')

@@ -148,13 +148,20 @@ def inject_order_redirect(sender, request, **kwargs):
     browser session per order, so a buyer who bookmarks the Pretix URL
     and revisits later isn't redirected away again.
     """
+    import logging
+    log = logging.getLogger(__name__)
     match = getattr(request, 'resolver_match', None)
-    if not match or (match.url_name or '') != 'event.order':
+    url_name = (match.url_name or '') if match else '<no-match>'
+    if url_name != 'event.order':
         return ''
     code = match.kwargs.get('order')
     secret = match.kwargs.get('secret')
     if not code or not secret:
         return ''
+    log.info(
+        'pretix_eth[redirect]: html_head fired url_name=%s code=%s thanks=%s',
+        url_name, code, request.GET.get('thanks'),
+    )
 
     # Quick read of the template setting — skip rendering entirely when
     # the operator hasn't configured a redirect target.
