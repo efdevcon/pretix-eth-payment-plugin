@@ -1005,3 +1005,45 @@ def admin_fiat_blocked_items_js(request):
         _FIAT_BLOCKED_SYNC_JS,
         content_type='application/javascript; charset=utf-8',
     )
+
+
+def order_redirect_js(request):
+    """Serves a small JS that redirects the buyer from Pretix's stock
+    order-detail page to the operator's configured frontend order URL
+    (e.g. devcon.org). Matches the post-payment redirect that the wc_inject
+    SuccessStep does for crypto orders, but fires for *any* payment
+    provider (Stripe, bank transfer, etc.) — anywhere Pretix lands the
+    buyer on its own order page after payment.
+
+    Hooked into the page by the `wc_order_redirect_inject` html_head
+    signal receiver in signals.py. Only injected when:
+      - the buyer is on `event.order` (not /pay/, /cancel/, /change/, ...),
+      - the order's payment status is PAID,
+      - `payment_walletconnect_frontend_order_url_template` is configured
+        on the event.
+
+    Sourced as a `<script src="...">` (not inline) because Pretix's
+    presale CSP typically forbids inline execution.
+    """
+    import json
+    code = (request.GET.get('code') or '').strip()
+    secret = (request.GET.get('secret') or '').strip()
+    event = getattr(request, 'event', None)
+    if not event or not code or not secret:
+        return HttpResponse('// missing context', content_type='application/javascript; charset=utf-8')
+    template = (event.settings.get('payment_walletconnect_frontend_order_url_template') or '').strip()
+    if not template:
+        return HttpResponse('// no redirect template configured', content_type='application/javascript; charset=utf-8')
+    dest = template.replace('{code}', code).replace('{secret}', secret)
+    # Only allow https or root-relative URLs — never javascript:, data:, etc.
+    if not (dest.startswith('https://') or dest.startswith('/')):
+        return HttpResponse('// invalid redirect destination', content_type='application/javascript; charset=utf-8')
+    js = (
+        '(function () {{ '
+        'var dest = {dest}; '
+        'var key = "wc-order-redirect-" + {code}; '
+        'try {{ if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, "1"); }} catch (e) {{}} '
+        'setTimeout(function () {{ window.location.href = dest; }}, 2000); '
+        '}})();'
+    ).format(dest=json.dumps(dest), code=json.dumps(code))
+    return HttpResponse(js, content_type='application/javascript; charset=utf-8')

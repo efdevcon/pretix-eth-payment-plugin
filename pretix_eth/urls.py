@@ -39,6 +39,8 @@ def _wc_routes():
         path('plugin/wc/client-info/',     views.client_info,      name='wc_client_info'),
         path('plugin/wc/admin/fiat-blocked-items.js',
              views.admin_fiat_blocked_items_js, name='wc_admin_fiat_blocked_items_js'),
+        path('plugin/wc/order-redirect.js',
+             views.order_redirect_js, name='wc_order_redirect_js'),
     ]
 
 

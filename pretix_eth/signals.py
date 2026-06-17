@@ -1,7 +1,8 @@
 from django.dispatch import receiver
+from django.utils.html import format_html
 
 from pretix.base.middleware import _parse_csp, _merge_csp, _render_csp
-from pretix.presale.signals import process_response
+from pretix.presale.signals import html_head, process_response
 from pretix.base.signals import register_payment_providers, register_text_placeholders
 from pretix.base.services.placeholders import SimpleFunctionalTextPlaceholder
 
@@ -120,3 +121,65 @@ try:
 except ImportError:
     # Fallback: no periodic scheduling (dev/test environments)
     pass
+
+
+@receiver(html_head, dispatch_uid='wc_order_redirect_inject')
+def inject_order_redirect(sender, request, **kwargs):
+    """Inject a `<script>` on Pretix's order-detail page that redirects
+    the buyer to the operator's configured frontend order URL after a
+    short delay. Same UX as the wc_inject SuccessStep does for crypto
+    orders, extended here to every payment provider (Stripe, bank
+    transfer, etc.) — Pretix's stock order page is the post-payment
+    landing for non-crypto orders, so the redirect happens here instead.
+
+    Guards:
+      - URL must be the order detail page (`event.order`), not a
+        sub-page like `event.order.pay`, `event.order.cancel`, etc.,
+        where the buyer still has work to do on Pretix.
+      - The order must be PAID — pending/expired orders shouldn't be
+        redirected away from Pretix where the buyer needs to act.
+      - `frontend_order_url_template` must be configured on the event.
+
+    The actual JS lives at a plugin URL (`order_redirect_js` view) so
+    it loads from `'self'` — Pretix's presale CSP blocks inline
+    `<script>` blocks.
+
+    The script itself uses `sessionStorage` to redirect at most once per
+    browser session per order, so a buyer who bookmarks the Pretix URL
+    and revisits later isn't redirected away again.
+    """
+    match = getattr(request, 'resolver_match', None)
+    if not match or (match.url_name or '') != 'event.order':
+        return ''
+    code = match.kwargs.get('order')
+    secret = match.kwargs.get('secret')
+    if not code or not secret:
+        return ''
+
+    # Quick read of the template setting — skip rendering entirely when
+    # the operator hasn't configured a redirect target.
+    template = (sender.settings.get('payment_walletconnect_frontend_order_url_template') or '').strip()
+    if not template:
+        return ''
+
+    # Only inject for PAID orders. Loading the order from the DB on
+    # every order-page render is one tiny indexed query — Pretix already
+    # touched this row to render the page.
+    try:
+        from pretix.base.models import Order
+        order = Order.objects.only('status').get(event=sender, code=code, secret=secret)
+    except Exception:
+        return ''
+    if getattr(order, 'status', None) != Order.STATUS_PAID:
+        return ''
+
+    try:
+        from pretix.multidomain.urlreverse import eventreverse
+        url = eventreverse(sender, 'plugins:pretix_eth:wc_order_redirect_js')
+    except Exception:
+        return ''
+
+    return format_html(
+        '<script src="{}?code={}&secret={}"></script>',
+        url, code, secret,
+    )
