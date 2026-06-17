@@ -1042,12 +1042,17 @@ def order_redirect_js(request, **kwargs):
     # should be `https://…` anyway.
     if not (dest.startswith('https://') or dest.startswith('http://') or dest.startswith('/')):
         return HttpResponse('// invalid redirect destination', content_type='application/javascript; charset=utf-8')
+    # No in-browser dedup needed: the signal receiver in signals.py only
+    # injects this script on the URL that has `?thanks=yes`, which Pretix
+    # appends exactly once (the post-payment landing redirect). Any
+    # subsequent navigation back to `/order/<code>/<secret>/` (from the
+    # email link, a bookmark, etc.) lacks that flag and never loads this
+    # script, so we don't redirect — buyers can actually view their
+    # Pretix order page when they want to.
     js = (
         '(function () {{ '
         'var dest = {dest}; '
-        'var key = "wc-order-redirect-" + {code}; '
-        'try {{ if (sessionStorage.getItem(key)) return; sessionStorage.setItem(key, "1"); }} catch (e) {{}} '
         'setTimeout(function () {{ window.location.href = dest; }}, 2000); '
         '}})();'
-    ).format(dest=json.dumps(dest), code=json.dumps(code))
+    ).format(dest=json.dumps(dest))
     return HttpResponse(js, content_type='application/javascript; charset=utf-8')

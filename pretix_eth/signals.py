@@ -200,23 +200,17 @@ def inject_order_redirect(sender, request, **kwargs):
     if not template:
         return ''
 
-    # Redirect criteria — fire if EITHER:
-    #   (a) Pretix appended `?thanks=yes` (its just-paid landing flag, set
-    #       by the post-payment redirect from /pay/<id>/complete). Order
-    #       may still be PENDING for a fraction of a second while the
-    #       Stripe webhook lands, so we don't gate on status here.
-    #   (b) The order is already PAID — covers crypto orders that arrive
-    #       on the Pretix order page after the bundle's redirect fallback,
-    #       and any other paid-revisit case.
-    thanks = request.GET.get('thanks') == 'yes'
-    if not thanks:
-        try:
-            from pretix.base.models import Order
-            order = Order.objects.only('status').get(event=sender, code=code, secret=secret)
-        except Exception:
-            return ''
-        if getattr(order, 'status', None) != Order.STATUS_PAID:
-            return ''
+    # Redirect ONLY on the just-paid landing where Pretix appends
+    # `?thanks=yes` (set by the post-payment redirect from
+    # `/pay/<id>/complete` → `/order/<code>/<secret>/?thanks=yes`).
+    # Buyers who revisit their order via the email link or a bookmark
+    # later shouldn't be bounced to the storefront — they expect the
+    # Pretix order page to actually load (e.g. to view ticket details
+    # or download an invoice). The `?thanks=yes` flag is the only
+    # signal that distinguishes "just paid, take me to the next page"
+    # from "I navigated here on purpose."
+    if request.GET.get('thanks') != 'yes':
+        return ''
 
     try:
         from pretix.multidomain.urlreverse import eventreverse
