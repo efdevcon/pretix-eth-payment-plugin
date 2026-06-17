@@ -1035,8 +1035,12 @@ def order_redirect_js(request, **kwargs):
     if not template:
         return HttpResponse('// no redirect template configured', content_type='application/javascript; charset=utf-8')
     dest = template.replace('{code}', code).replace('{secret}', secret)
-    # Only allow https or root-relative URLs — never javascript:, data:, etc.
-    if not (dest.startswith('https://') or dest.startswith('/')):
+    # Allow http://, https://, or root-relative URLs — never javascript:,
+    # data:, or any other scheme that could execute in the buyer's browser.
+    # `http://` is intentionally allowed for localhost / dev environments;
+    # for production deployments the operator's `frontend_order_url_template`
+    # should be `https://…` anyway.
+    if not (dest.startswith('https://') or dest.startswith('http://') or dest.startswith('/')):
         return HttpResponse('// invalid redirect destination', content_type='application/javascript; charset=utf-8')
     js = (
         '(function () {{ '
