@@ -759,6 +759,13 @@ def _install_stripe_mail_render():
         # Build a minimal recap mirroring the shape of the crypto recap
         # (one fact per line, blank line between, since Pretix's email
         # markdown collapses single newlines).
+        log.info(
+            'pretix_eth[mail]: stripe order_pending_mail_render called '
+            'order=%s payment=%s provider=%s',
+            getattr(order, 'code', '?'),
+            getattr(payment, 'pk', '?'),
+            getattr(payment, 'provider', '?'),
+        )
         info = payment.info_data or {}
         lines = []
 

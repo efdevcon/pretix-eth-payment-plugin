@@ -994,7 +994,7 @@ def client_info(request, **kwargs):
     return HttpResponse(status=204)
 
 
-def admin_fiat_blocked_items_js(request):
+def admin_fiat_blocked_items_js(request, **kwargs):
     """Serves the sync JS for the 'Items that block fiat payment' admin
     widget. Lives behind a plugin URL (rather than a collected static
     file) so it works on Pretix deployments using ManifestStaticFilesStorage
@@ -1007,7 +1007,7 @@ def admin_fiat_blocked_items_js(request):
     )
 
 
-def order_redirect_js(request):
+def order_redirect_js(request, **kwargs):
     """Serves a small JS that redirects the buyer from Pretix's stock
     order-detail page to the operator's configured frontend order URL
     (e.g. devcon.org). Matches the post-payment redirect that the wc_inject
