@@ -84,8 +84,8 @@ def _install_order_placed_email_suppressor():
             return False
         provider = (getattr(payment, 'provider', '') or '')
         is_fast_settling = (
-            provider == 'walletconnect' or
-            provider.startswith('stripe')  # stripe_cc, stripe_sepa_debit, etc.
+            provider == 'walletconnect'
+            or provider.startswith('stripe')  # stripe_cc, stripe_sepa_debit, etc.
         )
         if not is_fast_settling:
             return False
@@ -242,7 +242,6 @@ def _current_cart_fully_exempt(event):
     Returns False on any error / when the request or cart isn't available
     so we fail open (label keeps the prefix, matching the prior behaviour).
     """
-    from decimal import Decimal
     ctx = globals().get('_fee_exempt_ctx')
     if ctx is None:
         return False
@@ -795,14 +794,14 @@ def _install_stripe_mail_render():
         card = info.get('source') or info.get('charges') or {}
         if isinstance(card, dict):
             last4 = (
-                card.get('last4') or
-                ((card.get('card') or {}).get('last4')) or
-                ((card.get('payment_method_details') or {}).get('card') or {}).get('last4')
+                card.get('last4')
+                or ((card.get('card') or {}).get('last4'))
+                or ((card.get('payment_method_details') or {}).get('card') or {}).get('last4')
             )
             brand = (
-                card.get('brand') or
-                ((card.get('card') or {}).get('brand')) or
-                ((card.get('payment_method_details') or {}).get('card') or {}).get('brand')
+                card.get('brand')
+                or ((card.get('card') or {}).get('brand'))
+                or ((card.get('payment_method_details') or {}).get('card') or {}).get('brand')
             )
             if last4:
                 bits = []
