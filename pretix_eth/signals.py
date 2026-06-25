@@ -1,7 +1,9 @@
+from django.db.models.signals import pre_save
 from django.dispatch import receiver
 from django.utils.html import format_html
 
 from pretix.base.middleware import _parse_csp, _merge_csp, _render_csp
+from pretix.base.models import OrderFee
 from pretix.presale.signals import html_head, process_response
 from pretix.base.signals import register_payment_providers, register_text_placeholders
 from pretix.base.services.placeholders import SimpleFunctionalTextPlaceholder
@@ -222,3 +224,38 @@ def inject_order_redirect(sender, request, **kwargs):
         '<script src="{}?code={}&secret={}"></script>',
         url, code, secret,
     )
+
+
+@receiver(pre_save, sender=OrderFee, dispatch_uid='wc_stripe_fee_label')
+def set_stripe_fee_label(sender, instance, **kwargs):
+    """Set OrderFee.description on Stripe payment fees so the line shown
+    on the order page, invoice PDF, and confirmation emails reads
+    'Credit card processing fee (+20%)' instead of Pretix's generic
+    'Payment fee' fallback.
+
+    The percentage is read from the same setting that drives the chooser
+    label decoration (`payment_stripe_fee_percent`), so updates to the
+    percentage in admin propagate to the label automatically on the next
+    order.
+
+    Skipped when:
+      - The fee is not a payment fee (FEE_TYPE_PAYMENT)
+      - The provider is not a Stripe variant (`stripe`, `stripe_cc`, ...)
+      - A description is already set (admin edit or earlier hook wins)
+
+    Only affects newly created/saved fees. Existing OrderFee rows keep
+    their current empty description until they get saved again; a one-off
+    backfill via the Django shell can update historical rows if needed.
+    """
+    if instance.fee_type != OrderFee.FEE_TYPE_PAYMENT:
+        return
+    if not (instance.internal_type or '').startswith('stripe'):
+        return
+    if instance.description:
+        return
+    try:
+        pct = instance.order.event.settings.get('payment_stripe_fee_percent') or 0
+    except Exception:
+        return
+    pct_str = f'{float(pct):g}'  # 20 stays '20', 20.5 stays '20.5'
+    instance.description = f'Credit card processing fee (+{pct_str}%)'
