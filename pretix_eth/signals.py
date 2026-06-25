@@ -253,9 +253,27 @@ def set_stripe_fee_label(sender, instance, **kwargs):
         return
     if instance.description:
         return
+    # Resolve the percentage via the provider's own settings proxy — same
+    # path the chooser-label decoration uses, so the label here matches
+    # the "+N% · Credit card via Stripe" the buyer saw at checkout.
+    # Pretix's BasePaymentProvider.settings auto-prefixes with the
+    # provider identifier, so `_fee_percent` resolves to the right
+    # hierarkey key (e.g. `payment_stripe__fee_percent`) regardless of
+    # whether the setting is shared across Stripe methods or per-method.
     try:
-        pct = instance.order.event.settings.get('payment_stripe_fee_percent') or 0
+        from decimal import Decimal
+        providers = instance.order.event.get_payment_providers()
+        provider = providers.get(instance.internal_type)
+        if provider is None:
+            return
+        pct = provider.settings.get('_fee_percent', as_type=Decimal, default=Decimal('0')) or Decimal('0')
     except Exception:
         return
-    pct_str = f'{float(pct):g}'  # 20 stays '20', 20.5 stays '20.5'
+    if pct <= 0:
+        return  # no markup configured; leave the default 'Payment fee' label
+    # Strip trailing zeros so 3.00 displays as 3, 20.5 stays as 20.5.
+    pct_str = (
+        format(pct.normalize(), 'f') if pct == pct.to_integral()
+        else format(pct, 'f').rstrip('0').rstrip('.')
+    )
     instance.description = f'Credit card processing fee (+{pct_str}%)'
