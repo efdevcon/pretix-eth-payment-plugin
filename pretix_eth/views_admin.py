@@ -52,6 +52,26 @@ def _get_event(org_slug: str, event_slug: str):
         return None
 
 
+def _check_event_access_or_403(request, event):
+    """Final cross-tenant authorization check on the body-resolved event.
+
+    The `require_pretix_admin_token` decorator validates token+team against
+    the URL-resolved event (`?organizer=…&event=…`). Views that re-resolve
+    the event from the JSON body must call this so a URL/body mismatch can't
+    bypass authorization (e.g. URL targets org A to pass the decorator,
+    body targets org B to act on its data).
+
+    Returns a `JsonResponse(403)` on mismatch, or None when access is OK.
+    """
+    from pretix_eth.x402.auth import check_team_event_access
+    if not check_team_event_access(request, event):
+        return JsonResponse(
+            {'success': False, 'error': 'forbidden — token does not cover this organizer'},
+            status=403,
+        )
+    return None
+
+
 def _serialize_completed(
     o: X402CompletedOrder,
     email: Optional[str] = None,
@@ -499,7 +519,9 @@ def admin_refund(request: HttpRequest, **kwargs):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
-    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
+    forbidden = _check_event_access_or_403(request, event)
+    if forbidden is not None:
+        return forbidden
 
     payment_reference = body.get('payment_reference', '')
     if not payment_reference:
@@ -581,6 +603,9 @@ def admin_wc_refund(request: HttpRequest, **kwargs):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
+    forbidden = _check_event_access_or_403(request, event)
+    if forbidden is not None:
+        return forbidden
 
     pretix_order_code = body.get('pretix_order_code') or body.get('order_code') or ''
     refund_tx_hash = body.get('refund_tx_hash', '')
@@ -597,10 +622,15 @@ def admin_wc_refund(request: HttpRequest, **kwargs):
         return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
 
     import json as _json
+    from django.db import transaction
     from pretix.base.models import Order
-    with scopes_disabled():
+    # Atomic + select_for_update so two concurrent POSTs with the same
+    # refund_tx_hash (admin double-click on a slow Confirm button) can't
+    # both pass the idempotency check and both create OrderRefund rows.
+    # Mirrors admin_wc_verify's lock pattern below.
+    with scopes_disabled(), transaction.atomic():
         try:
-            order = Order.objects.get(event=event, code=pretix_order_code)
+            order = Order.objects.select_for_update().get(event=event, code=pretix_order_code)
         except Order.DoesNotExist:
             return JsonResponse({'success': False, 'error': 'pretix order not found'}, status=404)
 
@@ -662,7 +692,9 @@ def admin_verify(request: HttpRequest, **kwargs):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
-    # TODO: enforce event-level authorization — verify token.team has access to event.organizer
+    forbidden = _check_event_access_or_403(request, event)
+    if forbidden is not None:
+        return forbidden
 
     required = ('payment_reference', 'tx_hash', 'payer', 'chain_id', 'symbol')
     missing = [k for k in required if not body.get(k)]
@@ -761,6 +793,9 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
     event = _get_event(body.get('organizer', ''), body.get('event', ''))
     if not event:
         return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
+    forbidden = _check_event_access_or_403(request, event)
+    if forbidden is not None:
+        return forbidden
 
     required = ('order_code', 'order_secret', 'tx_hash', 'chain_id', 'symbol', 'payer')
     missing = [k for k in required if not body.get(k)]
