@@ -226,6 +226,46 @@ def inject_order_redirect(sender, request, **kwargs):
     )
 
 
+@receiver(html_head, dispatch_uid='wc_item_pricing_inject')
+def inject_item_pricing(sender, request, **kwargs):
+    """Inject the buyer-side dual-price rendering script on Pretix's
+    catalog and cart pages.
+
+    The script (served by `views.item_pricing_js`) fetches the event's
+    item-pricing JSON and DOM-annotates each item row with a "Card: $X"
+    hint or a "Crypto only" badge. Loading it via an `html_head` signal
+    keeps the injection scoped to event-buyer pages — admin pages and
+    other organizer surfaces are unaffected.
+
+    URL-name allowlist:
+      - `event.index` — main catalog (item list + optional cart sidebar)
+      - `event.checkout` / `event.checkout.*` — checkout funnel steps
+      - `event.cart.*` — cart manipulation routes (cart preview, add, etc.)
+      - `event.order` / `event.order.*` — order detail and re-pay views
+
+    All event-scoped, all buyer-facing. Skips quietly on pages where the
+    DOM contract doesn't apply (no item rows to annotate).
+    """
+    match = getattr(request, 'resolver_match', None)
+    url_name = (match.url_name or '') if match else ''
+    if not url_name:
+        return ''
+    allowed_prefixes = (
+        'event.index',
+        'event.checkout',
+        'event.cart',
+        'event.order',
+    )
+    if not any(url_name == p or url_name.startswith(p + '.') for p in allowed_prefixes):
+        return ''
+    try:
+        from pretix.multidomain.urlreverse import eventreverse
+        url = eventreverse(sender, 'plugins:pretix_eth:wc_item_pricing_js')
+    except Exception:
+        return ''
+    return format_html('<script src="{}"></script>', url)
+
+
 @receiver(pre_save, sender=OrderFee, dispatch_uid='wc_stripe_fee_label')
 def set_stripe_fee_label(sender, instance, **kwargs):
     """Set OrderFee.description on Stripe payment fees so the line shown

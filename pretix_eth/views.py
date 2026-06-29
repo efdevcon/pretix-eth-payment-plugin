@@ -1128,3 +1128,130 @@ def item_pricing(request, **kwargs):
     # editing prices want to see updates within a minute. CDN can override.
     response['Cache-Control'] = 'public, max-age=60'
     return response
+
+
+# Inline JS bundle for the buyer-facing catalog dual-price rendering. Plain
+# vanilla JS (no React, no build step) so it ships as a single static-looking
+# response from the plugin URL, satisfies a strict `script-src 'self'` CSP,
+# and runs the moment the catalog renders.
+#
+# DOM contract (Pretix 5.x):
+#   - Catalog item rows are `<article id="{prefix}item-{pk}">` (variations get
+#     `item-{pk}-{var_pk}` — we only annotate the main row, since variation
+#     prices already live under the same item-level metadata).
+#   - Each item row has a `<div class="price">…</div>` inside its `.row`.
+#   - Cart rows carry `data-article-id="item-{pk}"` on the rowgroup `<div>`
+#     and render the line price in `.cart-row .price`.
+#
+# Behavior:
+#   - `fiat_disabled = true` → append a "Crypto only" badge next to the price.
+#   - `fiat_price_usd` set and different from `default_price` → append
+#     "Card: $X" hint on its own line.
+#   - Otherwise (no metadata, or fiat = crypto) → no change.
+_ITEM_PRICING_JS_TEMPLATE = """
+(function () {{
+  'use strict';
+  var endpoint = {endpoint!s};
+  if (!endpoint) return;
+
+  function fmtMoney(v) {{
+    var n = parseFloat(v);
+    if (!isFinite(n)) return v;
+    var s = n.toFixed(2);
+    return '$' + s.replace(/\\.00$/, '').replace(/(\\.[0-9])0$/, '$1');
+  }}
+
+  function annotate(elem, info, defaultPrice) {{
+    if (elem.querySelector('.pretix-eth-dual-price')) return;
+    if (info.fiat_disabled) {{
+      var b = document.createElement('div');
+      b.className = 'pretix-eth-dual-price pretix-eth-crypto-only';
+      b.style.fontSize = '0.85em';
+      b.style.opacity = '0.75';
+      b.style.marginTop = '2px';
+      b.textContent = 'Crypto only';
+      elem.appendChild(b);
+      return;
+    }}
+    if (!info.fiat_price_usd) return;
+    var fiat = parseFloat(info.fiat_price_usd);
+    var def = parseFloat(defaultPrice == null ? info.default_price : defaultPrice);
+    if (!isFinite(fiat) || !isFinite(def) || fiat === def) return;
+    var d = document.createElement('div');
+    d.className = 'pretix-eth-dual-price pretix-eth-fiat-hint';
+    d.style.fontSize = '0.85em';
+    d.style.opacity = '0.75';
+    d.style.marginTop = '2px';
+    d.textContent = 'Card: ' + fmtMoney(fiat);
+    elem.appendChild(d);
+  }}
+
+  function applyToDocument(byId) {{
+    // Catalog: <article id="…item-{{pk}}">
+    document.querySelectorAll('article[id]').forEach(function (article) {{
+      var m = article.id.match(/item-(\\d+)$/);
+      if (!m) return;
+      var info = byId[parseInt(m[1], 10)];
+      if (!info) return;
+      var priceDiv = article.querySelector(':scope > .row .price') ||
+                     article.querySelector('.price');
+      if (priceDiv) annotate(priceDiv, info, null);
+    }});
+    // Cart: rowgroup with data-article-id="item-{{pk}}" or "item-{{pk}}-{{var}}"
+    document.querySelectorAll('[data-article-id^="item-"]').forEach(function (row) {{
+      var m = row.getAttribute('data-article-id').match(/^item-(\\d+)/);
+      if (!m) return;
+      var info = byId[parseInt(m[1], 10)];
+      if (!info) return;
+      var priceDiv = row.querySelector('.price') || row.querySelector('.cart-price');
+      if (priceDiv) annotate(priceDiv, info, null);
+    }});
+  }}
+
+  function load() {{
+    fetch(endpoint, {{ credentials: 'same-origin' }})
+      .then(function (r) {{ return r.ok ? r.json() : null; }})
+      .then(function (data) {{
+        if (!data || !data.items) return;
+        var byId = {{}};
+        data.items.forEach(function (it) {{ byId[it.id] = it; }});
+        applyToDocument(byId);
+      }})
+      .catch(function () {{}});
+  }}
+
+  if (document.readyState === 'loading') {{
+    document.addEventListener('DOMContentLoaded', load);
+  }} else {{
+    load();
+  }}
+}})();
+"""
+
+
+@require_http_methods(['GET'])
+def item_pricing_js(request, **kwargs):
+    """Serve the buyer-side dual-price rendering JS for the current event.
+
+    Loaded via an `html_head` injection on Pretix's catalog and cart pages
+    (see `pretix_eth.signals.inject_item_pricing`). The script fetches
+    `plugin/wc/item-pricing/` for the event and DOM-annotates each item
+    row with either a "Card: $X" hint (when `fiat_price_usd` overrides
+    the crypto price) or a "Crypto only" badge (when `fiat_disabled` is
+    set on the item).
+
+    The endpoint URL is baked into the script as a string literal, scoped
+    to the event the script was injected from — so the JS doesn't need
+    to guess at organizer/event slugs at runtime.
+    """
+    import json
+    event = getattr(request, 'event', None)
+    endpoint_url = '/plugin/wc/item-pricing/'
+    if event is not None:
+        try:
+            from pretix.multidomain.urlreverse import eventreverse
+            endpoint_url = eventreverse(event, 'plugins:pretix_eth:wc_item_pricing')
+        except Exception:
+            pass
+    js = _ITEM_PRICING_JS_TEMPLATE.format(endpoint=json.dumps(endpoint_url))
+    return HttpResponse(js, content_type='application/javascript; charset=utf-8')
