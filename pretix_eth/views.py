@@ -1130,102 +1130,261 @@ def item_pricing(request, **kwargs):
     return response
 
 
-# Inline JS bundle for the buyer-facing catalog dual-price rendering. Plain
-# vanilla JS (no React, no build step) so it ships as a single static-looking
-# response from the plugin URL, satisfies a strict `script-src 'self'` CSP,
-# and runs the moment the catalog renders.
+# Buyer-facing dual-price rendering bundle. Plain vanilla JS + a small
+# injected stylesheet, no React or build step, so it ships as a single
+# static response from the plugin URL and satisfies a strict `script-src
+# 'self'` CSP.
 #
 # DOM contract (Pretix 5.x):
-#   - Catalog item rows are `<article id="{prefix}item-{pk}">` (variations get
-#     `item-{pk}-{var_pk}` — we only annotate the main row, since variation
-#     prices already live under the same item-level metadata).
+#   - Catalog item rows are `<article id="{prefix}item-{pk}">` (variations
+#     get `item-{pk}-{var_pk}` — we only annotate the main row).
 #   - Each item row has a `<div class="price">…</div>` inside its `.row`.
 #   - Cart rows carry `data-article-id="item-{pk}"` on the rowgroup `<div>`
 #     and render the line price in `.cart-row .price`.
 #
-# Behavior:
-#   - `fiat_disabled = true` → append a "Crypto only" badge next to the price.
-#   - `fiat_price_usd` set and different from `default_price` → append
-#     "Card: $X" hint on its own line.
+# Per-item annotation logic:
+#   - `fiat_disabled = true` → append a single warm-tinted "Ethereum only"
+#     pill next to the existing price.
+#   - `fiat_price_usd` set and different from `default_price` →
+#       1. append a blue "Ethereum" pill next to the existing price
+#       2. append a card-price line below with a gray "Card" pill + amount
+#       3. if delta ≥ max($50, 10% of crypto), append a green
+#          "Save $X with Ethereum" line.
 #   - Otherwise (no metadata, or fiat = crypto) → no change.
-_ITEM_PRICING_JS_TEMPLATE = """
-(function () {{
-  'use strict';
-  var endpoint = {endpoint!s};
-  if (!endpoint) return;
+#
+# The ETH glyph icon is embedded as a base64 data URI (~4.6 KB inline) so
+# the bundle is self-contained — avoids dependence on `collectstatic`
+# under `ManifestStaticFilesStorage`, which has bitten this plugin before.
+# The credit-card glyph is an inline SVG (~200 bytes).
+_ETH_ICON_PNG_BASE64 = (
+    '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'
+    'sAPwOeoAAAAASUVORK5CYII='
+)
+# NOTE: The exact base64 above was generated from
+# pretix_eth/static/wc_inject/icons/tokens/eth.png at build time and is
+# the same image the wc_inject bundle uses to represent ETH. Regenerate
+# with `base64 < eth.png` if the source PNG changes.
+_ETH_ICON_DATA_URI = 'data:image/png;base64,' + _ETH_ICON_PNG_BASE64
 
-  function fmtMoney(v) {{
+# Body uses sentinel placeholders that the view substitutes with
+# JSON-encoded values at request time. Avoids Python f-string brace
+# escaping in the JS body, keeping the JS readable.
+_ITEM_PRICING_JS_BODY = r"""
+(function () {
+  'use strict';
+  var ENDPOINT = __PED_ENDPOINT__;
+  var ETH_ICON = __PED_ETH_ICON__;
+  if (!ENDPOINT) return;
+
+  var CSS = (
+    '.ped-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;' +
+      'border-radius:999px;font-size:0.72em;font-weight:600;line-height:1.3;' +
+      'vertical-align:middle;white-space:nowrap;letter-spacing:0.01em}' +
+    '.ped-pill .ped-icon{width:12px;height:12px;display:inline-flex;' +
+      'align-items:center;justify-content:center;flex-shrink:0}' +
+    '.ped-pill .ped-icon img,.ped-pill .ped-icon svg{width:12px;height:12px;' +
+      'display:block}' +
+    '.ped-pill.ped-eth{background-color:rgba(98,126,234,0.14);color:#2f3aa0}' +
+    '.ped-pill.ped-card{background-color:rgba(0,0,0,0.06);color:#555}' +
+    '.ped-pill.ped-only{background-color:rgba(217,119,6,0.14);color:#b45309}' +
+    '.ped-eth-inline{margin-left:6px}' +
+    '.ped-card-line{display:flex;justify-content:flex-end;align-items:center;' +
+      'gap:6px;font-size:0.9em;color:#777;margin-top:4px}' +
+    '.ped-card-line .ped-card-amount{font-variant-numeric:tabular-nums}' +
+    '.ped-save-line{margin-top:3px;font-size:0.78em;color:#047857;' +
+      'text-align:right;font-style:italic}' +
+    '[data-article-id^="item-"] .ped-card-line,' +
+    '[data-article-id^="item-"] .ped-save-line{justify-content:flex-end}'
+  );
+
+  var CARD_SVG = (
+    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+    '<path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/>' +
+    '</svg>'
+  );
+
+  function injectStyle() {
+    if (document.getElementById('pretix-eth-dual-price-css')) return;
+    var s = document.createElement('style');
+    s.id = 'pretix-eth-dual-price-css';
+    s.textContent = CSS;
+    document.head.appendChild(s);
+  }
+
+  function fmtMoney(v) {
     var n = parseFloat(v);
     if (!isFinite(n)) return v;
     var s = n.toFixed(2);
-    return '$' + s.replace(/\\.00$/, '').replace(/(\\.[0-9])0$/, '$1');
-  }}
+    return '$' + s.replace(/\.00$/, '').replace(/(\.[0-9])0$/, '$1');
+  }
 
-  function annotate(elem, info, defaultPrice) {{
-    if (elem.querySelector('.pretix-eth-dual-price')) return;
-    if (info.fiat_disabled) {{
-      var b = document.createElement('div');
-      b.className = 'pretix-eth-dual-price pretix-eth-crypto-only';
-      b.style.fontSize = '0.85em';
-      b.style.opacity = '0.75';
-      b.style.marginTop = '2px';
-      b.textContent = 'Crypto only';
-      elem.appendChild(b);
+  function buildPill(kind) {
+    var pill = document.createElement('span');
+    pill.className = 'ped-pill ped-' + kind;
+    var iconEl = document.createElement('span');
+    iconEl.className = 'ped-icon';
+    if (kind === 'eth' || kind === 'only') {
+      var img = document.createElement('img');
+      img.src = ETH_ICON;
+      img.alt = '';
+      iconEl.appendChild(img);
+    } else if (kind === 'card') {
+      iconEl.innerHTML = CARD_SVG;
+    }
+    pill.appendChild(iconEl);
+    var lbl = document.createElement('span');
+    lbl.textContent = (kind === 'eth') ? 'Ethereum' :
+                      (kind === 'card') ? 'Card' :
+                      (kind === 'only') ? 'Ethereum only' : '';
+    pill.appendChild(lbl);
+    return pill;
+  }
+
+  function annotate(elem, info) {
+    if (elem.dataset.pedAnnotated === '1') return;
+    elem.dataset.pedAnnotated = '1';
+
+    if (info.fiat_disabled) {
+      var only = buildPill('only');
+      only.classList.add('ped-eth-inline');
+      elem.appendChild(only);
       return;
-    }}
+    }
+
+    // Always tag the existing crypto price with an "Ethereum" pill so
+    // buyers know which payment method that number applies to.
+    var ethPill = buildPill('eth');
+    ethPill.classList.add('ped-eth-inline');
+    elem.appendChild(ethPill);
+
     if (!info.fiat_price_usd) return;
     var fiat = parseFloat(info.fiat_price_usd);
-    var def = parseFloat(defaultPrice == null ? info.default_price : defaultPrice);
+    var def = parseFloat(info.default_price);
     if (!isFinite(fiat) || !isFinite(def) || fiat === def) return;
-    var d = document.createElement('div');
-    d.className = 'pretix-eth-dual-price pretix-eth-fiat-hint';
-    d.style.fontSize = '0.85em';
-    d.style.opacity = '0.75';
-    d.style.marginTop = '2px';
-    d.textContent = 'Card: ' + fmtMoney(fiat);
-    elem.appendChild(d);
-  }}
 
-  function applyToDocument(byId) {{
-    // Catalog: <article id="…item-{{pk}}">
-    document.querySelectorAll('article[id]').forEach(function (article) {{
-      var m = article.id.match(/item-(\\d+)$/);
+    var cardLine = document.createElement('div');
+    cardLine.className = 'ped-card-line';
+    cardLine.appendChild(buildPill('card'));
+    var amt = document.createElement('span');
+    amt.className = 'ped-card-amount';
+    amt.textContent = fmtMoney(fiat);
+    cardLine.appendChild(amt);
+    elem.appendChild(cardLine);
+
+    // Savings callout — only when the delta is meaningful, so cheap items
+    // (where +$2 to fiat is technically a "saving" but reads as noise)
+    // don't clutter the catalog.
+    var delta = fiat - def;
+    var threshold = Math.max(50, def * 0.10);
+    if (delta >= threshold) {
+      var save = document.createElement('div');
+      save.className = 'ped-save-line';
+      save.textContent = 'Save ' + fmtMoney(delta) + ' with Ethereum';
+      elem.appendChild(save);
+    }
+  }
+
+  function applyToDocument(byId) {
+    // Catalog: <article id="…item-{pk}">. We only annotate the main row;
+    // variations under the same item inherit the parent's metadata.
+    document.querySelectorAll('article[id]').forEach(function (article) {
+      var m = article.id.match(/item-(\d+)$/);
       if (!m) return;
       var info = byId[parseInt(m[1], 10)];
       if (!info) return;
       var priceDiv = article.querySelector(':scope > .row .price') ||
                      article.querySelector('.price');
-      if (priceDiv) annotate(priceDiv, info, null);
-    }});
-    // Cart: rowgroup with data-article-id="item-{{pk}}" or "item-{{pk}}-{{var}}"
-    document.querySelectorAll('[data-article-id^="item-"]').forEach(function (row) {{
-      var m = row.getAttribute('data-article-id').match(/^item-(\\d+)/);
+      if (priceDiv) annotate(priceDiv, info);
+    });
+    // Cart: rowgroup with data-article-id="item-{pk}" or "item-{pk}-{var}".
+    document.querySelectorAll('[data-article-id^="item-"]').forEach(function (row) {
+      var m = row.getAttribute('data-article-id').match(/^item-(\d+)/);
       if (!m) return;
       var info = byId[parseInt(m[1], 10)];
       if (!info) return;
-      var priceDiv = row.querySelector('.price') || row.querySelector('.cart-price');
-      if (priceDiv) annotate(priceDiv, info, null);
-    }});
-  }}
+      var priceDiv = row.querySelector('.price');
+      if (priceDiv) annotate(priceDiv, info);
+    });
+  }
 
-  function load() {{
-    fetch(endpoint, {{ credentials: 'same-origin' }})
-      .then(function (r) {{ return r.ok ? r.json() : null; }})
-      .then(function (data) {{
+  function load() {
+    injectStyle();
+    fetch(ENDPOINT, { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
         if (!data || !data.items) return;
-        var byId = {{}};
-        data.items.forEach(function (it) {{ byId[it.id] = it; }});
+        var byId = {};
+        data.items.forEach(function (it) { byId[it.id] = it; });
         applyToDocument(byId);
-      }})
-      .catch(function () {{}});
-  }}
+      })
+      .catch(function () {});
+  }
 
-  if (document.readyState === 'loading') {{
+  if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', load);
-  }} else {{
+  } else {
     load();
-  }}
-}})();
+  }
+})();
 """
 
 
@@ -1236,13 +1395,13 @@ def item_pricing_js(request, **kwargs):
     Loaded via an `html_head` injection on Pretix's catalog and cart pages
     (see `pretix_eth.signals.inject_item_pricing`). The script fetches
     `plugin/wc/item-pricing/` for the event and DOM-annotates each item
-    row with either a "Card: $X" hint (when `fiat_price_usd` overrides
-    the crypto price) or a "Crypto only" badge (when `fiat_disabled` is
-    set on the item).
+    row with pills indicating Ethereum vs Card pricing, plus an optional
+    "Save $X with Ethereum" callout for items with a meaningful fiat
+    markup.
 
-    The endpoint URL is baked into the script as a string literal, scoped
-    to the event the script was injected from — so the JS doesn't need
-    to guess at organizer/event slugs at runtime.
+    Both the endpoint URL and the ETH icon data URI are substituted into
+    the JS body at request time so the JS body itself is a static string
+    constant (no Python f-string brace escaping needed).
     """
     import json
     event = getattr(request, 'event', None)
@@ -1253,5 +1412,9 @@ def item_pricing_js(request, **kwargs):
             endpoint_url = eventreverse(event, 'plugins:pretix_eth:wc_item_pricing')
         except Exception:
             pass
-    js = _ITEM_PRICING_JS_TEMPLATE.format(endpoint=json.dumps(endpoint_url))
+    js = (
+        _ITEM_PRICING_JS_BODY
+        .replace('__PED_ENDPOINT__', json.dumps(endpoint_url))
+        .replace('__PED_ETH_ICON__', json.dumps(_ETH_ICON_DATA_URI))
+    )
     return HttpResponse(js, content_type='application/javascript; charset=utf-8')

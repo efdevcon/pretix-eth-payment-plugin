@@ -241,10 +241,14 @@ def inject_item_pricing(sender, request, **kwargs):
       - `event.index` — main catalog (item list + optional cart sidebar)
       - `event.checkout` / `event.checkout.*` — checkout funnel steps
       - `event.cart.*` — cart manipulation routes (cart preview, add, etc.)
-      - `event.order` / `event.order.*` — order detail and re-pay views
 
-    All event-scoped, all buyer-facing. Skips quietly on pages where the
-    DOM contract doesn't apply (no item rows to annotate).
+    Deliberately NOT injected on `event.order.*`. Once an order exists,
+    the buyer has either already paid (showing "Card: $999" hints next
+    to items they paid $499 for in ETH would be confusing) or is about
+    to pay against a fixed Pretix-computed total (the order's actual
+    `OrderFee` row already captures the fiat markup, so dual-price hints
+    would just duplicate it). Dual-price rendering belongs in the
+    pre-commitment surfaces only.
     """
     match = getattr(request, 'resolver_match', None)
     url_name = (match.url_name or '') if match else ''
@@ -254,7 +258,6 @@ def inject_item_pricing(sender, request, **kwargs):
         'event.index',
         'event.checkout',
         'event.cart',
-        'event.order',
     )
     if not any(url_name == p or url_name.startswith(p + '.') for p in allowed_prefixes):
         return ''
