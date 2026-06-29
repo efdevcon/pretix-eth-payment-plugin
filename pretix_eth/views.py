@@ -1056,3 +1056,75 @@ def order_redirect_js(request, **kwargs):
         '}})();'
     ).format(dest=json.dumps(dest))
     return HttpResponse(js, content_type='application/javascript; charset=utf-8')
+
+
+@csrf_exempt
+@require_http_methods(['GET'])
+def item_pricing(request, **kwargs):
+    """Per-event item pricing map: `{items: [{id, default_price,
+    fiat_price_usd, fiat_disabled}, ...]}`.
+
+    Used by the wc_inject bundle to render dual prices ("$499 crypto /
+    $999 fiat") on catalog and cart pages, since Pretix's stock templates
+    only show `default_price`. Read-only, public; rate-limited per IP at
+    the same rate as other buyer endpoints.
+
+    Resolves the event from `request.event` (when called on the
+    event-scoped URL) or from `?organizer=…&event=…` (root-level URL,
+    used by the wc_inject bundle on main-domain deployments).
+
+    Only active items are returned. Variations are NOT yet expanded —
+    they inherit their parent's metadata for now; if per-variation fiat
+    pricing becomes needed, extend this view to emit variation rows too.
+    """
+    client_ip = get_client_ip(request)
+    if not _wc_buyer_rate_limit(client_ip, 'item_pricing'):
+        return _rate_limited()
+
+    event = getattr(request, 'event', None)
+    if event is None:
+        org_slug = (request.GET.get('organizer') or '').strip()
+        ev_slug = (request.GET.get('event') or '').strip()
+        if not (org_slug and ev_slug):
+            return JsonResponse({'success': False, 'error': 'organizer and event are required'}, status=400)
+        from pretix.base.models import Event
+        with scopes_disabled():
+            try:
+                event = Event.objects.get(organizer__slug=org_slug, slug=ev_slug)
+            except Event.DoesNotExist:
+                return JsonResponse({'success': False, 'error': 'event not found'}, status=404)
+
+    def _truthy(v):
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() in ('true', 'yes', '1')
+
+    with scopes_disabled():
+        items = list(event.items.filter(active=True).values('id', 'default_price'))
+        # Resolve meta_data for each item. ItemMetaValue access is per-item
+        # so we batch via a single query and group in Python.
+        from pretix.base.models import ItemMetaValue
+        meta_rows = ItemMetaValue.objects.filter(
+            item__event=event, item__active=True,
+        ).select_related('property').values('item_id', 'property__name', 'value')
+        per_item_meta: dict = {}
+        for row in meta_rows:
+            per_item_meta.setdefault(row['item_id'], {})[row['property__name']] = row['value']
+
+    out = []
+    for it in items:
+        meta = per_item_meta.get(it['id'], {})
+        fiat_raw = (meta.get('fiat_price_usd') or '').strip() or None
+        out.append({
+            'id': it['id'],
+            'default_price': str(it['default_price']),
+            'fiat_price_usd': fiat_raw,  # null when not overridden (fiat = default_price)
+            'fiat_disabled': _truthy(meta.get('fiat_disabled')),
+        })
+    response = JsonResponse({'items': out})
+    # Short cache: item config doesn't change every second, but admins
+    # editing prices want to see updates within a minute. CDN can override.
+    response['Cache-Control'] = 'public, max-age=60'
+    return response

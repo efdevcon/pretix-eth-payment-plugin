@@ -30,7 +30,7 @@ class EthApp(AppConfig):
         _install_order_placed_email_suppressor()
         _install_fiat_provider_restrictor()
         _install_fiat_fee_name_decoration()
-        _install_fiat_markup_exemption()
+        _install_fiat_per_item_markup()
         _install_stripe_mail_render()
         _install_payment_info_autofill()
 
@@ -118,19 +118,21 @@ def _install_fiat_provider_restrictor():
     """Monkey-patch `pretix.plugins.stripe.payment.StripeMethod.is_allowed`
     so that Stripe (and every concrete payment method that inherits from it
     — card, SEPA, etc.) is hidden whenever the current cart or order
-    contains an item listed in the event's `payment_walletconnect_fiat_blocked_items`
-    setting.
+    contains an item whose `meta_data.fiat_disabled` is truthy.
+
+    Storage model: each `Item` carries its own `fiat_disabled` value via
+    Pretix's `ItemMetaProperty` / `ItemMetaValue` (set in the standard
+    Items > Edit > Metadata tab, or via the API). A truthy value
+    ("true", "yes", "1") on any base position in the cart hides Stripe.
 
     Why monkey-patch: Pretix has no first-class "this item bans this
-    payment method" config. Sales-channels could express it but would
-    force buyers onto a separate URL. Overriding `is_allowed` covers
-    BOTH checkout flows (cart → pay, and order → change payment method)
-    with one hook that runs server-side, so the rule can't be bypassed
-    by hand-crafting a URL.
+    payment method" config. Overriding `is_allowed` covers BOTH checkout
+    flows (cart → pay, and order → change payment method) with one
+    server-side hook that can't be bypassed by hand-crafting a URL.
 
-    If Stripe's plugin is missing or has been renamed in a future Pretix
-    version, the import fails cleanly and the admin checklist becomes a
-    no-op (we log a warning) rather than crashing the worker.
+    If Stripe's plugin is missing or renamed in a future Pretix version,
+    the import fails cleanly and item-level blocking becomes a no-op
+    (warning logged) rather than crashing the worker.
     """
     import logging
     log = logging.getLogger(__name__)
@@ -139,41 +141,41 @@ def _install_fiat_provider_restrictor():
     except (ImportError, AttributeError) as e:
         log.warning(
             'pretix_eth: Stripe payment plugin not importable (%s); '
-            'the "Items that block fiat payment" admin checklist will have no effect.',
+            'per-item fiat_disabled blocking will have no effect.',
             e,
         )
         return
 
     orig_is_allowed = StripeMethod.is_allowed
 
+    def _is_truthy(v):
+        if v is None:
+            return False
+        if isinstance(v, bool):
+            return v
+        return str(v).strip().lower() in ('true', 'yes', '1')
+
     def _is_blocked_for_fiat(provider, request):
         event = provider.event
-        # Setting is a CharField holding comma-separated IDs (e.g. "145, 146").
-        # We tolerate stray whitespace / trailing commas; anything non-integer
-        # is silently dropped so a typo doesn't block all fiat.
-        raw = event.settings.get(
-            'payment_walletconnect_fiat_blocked_items',
-            as_type=str,
-            default='',
-        ) or ''
-        blocked_ids = set()
-        for token in raw.split(','):
-            token = token.strip()
-            if not token:
-                continue
-            try:
-                blocked_ids.add(int(token))
-            except (TypeError, ValueError):
-                continue
-        if not blocked_ids:
-            return False
+        from pretix.base.models import CartPosition, Item, OrderPosition
 
-        from pretix.base.models import CartPosition, OrderPosition
+        def _any_item_fiat_disabled(item_ids):
+            if not item_ids:
+                return None  # no items checked
+            # Item.meta_data aggregates ItemMetaValue rows on access. One
+            # query for the items, then in-memory iteration; small N
+            # (cart size is tiny) so this is fine.
+            items = Item.objects.filter(pk__in=set(item_ids))
+            for it in items:
+                if _is_truthy((it.meta_data or {}).get('fiat_disabled')):
+                    log.info(
+                        'pretix_eth: fiat blocked event=%s item=%s (meta_data.fiat_disabled truthy)',
+                        event.slug, it.pk,
+                    )
+                    return it.pk
+            return None
 
         # Cart flow — buyer is in checkout, no order yet.
-        # Pretix's helper is `get_or_create_cart_id(request, create=False)`
-        # (returns None when no cart exists). Falls back to the session key
-        # `current_cart_event_<pk>` if the import path ever changes.
         cart_id = None
         try:
             from pretix.presale.views.cart import get_or_create_cart_id
@@ -186,20 +188,14 @@ def _install_fiat_provider_restrictor():
             except Exception:
                 cart_id = None
 
-        # Ignore add-on positions (addon_to NOT NULL) so a buyer adding a
-        # restricted add-on to an unrelated main item doesn't change the
-        # available payment methods. Add-ons follow their parent's rules.
+        # Only main positions dictate payment-method visibility. Add-ons
+        # follow their parent's payment treatment, so a fiat_disabled add-on
+        # under a fiat-allowed main item should not hide Stripe.
         if cart_id:
-            matched = CartPosition.objects.filter(
-                cart_id=cart_id, event=event, item_id__in=blocked_ids,
-                addon_to__isnull=True,
-            ).values_list('item_id', flat=True)
-            matched_list = list(matched)
-            if matched_list:
-                log.info(
-                    'pretix_eth: fiat blocked for cart=%s event=%s (matched items %s in blocked set %s)',
-                    cart_id, event.slug, matched_list, sorted(blocked_ids),
-                )
+            cart_item_ids = list(CartPosition.objects.filter(
+                cart_id=cart_id, event=event, addon_to__isnull=True,
+            ).values_list('item_id', flat=True))
+            if _any_item_fiat_disabled(cart_item_ids):
                 return True
 
         # Order re-pay flow — order code lives in the URL kwargs.
@@ -209,16 +205,10 @@ def _install_fiat_provider_restrictor():
         except Exception:
             order_code = None
         if order_code:
-            matched = OrderPosition.objects.filter(
-                order__code=order_code, order__event=event, item_id__in=blocked_ids,
-                addon_to__isnull=True,
-            ).values_list('item_id', flat=True)
-            matched_list = list(matched)
-            if matched_list:
-                log.info(
-                    'pretix_eth: fiat blocked for order=%s event=%s (matched items %s in blocked set %s)',
-                    order_code, event.slug, matched_list, sorted(blocked_ids),
-                )
+            order_item_ids = list(OrderPosition.objects.filter(
+                order__code=order_code, order__event=event, addon_to__isnull=True,
+            ).values_list('item_id', flat=True))
+            if _any_item_fiat_disabled(order_item_ids):
                 return True
 
         return False
@@ -231,42 +221,36 @@ def _install_fiat_provider_restrictor():
     StripeMethod.is_allowed = _wrapped_is_allowed
 
 
-def _current_cart_fully_exempt(event):
-    """Returns True when every position in the buyer's current cart for
-    `event` is in the event's `payment_walletconnect_fiat_markup_exempt_items`
-    list. Used by the `public_name` decorator to suppress the misleading
-    "+X%" prefix when the actual Stripe fee will be $0.
+def _current_cart_markup_sum(event):
+    """Compute the per-item Stripe markup for the buyer's current cart
+    on `event`, in event currency, as a Decimal.
 
-    Reads the active request from the thread-local that
-    `_install_fiat_markup_exemption` populates via `process_request`.
-    Returns False on any error / when the request or cart isn't available
-    so we fail open (label keeps the prefix, matching the prior behaviour).
+    Each cart position contributes `max(0, fiat_price_usd - position.price)`
+    when its item carries a `fiat_price_usd` ItemMetaValue, and contributes
+    `0` otherwise. Add-ons contribute on their own metadata, same rule.
+
+    Reads positions from the thread-local that `_install_fiat_per_item_markup`
+    populates (covers both presale requests AND order placement in Celery).
+    Returns `Decimal('0')` when no context is available so the public-name
+    decoration falls back to the un-prefixed label rather than guessing.
+
+    Used by:
+      - `_install_fiat_per_item_markup` to override Stripe's calculate_fee
+      - `_install_fiat_fee_name_decoration` to suppress / format the
+        chooser-label prefix
     """
+    from decimal import Decimal
     ctx = globals().get('_fee_exempt_ctx')
     if ctx is None:
-        return False
+        return Decimal('0')
+    positions = getattr(ctx, 'positions', None)
+    if positions is not None:
+        return _markup_sum_from_positions(positions)
     request = getattr(ctx, 'request', None)
     if request is None:
-        return False
+        return Decimal('0')
 
-    raw = event.settings.get(
-        'payment_walletconnect_fiat_markup_exempt_items',
-        as_type=str,
-        default='',
-    ) or ''
-    exempt_ids = set()
-    for tok in raw.split(','):
-        tok = tok.strip()
-        if not tok:
-            continue
-        try:
-            exempt_ids.add(int(tok))
-        except (TypeError, ValueError):
-            continue
-    if not exempt_ids:
-        return False
-
-    # Resolve cart_id the same way the fee patch does.
+    # Fall back to a cart_id lookup from the request session.
     cart_id = None
     try:
         from pretix.presale.views.cart import get_or_create_cart_id
@@ -277,39 +261,72 @@ def _current_cart_fully_exempt(event):
         try:
             cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
         except Exception:
-            return False
+            return Decimal('0')
     if not cart_id:
-        return False
+        return Decimal('0')
 
     from pretix.base.models import CartPosition
-    # Only consider base (non-addon) positions; add-ons inherit their
-    # parent's payment treatment, so a non-exempt add-on shouldn't make
-    # an otherwise-exempt cart look mixed.
-    positions = CartPosition.objects.filter(
-        cart_id=cart_id, event=event, addon_to__isnull=True,
-    )
-    item_ids = list(positions.values_list('item_id', flat=True))
-    if not item_ids:
-        return False
-    # Fully exempt only when EVERY main-item position is in the exempt set.
-    return all(iid in exempt_ids for iid in item_ids)
+    positions = list(CartPosition.objects.filter(
+        cart_id=cart_id, event=event,
+    ).select_related('item'))
+    return _markup_sum_from_positions(positions)
+
+
+def _markup_sum_from_positions(positions):
+    """Sum of per-item fiat markups (`fiat_price_usd - position.price`,
+    clamped at 0) over an iterable of CartPosition or OrderPosition rows.
+
+    Items without `fiat_price_usd` metadata contribute 0 (fiat allowed at
+    `default_price`, no markup). Items with `fiat_disabled` contribute 0
+    here too — the chooser-side restrictor (`_install_fiat_provider_restrictor`)
+    is what actually hides Stripe, so the markup math doesn't need to
+    duplicate the check.
+
+    Add-ons contribute on their OWN metadata, not the parent's — gives
+    operators independent control of add-on fiat pricing.
+    """
+    from decimal import Decimal, InvalidOperation
+    total = Decimal('0')
+    for p in positions:
+        item = getattr(p, 'item', None)
+        if item is None:
+            continue
+        meta = item.meta_data or {}
+        fiat_str = (meta.get('fiat_price_usd') or '').strip()
+        if not fiat_str:
+            continue
+        try:
+            fiat = Decimal(fiat_str)
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        try:
+            price = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        delta = fiat - price
+        if delta > 0:
+            total += delta
+    return total
 
 
 def _install_fiat_fee_name_decoration():
-    """Append the configured Stripe additional-fee (percentage and/or
-    absolute amount) to the buyer-facing payment-method label, so the
-    chooser shows e.g. "+3% · Credit Card" before the buyer commits
-    to fiat. The fee values come from Pretix's standard payment-fee
-    settings (`_fee_percent`, `_fee_abs`) configured per-method under
-    *Event → Settings → Payment → Stripe*.
+    """Prefix the buyer-facing Stripe payment-method label with the
+    actual markup the current cart will pay, so the chooser shows
+    e.g. "+$500 · Credit Card" before the buyer commits to fiat.
 
-    The patch walks every concrete subclass of `StripeMethod` because
-    Pretix-Stripe defines `public_name` per-method (card vs SEPA vs
-    iDEAL …). For each class we wrap whatever `public_name` it inherits
-    or defines, so the original label is preserved when no fee is set.
+    The markup is computed live from per-item metadata (the same source
+    `_install_fiat_per_item_markup` uses for `calculate_fee`), so the
+    chooser label and the actual fee always agree.
 
-    No-op for methods with both fee fields at 0. Fails closed on
-    import errors — original labels remain unchanged.
+    No prefix is shown when the markup is 0 — i.e. all cart items have
+    no `fiat_price_usd` override or their override matches their cart
+    price. This handles "fiat = crypto" items cleanly without operator
+    configuration.
+
+    Patches the base `StripeMethod` plus every loaded subclass, since
+    Pretix-Stripe per-method classes (card, SEPA, iDEAL, …) may define
+    their own `public_name`. Fails closed on import errors — original
+    labels remain unchanged.
     """
     import inspect
     import logging
@@ -325,6 +342,18 @@ def _install_fiat_fee_name_decoration():
         )
         return
 
+    def _format_money(amount, currency):
+        # Strip trailing zeros so 500.00 displays as 500, 12.50 stays 12.50.
+        if amount == amount.to_integral():
+            num = format(amount.normalize(), 'f')
+        else:
+            num = format(amount, 'f').rstrip('0').rstrip('.')
+        # Lead with $ for USD so the most common case stays compact; fall
+        # back to "<amount> <currency-code>" for non-USD events.
+        if currency == 'USD':
+            return f'${num}'
+        return f'{num} {currency}'.strip()
+
     def _make_decorated(original_getter):
         def _decorated(self):
             try:
@@ -332,41 +361,16 @@ def _install_fiat_fee_name_decoration():
             except Exception:
                 base = str(self.verbose_name)
             try:
-                fee_pct = self.settings.get('_fee_percent', as_type=Decimal, default=Decimal('0')) or Decimal('0')
-                fee_abs = self.settings.get('_fee_abs', as_type=Decimal, default=Decimal('0')) or Decimal('0')
+                markup = _current_cart_markup_sum(self.event)
             except Exception:
                 return base
-
-            # Suppress the markup prefix when the current cart is fully
-            # exempt — otherwise the buyer sees "+20% · Credit card" but
-            # actually pays $0 markup, which is misleading. We consult
-            # the shared thread-local request set up by the markup
-            # exemption installer; if the cart is fully covered by the
-            # exempt list, skip the prefix.
-            try:
-                if _current_cart_fully_exempt(self.event):
-                    return base
-            except Exception:
-                pass
-
-            # Each bit is a bare amount ("20%", "1.50 USD"); we glue them
-            # with " + " and prefix the whole block with one "+" so a
-            # combined pct+abs fee reads as "+20% + 1.50 USD" rather than
-            # the awkward "+20% + +1.50 USD".
-            bits = []
-            if fee_pct > 0:
-                # Strip trailing zeros so "3.00" displays as "3".
-                pct_str = format(fee_pct.normalize(), 'f') if fee_pct == fee_pct.to_integral() else format(fee_pct, 'f').rstrip('0').rstrip('.')
-                bits.append(f'{pct_str}%')
-            if fee_abs > 0:
-                currency = (getattr(self.event, 'currency', '') or '').strip()
-                abs_str = format(fee_abs, 'f').rstrip('0').rstrip('.')
-                bits.append(f'{abs_str} {currency}'.strip())
-            if not bits:
+            if markup is None or markup <= Decimal('0'):
                 return base
-            # Front-place the markup so Stripe's auto-appended wallet
-            # list ("…, Google Pay") doesn't end up after our suffix.
-            return f'+{" + ".join(bits)} · {base}'
+            currency = (getattr(self.event, 'currency', '') or 'USD').strip() or 'USD'
+            label = _format_money(markup, currency)
+            # Front-place the markup so Stripe's auto-appended wallet list
+            # ("…, Google Pay") doesn't end up after our suffix.
+            return f'+{label} · {base}'
         return _decorated
 
     def _patch_class(cls):
@@ -374,14 +378,10 @@ def _install_fiat_fee_name_decoration():
         if isinstance(own, property) and own.fget:
             getter = own.fget
         else:
-            # Inherited property — resolve via MRO.
             inherited = inspect.getattr_static(cls, 'public_name', None)
             getter = inherited.fget if isinstance(inherited, property) and inherited.fget else (lambda self: str(self.verbose_name))
         cls.public_name = property(_make_decorated(getter))
 
-    # Patch the base + every subclass currently loaded. Subclasses can
-    # define their own `public_name`, so patching the base alone isn't
-    # enough.
     targets = [StripeMethod] + list(StripeMethod.__subclasses__())
     for cls in targets:
         try:
@@ -390,28 +390,35 @@ def _install_fiat_fee_name_decoration():
             log.warning('pretix_eth: failed to decorate %s.public_name: %s', cls.__name__, e)
 
 
-def _install_fiat_markup_exemption():
-    """Make Pretix's Stripe additional-fee opt out of selected items.
+def _install_fiat_per_item_markup():
+    """Override Stripe's additional fee with a sum of per-item markups.
 
-    Pretix's `BasePaymentProvider.calculate_fee(price)` only sees a
-    scalar — no cart breakdown — and Pretix itself fans the fee
+    Storage model: each Item carries an optional `fiat_price_usd`
+    ItemMetaValue. When set and different from the position's price,
+    the difference (`fiat_price_usd - price`, clamped at 0) is the
+    item's contribution to the Stripe markup. When unset, the item
+    contributes nothing — fiat buyers pay `default_price` with no
+    markup. Companion key `fiat_disabled` is handled by the chooser
+    restrictor; the markup math here just contributes 0 for those
+    items (since Stripe is hidden anyway).
+
+    Why monkey-patch: Pretix's `BasePaymentProvider.calculate_fee(price)`
+    only sees a scalar — no cart breakdown — and Pretix fans the fee
     calculation across at least four code paths (cart preview,
     PaymentStep.provider_forms chooser, CartMixin.current_selected_payments,
-    order placement) that don't share a clean hook. Rather than wrap
-    each call site we capture the current presale request via Pretix's
-    `process_request` / `process_response` signals into a thread-local,
-    then have the patched `StripeMethod.calculate_fee` look up the cart
-    positions itself (from `request.session` → cart_id → CartPosition).
-    Single sync point, covers every fee-calc path that runs during a
-    buyer-side request.
+    order placement) that don't share a clean hook. We capture the
+    current presale request via Pretix's `process_request` /
+    `process_response` signals into a thread-local, AND the positions
+    list passed into `_create_order` / `_apply_rounding_and_fees`.
+    The patched `StripeMethod.calculate_fee` reads from whichever is
+    populated.
 
-    Order-placement and re-pay paths run inside the same request, so the
-    thread-local is still populated. Admin-side recalculations (no
-    presale request) fall through to the original markup — acceptable
-    since the goal is the buyer experience.
+    Order-placement under Celery has no live HTTP request but always
+    passes positions to `_create_order`, so the thread-local pickup
+    works there too.
 
-    Stripe-only: hooks `StripeMethod` and its loaded subclasses. Other
-    fiat providers keep their original fees.
+    Stripe-only: hooks `StripeMethod` (subclasses inherit the patched
+    method). Other fiat providers keep their original fees.
     """
     import logging
     import threading
@@ -422,127 +429,61 @@ def _install_fiat_markup_exemption():
     except (ImportError, AttributeError) as e:
         log.warning(
             'pretix_eth: Stripe payment plugin not importable (%s); '
-            'fiat-markup exemption disabled.',
+            'per-item fiat markup disabled.',
             e,
         )
         return
 
-    # Thread-local stash for the current presale request. Set by the
-    # process_request receiver below, cleared by process_response.
+    # Thread-local stash for the active presale request and the positions
+    # list passed into order placement. Populated by the process_request
+    # receiver and the order-services wraps below; consumed by the
+    # patched calculate_fee.
     ctx = threading.local()
 
-    def _exempt_ids(event):
-        raw = event.settings.get(
-            'payment_walletconnect_fiat_markup_exempt_items',
-            as_type=str,
-            default='',
-        ) or ''
-        ids = set()
-        for tok in raw.split(','):
-            tok = tok.strip()
-            if not tok:
-                continue
-            try:
-                ids.add(int(tok))
-            except (TypeError, ValueError):
-                continue
-        return ids
-
-    def _exempt_subtotal_from_positions(event, positions, ids):
-        """Compute exempt subtotal directly from an in-memory positions list.
-        Used when we have positions but no live request (e.g. Celery
-        order placement). Mirrors the DB query logic in
-        `_exempt_subtotal_for`: a position is exempt if it's a main
-        position whose item is in `ids`, OR an add-on attached to such
-        a main position."""
-        from decimal import Decimal as D
-        # Build set of PKs of exempt main positions, by iterating once.
-        exempt_main_pks = set()
-        for p in positions:
-            if getattr(p, 'addon_to_id', None) is None and getattr(p, 'item_id', None) in ids:
-                pk = getattr(p, 'pk', None)
-                if pk is not None:
-                    exempt_main_pks.add(pk)
-        if not exempt_main_pks:
-            return D('0')
-        total = D('0')
-        for p in positions:
-            pk = getattr(p, 'pk', None)
-            addon_to = getattr(p, 'addon_to_id', None)
-            if pk in exempt_main_pks or addon_to in exempt_main_pks:
-                try:
-                    total += D(str(getattr(p, 'price', 0) or 0))
-                except Exception:
-                    continue
-        return total
-
-    def _exempt_subtotal_for(event):
-        ids = _exempt_ids(event)
-        if not ids:
-            log.info('pretix_eth[exempt]: event=%s no exempt items configured', getattr(event, 'slug', '?'))
-            return Decimal('0')
-        log.info('pretix_eth[exempt]: event=%s configured exempt_ids=%s', getattr(event, 'slug', '?'), sorted(ids))
-
-        # PRIMARY path: positions stashed by the _apply_rounding_and_fees
-        # wrap below. Works in Celery (order-placement) where no HTTP
-        # request is active. Also covers HTTP paths that pass through
-        # _apply_rounding_and_fees.
+    def _markup_for(event):
+        """Resolve the markup for the cart currently in flight. Prefers
+        positions stashed by `_create_order` / `_apply_rounding_and_fees`
+        (covers Celery), falls back to a request → cart_id → CartPosition
+        lookup.
+        """
         positions = getattr(ctx, 'positions', None)
         if positions is not None:
-            total = _exempt_subtotal_from_positions(event, positions, ids)
+            total = _markup_sum_from_positions(positions)
             log.info(
-                'pretix_eth[exempt]: from-positions positions_count=%s exempt_total=%s',
+                'pretix_eth[markup]: from-positions count=%s total=%s',
                 len(positions), total,
             )
             return total
 
         request = getattr(ctx, 'request', None)
         if request is None:
-            log.info('pretix_eth[exempt]: no request and no positions in thread-local')
+            log.info('pretix_eth[markup]: no request and no positions in thread-local')
             return Decimal('0')
 
-        # Resolve the active cart for this event.
         cart_id = None
         try:
             from pretix.presale.views.cart import get_or_create_cart_id
             cart_id = get_or_create_cart_id(request, create=False)
         except Exception as e:
-            log.info('pretix_eth[exempt]: get_or_create_cart_id failed (%s)', e)
+            log.info('pretix_eth[markup]: get_or_create_cart_id failed (%s)', e)
         if not cart_id:
             try:
                 cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
-                log.info('pretix_eth[exempt]: fell back to session key, cart_id=%s', cart_id)
             except Exception as e:
-                log.info('pretix_eth[exempt]: session lookup failed (%s)', e)
+                log.info('pretix_eth[markup]: session lookup failed (%s)', e)
                 cart_id = None
         if not cart_id:
-            log.info('pretix_eth[exempt]: no cart_id resolved for event=%s', getattr(event, 'slug', '?'))
+            log.info('pretix_eth[markup]: no cart_id resolved for event=%s', getattr(event, 'slug', '?'))
             return Decimal('0')
 
-        from django.db.models import Q, Sum
         from pretix.base.models import CartPosition
-        # Add-ons inherit their parent's payment treatment. Find the PK
-        # of every exempt MAIN position, then sum prices of (those mains
-        # + their attached add-ons). Without this, an exempt main with
-        # paid add-ons under-counts as exempt and the Stripe fee comes
-        # out non-zero — which mismatches the chooser preview and
-        # triggers Pretix's "order total has changed" error at confirm.
-        qs = CartPosition.objects.filter(cart_id=cart_id, event=event)
-        exempt_main_pks = list(qs.filter(
-            addon_to__isnull=True, item_id__in=ids,
-        ).values_list('pk', flat=True))
-        if not exempt_main_pks:
-            log.info('pretix_eth[exempt]: cart=%s no exempt main items', cart_id)
-            return Decimal('0')
-        exempt_qs = qs.filter(
-            Q(pk__in=exempt_main_pks) | Q(addon_to_id__in=exempt_main_pks)
-        )
-        matched_items = list(exempt_qs.values_list('item_id', flat=True))
-        agg = exempt_qs.aggregate(s=Sum('price'))
-        total = agg.get('s') or Decimal('0')
+        positions = list(CartPosition.objects.filter(
+            cart_id=cart_id, event=event,
+        ).select_related('item'))
+        total = _markup_sum_from_positions(positions)
         log.info(
-            'pretix_eth[exempt]: cart=%s exempt_main_pks=%s matched_items=%s exempt_total=%s',
-            cart_id, exempt_main_pks, matched_items, total,
+            'pretix_eth[markup]: cart=%s positions=%s total=%s',
+            cart_id, len(positions), total,
         )
         return total
 
@@ -552,38 +493,22 @@ def _install_fiat_markup_exemption():
             cls_name = type(self).__name__
             log.info('pretix_eth[calc]: %s.calculate_fee(price=%s) called pid=%s', cls_name, price, os.getpid())
             try:
-                exempt = _exempt_subtotal_for(self.event)
+                markup = _markup_for(self.event)
             except Exception as e:
-                log.warning('pretix_eth[calc]: fee-exempt calc failed: %s', e)
+                log.warning('pretix_eth[calc]: markup calc failed: %s; falling back to original fee', e)
                 return orig(self, price)
-            if exempt <= Decimal('0'):
-                log.info('pretix_eth[calc]: %s no exempt items, original fee applies', cls_name)
-                return orig(self, price)
-            try:
-                price_d = price if isinstance(price, Decimal) else Decimal(str(price))
-            except Exception:
-                return orig(self, price)
-            adjusted = max(Decimal('0'), price_d - exempt)
-            result = orig(self, adjusted)
-            log.info(
-                'pretix_eth[calc]: %s adjusted price=%s exempt=%s adjusted=%s -> fee=%s',
-                cls_name, price_d, exempt, adjusted, result,
-            )
-            return result
+            log.info('pretix_eth[calc]: %s markup=%s (original fee bypassed)', cls_name, markup)
+            return markup
         return _wrapped
 
     # CRITICAL: only patch the base class. Pretix-Stripe subclasses
-    # (StripeCC, StripeSEPADirectDebit, …) all inherit calculate_fee
-    # from StripeMethod without overriding it. If we ALSO patched each
-    # subclass, the orig we captured for subclass N would already be the
-    # wrapped version from N-1, causing the cart-exempt subtraction to
-    # run twice on a single call — which broke mixed carts (e.g. an OSS
-    # exempt + a non-exempt GA returned fee=0 instead of fee on the GA
-    # portion, triggering Pretix's "order total has changed" mismatch
-    # at confirm).
+    # (StripeCC, StripeSEPADirectDebit, …) inherit calculate_fee from
+    # StripeMethod without overriding it. Patching every subclass would
+    # double-wrap because each subclass's `orig` would be the wrapped
+    # version of the previous one.
     orig_calc = StripeMethod.calculate_fee
     StripeMethod.calculate_fee = _make_wrapped_calc(orig_calc)
-    log.info('pretix_eth[install]: fiat-markup exemption patched calculate_fee on StripeMethod (subclasses inherit)')
+    log.info('pretix_eth[install]: per-item markup patched calculate_fee on StripeMethod (subclasses inherit)')
 
     # Wrap the function Pretix uses to compute fees during order placement.
     # The exact name varies across Pretix versions:

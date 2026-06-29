@@ -230,21 +230,20 @@ def inject_order_redirect(sender, request, **kwargs):
 def set_stripe_fee_label(sender, instance, **kwargs):
     """Set OrderFee.description on Stripe payment fees so the line shown
     on the order page, invoice PDF, and confirmation emails reads
-    'Credit card processing fee (+20%)' instead of Pretix's generic
+    'Credit card processing fee ($500)' instead of Pretix's generic
     'Payment fee' fallback.
 
-    The percentage is read from the same setting that drives the chooser
-    label decoration (`payment_stripe_fee_percent`), so updates to the
-    percentage in admin propagate to the label automatically on the next
-    order.
+    The dollar amount is read from `instance.value` (the actual fee on
+    the order), so the label matches the per-item markup the buyer paid.
 
     Skipped when:
       - The fee is not a payment fee (FEE_TYPE_PAYMENT)
       - The provider is not a Stripe variant (`stripe`, `stripe_cc`, ...)
       - A description is already set (admin edit or earlier hook wins)
+      - The fee value is 0 or unset
 
     Only affects newly created/saved fees. Existing OrderFee rows keep
-    their current empty description until they get saved again; a one-off
+    their current description until they get saved again; a one-off
     backfill via the Django shell can update historical rows if needed.
     """
     if instance.fee_type != OrderFee.FEE_TYPE_PAYMENT:
@@ -253,27 +252,21 @@ def set_stripe_fee_label(sender, instance, **kwargs):
         return
     if instance.description:
         return
-    # Resolve the percentage via the provider's own settings proxy — same
-    # path the chooser-label decoration uses, so the label here matches
-    # the "+N% · Credit card via Stripe" the buyer saw at checkout.
-    # Pretix's BasePaymentProvider.settings auto-prefixes with the
-    # provider identifier, so `_fee_percent` resolves to the right
-    # hierarkey key (e.g. `payment_stripe__fee_percent`) regardless of
-    # whether the setting is shared across Stripe methods or per-method.
+    from decimal import Decimal
     try:
-        from decimal import Decimal
-        providers = instance.order.event.get_payment_providers()
-        provider = providers.get(instance.internal_type)
-        if provider is None:
-            return
-        pct = provider.settings.get('_fee_percent', as_type=Decimal, default=Decimal('0')) or Decimal('0')
+        value = instance.value if isinstance(instance.value, Decimal) else Decimal(str(instance.value or 0))
     except Exception:
         return
-    if pct <= 0:
-        return  # no markup configured; leave the default 'Payment fee' label
-    # Strip trailing zeros so 3.00 displays as 3, 20.5 stays as 20.5.
-    pct_str = (
-        format(pct.normalize(), 'f') if pct == pct.to_integral()
-        else format(pct, 'f').rstrip('0').rstrip('.')
-    )
-    instance.description = f'Credit card processing fee (+{pct_str}%)'
+    if value <= 0:
+        return  # no markup on this order; leave the default 'Payment fee' label
+    try:
+        currency = (instance.order.event.currency or 'USD').strip() or 'USD'
+    except Exception:
+        currency = 'USD'
+    # Strip trailing zeros so 500.00 displays as 500, 12.50 stays 12.50.
+    if value == value.to_integral():
+        num = format(value.normalize(), 'f')
+    else:
+        num = format(value, 'f').rstrip('0').rstrip('.')
+    amount_str = f'${num}' if currency == 'USD' else f'{num} {currency}'.strip()
+    instance.description = f'Credit card processing fee ({amount_str})'

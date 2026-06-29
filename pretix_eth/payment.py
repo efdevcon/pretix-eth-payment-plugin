@@ -296,58 +296,24 @@ class WalletConnectPayment(BasePaymentProvider):
             required=False,
             initial=False,
         )
-        # Per-item fiat lockout. When any cart/order position references an
-        # item in this list, Pretix's Stripe payment provider is hidden via
-        # the `is_allowed` monkey-patch in apps.py. Lets us force a tier
-        # (e.g. General Admission) to crypto-only without forking Stripe
-        # plugin or shipping a custom sales channel.
+        # Per-item fiat behavior is now driven by ItemMetaProperty values
+        # on each Item, edited in Pretix's standard Items > Edit > Metadata
+        # tab (or via the REST API). Two keys:
         #
-        # Stored as a comma-separated string of IDs (NOT MultipleChoiceField):
-        # Pretix's HierarkeyForm doesn't round-trip a list value through
-        # CheckboxSelectMultiple reliably (the cleaned list lands as
-        # `repr(list)` rather than JSON, then reads back as empty under
-        # `as_type=list`), so we keep the field as a plain CharField and
-        # render a checkbox UI on top via `_ChecklistOverHiddenField`.
-        # The accompanying JS in `static/pretix_eth/fiat_blocked_items.js`
-        # mirrors checkbox state into the hidden input on change.
-        item_choices = [
-            (str(i.pk), f'{i.pk} - {i.name}')
-            for i in self.event.items.all().order_by('position', 'pk')
-        ]
-        base['fiat_blocked_items'] = forms.CharField(
-            label=_('Items that block fiat payment (Stripe)'),
-            help_text=_(
-                'Tick the items that should be crypto-only. When ANY of '
-                'them is in the cart (or in the order, on re-pay), Pretix\'s '
-                'Stripe payment provider is hidden so the buyer can only '
-                'pay in crypto. Leave all unchecked to allow fiat for every '
-                'item. (Stored internally as a comma-separated list of '
-                'Pretix item IDs.)'
-            ),
-            widget=_ChecklistOverHiddenField(choices=item_choices),
-            required=False,
-        )
-        # Per-item markup exemption. When a cart/order contains items from
-        # this list, the Stripe additional-fee (`_fee_percent` / `_fee_abs`)
-        # is applied only to the NON-exempt subtotal. Implemented in
-        # apps.py via a thread-local + monkey-patch on
-        # `StripeMethod.calculate_fee`. Same storage shape as
-        # `fiat_blocked_items` so the widget round-trips identically.
-        base['fiat_markup_exempt_items'] = forms.CharField(
-            label=_('Items exempt from Stripe markup'),
-            help_text=_(
-                'Tick the items that should NOT contribute to the Stripe '
-                'additional-fee base. Stripe is still available, but the '
-                'markup is applied only to the non-exempt portion of the '
-                'cart. Use for tiers where the fee would be misleading '
-                '(e.g. a $0 community pass that picked up a +20% fee on '
-                'an upstream paid item). Leave all unchecked to apply '
-                'the Stripe fee to the full cart. (Stored internally as '
-                'a comma-separated list of Pretix item IDs.)'
-            ),
-            widget=_ChecklistOverHiddenField(choices=item_choices),
-            required=False,
-        )
+        #   fiat_price_usd  Override the fiat price for this item. Unset
+        #                   means fiat buyers pay `default_price` — no
+        #                   markup. When set, the Stripe fee on the order
+        #                   is `(fiat_price_usd - position.price)` summed
+        #                   across all positions, clamped at 0.
+        #
+        #   fiat_disabled   Set to "true" to hide Stripe in the chooser
+        #                   whenever this item is in the cart (crypto-only).
+        #
+        # See devcon-monorepo/devcon/src/scripts/pretix/setup-pricing.ts for
+        # the canonical bulk-apply tool. The legacy `fiat_blocked_items` /
+        # `fiat_markup_exempt_items` settings are no longer read and have
+        # been removed from this form; existing stored values are harmless
+        # and can be cleared from `pretix.event.settings.*` if desired.
         # wc_inject's Safe-multisig support is opt-in per event. When ON, the
         # bundle un-excludes Safe from the AppKit picker, detects Safes via
         # Safe Transaction Service at connect time, surfaces a multi-signer
