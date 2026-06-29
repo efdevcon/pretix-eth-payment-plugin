@@ -422,7 +422,7 @@ def _install_fiat_per_item_markup():
     """
     import logging
     import threading
-    from decimal import Decimal
+    from decimal import Decimal, InvalidOperation
     log = logging.getLogger(__name__)
     try:
         from pretix.plugins.stripe.payment import StripeMethod
@@ -565,18 +565,117 @@ def _install_fiat_per_item_markup():
         # order placement (called both inline and from the Celery
         # perform_order task) and has remained stable across recent
         # Pretix versions. Its signature is
-        # `_create_order(event, *, email, positions, now_dt, ...)`, so
-        # positions is always a keyword argument. Wrapping it sets the
-        # thread-local for the entire duration of order creation —
-        # bullet-proof even if the inner fee helper was renamed.
+        # `_create_order(event, *, email, positions, now_dt, payment_requests, ...)`,
+        # so positions and payment_requests are always keyword arguments.
+        #
+        # Two jobs at this point:
+        #   1) Set the thread-local positions context for the entire
+        #      duration of order creation, so calculate_fee inside
+        #      `_apply_rounding_and_fees` can find them.
+        #   2) Path 3b: if the buyer is paying with Stripe, BAKE each
+        #      position's `fiat_price_usd` metadata into its `price`
+        #      (and update `tax_value` accordingly). When the inner
+        #      calculate_fee runs, every position already has its fiat
+        #      price, so the markup sum is 0 and Pretix doesn't add a
+        #      payment-fee row. The resulting order has the fiat price
+        #      directly on each OrderPosition — no separate fee line.
+        def _is_stripe_payment(payment_requests, payment_provider):
+            """Detect Stripe across two Pretix-version call shapes:
+
+            - Modern (Pretix 4.18+, including 5.2.14 and 2026.x): payment
+              is passed as `payment_requests: List[dict]`, where each
+              dict has a `provider` key holding the identifier
+              (`'stripe_cc'`, `'stripe_sepa_debit'`, etc.).
+            - Legacy fallback: some Pretix versions/code paths still
+              pass a single `payment_provider` instance with an
+              `.identifier` attribute. Older 4.x or hot-patched 5.x
+              builds may use this shape; harmless on newer versions
+              where the kwarg is absent.
+
+            Returns True if ANY payment in the request set is a Stripe
+            method. Multi-payment orders that mix Stripe with other
+            methods are still treated as Stripe-paid for our purposes;
+            partial-Stripe baking would need split logic we don't
+            attempt here (rare scenario for Devcon).
+            """
+            for p in payment_requests or []:
+                if (p.get('provider') or '').startswith('stripe'):
+                    return True
+            if payment_provider is not None:
+                ident = getattr(payment_provider, 'identifier', '') or ''
+                if ident.startswith('stripe'):
+                    return True
+            return False
+
+        def _bake_fiat_into_positions(positions):
+            """In-place mutation: for each position whose item carries a
+            `fiat_price_usd` metadata override greater than its current
+            price, swap `price` to the fiat amount and recompute
+            `tax_value` (gross-inclusive: tax = price * rate / (100 + rate)).
+
+            Mutates the CartPosition Python objects only. They have not
+            yet been persisted as OrderPositions at this point —
+            `_create_order` copies `price` and `tax_value` into the
+            OrderPosition rows it creates, so the new values land
+            directly in the DB without us touching the CartPosition
+            table.
+
+            Skipped for items where `free_price` is True (buyer chose
+            their own price — overriding would lose that input).
+            """
+            for p in positions or []:
+                item = getattr(p, 'item', None)
+                if item is None:
+                    continue
+                if getattr(item, 'free_price', False):
+                    continue  # buyer-chosen price wins; don't override
+                meta = item.meta_data or {}
+                fiat_str = (meta.get('fiat_price_usd') or '').strip()
+                if not fiat_str:
+                    continue
+                try:
+                    fiat = Decimal(fiat_str)
+                except (InvalidOperation, ValueError, TypeError):
+                    continue
+                try:
+                    current = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
+                except (InvalidOperation, ValueError, TypeError):
+                    continue
+                if fiat <= current:
+                    continue
+                # Apply fiat price
+                p.price = fiat
+                # Recompute gross-inclusive tax_value. tax_rate is in
+                # percent (e.g. Decimal('18.00') for 18%). When the
+                # position is tax-exempt (rate=0), tax_value stays 0.
+                tax_rate = getattr(p, 'tax_rate', None)
+                if tax_rate and tax_rate > 0:
+                    try:
+                        p.tax_value = fiat * tax_rate / (Decimal('100') + tax_rate)
+                    except (InvalidOperation, ValueError, TypeError):
+                        pass
+                log.info(
+                    'pretix_eth[bake]: position item=%s price %s -> %s tax_value -> %s (rate=%s)',
+                    getattr(item, 'pk', '?'), current, fiat,
+                    getattr(p, 'tax_value', None), tax_rate,
+                )
+
         orig_create = getattr(orders_svc, '_create_order', None)
         if callable(orig_create):
             def _wrapped_create_order(*args, **kwargs):
                 positions = kwargs.get('positions')
+                payment_requests = kwargs.get('payment_requests') or []
+                payment_provider = kwargs.get('payment_provider')  # legacy
                 log.info(
-                    'pretix_eth[create]: _create_order wrap fired with %d positions (pid=%s)',
-                    len(positions or []), _os.getpid(),
+                    'pretix_eth[create]: _create_order wrap fired positions=%d payment_requests=%d '
+                    'payment_provider=%s (pid=%s)',
+                    len(positions or []), len(payment_requests),
+                    getattr(payment_provider, 'identifier', None),
+                    _os.getpid(),
                 )
+                if _is_stripe_payment(payment_requests, payment_provider):
+                    log.info('pretix_eth[create]: Stripe payment detected — baking fiat prices')
+                    _bake_fiat_into_positions(positions)
                 prev = getattr(ctx, 'positions', None)
                 ctx.positions = positions
                 try:
