@@ -1301,6 +1301,18 @@ _ITEM_PRICING_JS_BODY = r"""
 
   function annotate(elem, info) {
     if (elem.dataset.pedAnnotated === '1') return;
+
+    // Only annotate items that have something payment-specific to say.
+    // Items without an override and without fiat_disabled (free swag,
+    // comps, items where fiat == crypto) get no pill — the listed price
+    // is what every buyer pays, regardless of method. Adding an
+    // "Ethereum" pill on those would falsely imply a per-item payment
+    // choice (payment method is actually a cart-level decision).
+    var fiat = info.fiat_price_usd != null ? parseFloat(info.fiat_price_usd) : NaN;
+    var def = parseFloat(info.default_price);
+    var hasMeaningfulOverride = isFinite(fiat) && isFinite(def) && fiat !== def;
+    if (!info.fiat_disabled && !hasMeaningfulOverride) return;
+
     elem.dataset.pedAnnotated = '1';
 
     if (info.fiat_disabled) {
@@ -1310,16 +1322,11 @@ _ITEM_PRICING_JS_BODY = r"""
       return;
     }
 
-    // Always tag the existing crypto price with an "Ethereum" pill so
-    // buyers know which payment method that number applies to.
+    // Has a meaningful fiat override: tag the existing crypto price with
+    // an "Ethereum" pill and append the card-price line below.
     var ethPill = buildPill('eth');
     ethPill.classList.add('ped-eth-inline');
     elem.appendChild(ethPill);
-
-    if (!info.fiat_price_usd) return;
-    var fiat = parseFloat(info.fiat_price_usd);
-    var def = parseFloat(info.default_price);
-    if (!isFinite(fiat) || !isFinite(def) || fiat === def) return;
 
     var cardLine = document.createElement('div');
     cardLine.className = 'ped-card-line';
