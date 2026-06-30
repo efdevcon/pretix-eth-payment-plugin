@@ -1254,7 +1254,25 @@ _ITEM_PRICING_JS_BODY = r"""
     // Fiat amount sits next to the pill, not inside it (so the pill stays
     // a fixed-width chip while the amount can vary in digit count).
     '.ped-fiat-amount{font-weight:600;color:#160b2b;' +
-      'font-variant-numeric:tabular-nums}'
+      'font-variant-numeric:tabular-nums}' +
+    // Wrapper for the "incl. 18% GST" small that we relocate so the
+    // tax line sits BELOW the pills rather than above them. Keeps the
+    // right-alignment of Pretix\'s price column.
+    '.ped-tax-line{text-align:right;margin-top:4px;line-height:1.2}' +
+    // Promote the headline price to the "new price" treatment Pretix
+    // ships for <ins> (green, 18px, bold) regardless of whether the
+    // item has an `original_price` strikethrough. Matches the SCSS
+    // rule from _event.scss `.price ins { ... }`. Targets the bare
+    // <p> wrapper in the catalog (fragment_product_list.html) and the
+    // <strong> wrapper in the cart (fragment_cart.html, both line
+    // items and the rowgroup total). Strikethrough <del> and any tax
+    // <small> children stay muted via the override below so they
+    // don\'t inherit the new color/size.
+    '.price > p,.price > strong:first-child{' +
+      'color:#3c763d;font-size:18px;font-weight:bold;line-height:1.2}' +
+    '.price > p del,.price > p small,' +
+    '.price > small,.ped-tax-line small{' +
+      'color:#777;font-size:0.78em;font-weight:normal}'
   );
 
   // Self-contained dollar-sign-in-tile icon for the Fiat pill. The dark
@@ -1356,6 +1374,7 @@ _ITEM_PRICING_JS_BODY = r"""
       onlyLine.className = 'ped-line';
       onlyLine.appendChild(buildPill('only'));
       elem.appendChild(onlyLine);
+      moveTaxNoticeToBottom(elem);
       return;
     }
 
@@ -1375,6 +1394,33 @@ _ITEM_PRICING_JS_BODY = r"""
     amt.textContent = fmtMoney(fiat);
     fiatLine.appendChild(amt);
     elem.appendChild(fiatLine);
+
+    moveTaxNoticeToBottom(elem);
+  }
+
+  // Pretix renders the "incl. 18% GST" notice as a <small> next to the
+  // price — inside a <p> in fragment_product_list.html, as a direct
+  // child of .price in fragment_cart.html. By default that puts it
+  // above our pills. Detach it and re-append below so the visual order
+  // becomes:  price → ETH/Fiat pills → tax notice.
+  // No-op when no tax small is present (e.g. tax-exempt items) or when
+  // it's already been moved (idempotency guard via a marker class).
+  function moveTaxNoticeToBottom(elem) {
+    var smalls = elem.querySelectorAll('small');
+    for (var i = 0; i < smalls.length; i++) {
+      var s = smalls[i];
+      if (s.classList.contains('ped-tax-moved')) continue;
+      var txt = (s.textContent || '').trim();
+      // Match Pretix's "incl. X% TaxName" / "plus X% TaxName" output.
+      // Allowing both forms in case the event uses net-price display.
+      if (!/^(incl\.|plus)/i.test(txt)) continue;
+      s.classList.add('ped-tax-moved');
+      var line = document.createElement('div');
+      line.className = 'ped-tax-line';
+      // appendChild moves the node from its current parent.
+      line.appendChild(s);
+      elem.appendChild(line);
+    }
   }
 
   function applyToDocument(byId) {
