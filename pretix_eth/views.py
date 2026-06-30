@@ -1235,8 +1235,15 @@ _ITEM_PRICING_JS_BODY = r"""
   // vertically below the existing price so the buyer's eye lands on the
   // price first, then sees the per-method clarification.
   var CSS = (
-    '.ped-line{display:flex;justify-content:flex-end;align-items:center;' +
-      'gap:6px;margin-top:4px}' +
+    // Inline rows that put a payment-method pill on the LEFT and either
+    // Pretix\'s native price element (catalog <p>, cart <strong>) or our
+    // own fiat amount span on the RIGHT, both right-aligned within
+    // Pretix\'s price column. `flex-wrap: wrap` lets narrow columns
+    // collapse the pill onto its own line gracefully.
+    '.ped-row{display:flex;align-items:center;justify-content:flex-end;' +
+      'gap:6px;flex-wrap:wrap;margin-top:4px}' +
+    '.ped-row:first-child{margin-top:0}' +
+    '.ped-row > p,.ped-row > strong{margin:0}' +
     '.ped-pill{display:inline-flex;align-items:center;gap:6px;' +
       'padding:3px 10px;border-radius:999px;font-size:0.78em;' +
       'font-weight:600;line-height:1.25;white-space:nowrap;' +
@@ -1268,10 +1275,17 @@ _ITEM_PRICING_JS_BODY = r"""
     // items and the rowgroup total). Strikethrough <del> and any tax
     // <small> children stay muted via the override below so they
     // don\'t inherit the new color/size.
-    '.price > p,.price > strong:first-child{' +
+    // Promote the headline price to Pretix\'s "new price" treatment
+    // (green/18px/bold from _event.scss `.price ins`) regardless of
+    // whether (a) the item has a strikethrough original, (b) we
+    // re-parented it into a `.ped-row` flex wrapper. Strikethrough
+    // <del> children and tax <small> stay muted.
+    '.price > p,.price > strong:first-child,' +
+    '.price .ped-row > p,.price .ped-row > strong{' +
       'color:#3c763d;font-size:18px;font-weight:bold;line-height:1.2}' +
-    '.price > p del,.price > p small,' +
-    '.price > small,.ped-tax-line small{' +
+    '.price > p del,.price > p small,.price > small,' +
+    '.price .ped-row > p del,.price .ped-row > p small,' +
+    '.ped-tax-line small{' +
       'color:#777;font-size:0.78em;font-weight:normal}'
   );
 
@@ -1352,6 +1366,43 @@ _ITEM_PRICING_JS_BODY = r"""
     return pill;
   }
 
+  // Locate Pretix\'s native price element inside the .price column:
+  //   - catalog (fragment_product_list.html): a <p> directly inside
+  //     `.price` containing the amount text plus an inline tax <small>.
+  //   - cart (fragment_cart.html): a <strong> directly inside `.price`
+  //     holding the amount, followed by a <br/> and a tax <small>.
+  // Returns null when the structure doesn\'t match (rare, e.g. free or
+  // ranged-price items) so the caller can fall back to non-inline
+  // rendering without crashing.
+  function findPriceElement(elem) {
+    return elem.querySelector(':scope > p') ||
+           elem.querySelector(':scope > strong');
+  }
+
+  // Wrap `priceEl` in a `.ped-row` flex container with `pill` to its
+  // left. Replaces the price element in-place so subsequent siblings
+  // (e.g. orphan <br/> or pre-existing <small>) stay where they were
+  // and our downstream tax-relocation logic still finds them.
+  function wrapPriceWithPill(elem, priceEl, pill) {
+    var row = document.createElement('div');
+    row.className = 'ped-row';
+    priceEl.parentNode.insertBefore(row, priceEl);
+    row.appendChild(pill);
+    row.appendChild(priceEl);  // appendChild moves priceEl out of its old spot
+    return row;
+  }
+
+  // Remove any <br/> that\'s a direct child of .price. Pretix\'s cart
+  // template uses <br/> as a separator between the price <strong> and
+  // the tax <small>; once we relocate the <small> to the bottom and
+  // move the <strong> into a flex row, the <br/> serves no purpose and
+  // creates an unwanted blank line. Catalog has no <br/> here so this
+  // is a no-op there.
+  function dropOrphanBrs(elem) {
+    var brs = elem.querySelectorAll(':scope > br');
+    for (var i = 0; i < brs.length; i++) brs[i].remove();
+  }
+
   function annotate(elem, info) {
     if (elem.dataset.pedAnnotated === '1') return;
 
@@ -1368,33 +1419,42 @@ _ITEM_PRICING_JS_BODY = r"""
 
     elem.dataset.pedAnnotated = '1';
 
-    // ETH-only items: single pill, stacked under the price.
-    if (info.fiat_disabled) {
-      var onlyLine = document.createElement('div');
-      onlyLine.className = 'ped-line';
-      onlyLine.appendChild(buildPill('only'));
-      elem.appendChild(onlyLine);
+    var priceEl = findPriceElement(elem);
+    if (!priceEl) {
+      // Fall back to a stacked treatment when we can\'t identify the
+      // price wrapper — better to render below the price than to crash
+      // or do nothing.
+      var fallbackPill = buildPill(info.fiat_disabled ? 'only' : 'eth');
+      var fallbackLine = document.createElement('div');
+      fallbackLine.className = 'ped-row';
+      fallbackLine.appendChild(fallbackPill);
+      elem.appendChild(fallbackLine);
       moveTaxNoticeToBottom(elem);
       return;
     }
 
-    // Dual-priced items: two pills stacked under the price. The ETH pill
-    // labels the existing displayed amount; the Fiat pill + amount shows
-    // the card alternative on its own line.
-    var ethLine = document.createElement('div');
-    ethLine.className = 'ped-line';
-    ethLine.appendChild(buildPill('eth'));
-    elem.appendChild(ethLine);
+    // ETH-only items: pill sits to the LEFT of the price on the same row.
+    if (info.fiat_disabled) {
+      wrapPriceWithPill(elem, priceEl, buildPill('only'));
+      dropOrphanBrs(elem);
+      moveTaxNoticeToBottom(elem);
+      return;
+    }
 
-    var fiatLine = document.createElement('div');
-    fiatLine.className = 'ped-line';
-    fiatLine.appendChild(buildPill('fiat'));
+    // Dual-priced items: ETH pill + price on the first row, Fiat pill +
+    // amount on a second row below.
+    wrapPriceWithPill(elem, priceEl, buildPill('eth'));
+
+    var fiatRow = document.createElement('div');
+    fiatRow.className = 'ped-row';
+    fiatRow.appendChild(buildPill('fiat'));
     var amt = document.createElement('span');
     amt.className = 'ped-fiat-amount';
     amt.textContent = fmtMoney(fiat);
-    fiatLine.appendChild(amt);
-    elem.appendChild(fiatLine);
+    fiatRow.appendChild(amt);
+    elem.appendChild(fiatRow);
 
+    dropOrphanBrs(elem);
     moveTaxNoticeToBottom(elem);
   }
 
