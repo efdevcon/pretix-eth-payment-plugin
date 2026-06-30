@@ -1286,7 +1286,22 @@ _ITEM_PRICING_JS_BODY = r"""
     '.price > p del,.price > p small,.price > small,' +
     '.price .ped-row > p del,.price .ped-row > p small,' +
     '.ped-tax-line small{' +
-      'color:#777;font-size:0.78em;font-weight:normal}'
+      'color:#777;font-size:0.78em;font-weight:normal}' +
+    // Widen the catalog price column on desktop (Bootstrap md+) so the
+    // [ETH Price] pill + price + gap stays on one line. col-md-2 gives
+    // 16.67% (~170px on a 1200px row) which is right at the wrap
+    // threshold for 3-4 digit prices. Bumping price to 22% and
+    // shrinking the description from col-md-8 (66.67%) to 61.33%
+    // recovers ~64px for the price column while only costing the
+    // description ~64px — descriptions on this event use one paragraph
+    // and one or two short lines, so the trim is invisible in practice.
+    // Availability column (col-md-2) is left alone. sm/xs viewports
+    // already render the pill inline because col-sm-3/col-xs-6 give
+    // wider relative space, so the override is md-and-up only.
+    '@media (min-width:992px){' +
+      '.product-row > .price.col-md-2{width:22%}' +
+      '.product-row > .col-md-8{width:61.33%}' +
+    '}'
   );
 
   // Self-contained dollar-sign-in-tile icon for the Fiat pill. The dark
