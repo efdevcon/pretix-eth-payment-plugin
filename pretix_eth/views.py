@@ -1157,72 +1157,67 @@ def item_pricing(request, **kwargs):
 # under `ManifestStaticFilesStorage`, which has bitten this plugin before.
 # The credit-card glyph is an inline SVG (~200 bytes).
 _ETH_ICON_PNG_BASE64 = (
-    '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'
-    'sAPwOeoAAAAASUVORK5CYII='
+    'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAABGdBTUEAALGPC/xhBQAAACBjSFJN'
+    'AAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAARGVYSWZNTQAqAAAACAABh2kA'
+    'BAAAAAEAAAAaAAAAAAADoAEAAwAAAAEAAQAAoAIABAAAAAEAAABAoAMABAAAAAEAAABAAAAAAEZR'
+    'QrAAAAHLaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2Jl'
+    'Om5zOm1ldGEvIiB4OnhtcHRrPSJYTVAgQ29yZSA2LjAuMCI+CiAgIDxyZGY6UkRGIHhtbG5zOnJk'
+    'Zj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+CiAgICAgIDxy'
+    'ZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICAgICAgICAgIHhtbG5zOmV4aWY9Imh0dHA6'
+    'Ly9ucy5hZG9iZS5jb20vZXhpZi8xLjAvIj4KICAgICAgICAgPGV4aWY6Q29sb3JTcGFjZT4xPC9l'
+    'eGlmOkNvbG9yU3BhY2U+CiAgICAgICAgIDxleGlmOlBpeGVsWERpbWVuc2lvbj4yNTY8L2V4aWY6'
+    'UGl4ZWxYRGltZW5zaW9uPgogICAgICAgICA8ZXhpZjpQaXhlbFlEaW1lbnNpb24+MjU2PC9leGlm'
+    'OlBpeGVsWURpbWVuc2lvbj4KICAgICAgPC9yZGY6RGVzY3JpcHRpb24+CiAgIDwvcmRmOlJERj4K'
+    'PC94OnhtcG1ldGE+CuYattQAAAm/SURBVGgF7Vrbb1THHZ7Lueyuvb5fCQYbY7w2scHYKimENAQF'
+    'CbUSSlqpL33qP9C3Pva/aSv1JZUa9UKl0IbSUBIIJagJJCTBBq/XXu/Fu+vds2cu/ebY2GCM8XrP'
+    'KorEWNo9Z86Zme/73WfW9Je/WSLf58a+z+AN9pcEvmsNvtTAjhrQVGtC9Y7v1PmwoRqgVHOtFK0T'
+    '447DG0lAU0pES4skRO2Ioa6HjSOgfCUH+tjPz8djrqXUmh2Fr4yGENDU15o5XL5zNjbY60yOOMRo'
+    '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'
+    '9G+3dDh9/wdSrVBGohHF0AAAAABJRU5ErkJggg=='
 )
-# NOTE: The exact base64 above was generated from
-# pretix_eth/static/wc_inject/icons/tokens/eth.png at build time and is
-# the same image the wc_inject bundle uses to represent ETH. Regenerate
-# with `base64 < eth.png` if the source PNG changes.
+# NOTE: ETH glyph sourced from the Devcon Figma design system (node
+# 5111:7180 in file aQDeWGxyogMccLpHaONIHG), resized to 64x64 to keep
+# the data-URI payload under 5 KB. Regenerate by re-running the figma
+# get_design_context flow and `sips -Z 64 <src.png> --out eth-64.png`.
 _ETH_ICON_DATA_URI = 'data:image/png;base64,' + _ETH_ICON_PNG_BASE64
 
 # Body uses sentinel placeholders that the view substitutes with
@@ -1235,31 +1230,61 @@ _ITEM_PRICING_JS_BODY = r"""
   var ETH_ICON = __PED_ETH_ICON__;
   if (!ENDPOINT) return;
 
+  // Design tokens from the Devcon Figma file (node 5111:7166): purple
+  // tint for the ETH pill, neutral gray for the Fiat pill. Stacked
+  // vertically below the existing price so the buyer's eye lands on the
+  // price first, then sees the per-method clarification.
   var CSS = (
-    '.ped-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;' +
-      'border-radius:999px;font-size:0.72em;font-weight:600;line-height:1.3;' +
-      'vertical-align:middle;white-space:nowrap;letter-spacing:0.01em}' +
-    '.ped-pill .ped-icon{width:12px;height:12px;display:inline-flex;' +
+    '.ped-line{display:flex;justify-content:flex-end;align-items:center;' +
+      'gap:6px;margin-top:4px}' +
+    '.ped-pill{display:inline-flex;align-items:center;gap:6px;' +
+      'padding:3px 10px;border-radius:999px;font-size:0.78em;' +
+      'font-weight:600;line-height:1.25;white-space:nowrap;' +
+      'letter-spacing:0.01em}' +
+    '.ped-pill .ped-icon{width:14px;height:14px;display:inline-flex;' +
       'align-items:center;justify-content:center;flex-shrink:0}' +
-    '.ped-pill .ped-icon img,.ped-pill .ped-icon svg{width:12px;height:12px;' +
+    '.ped-pill .ped-icon img,.ped-pill .ped-icon svg{width:14px;height:14px;' +
       'display:block}' +
-    '.ped-pill.ped-eth{background-color:rgba(98,126,234,0.14);color:#2f3aa0}' +
-    '.ped-pill.ped-card{background-color:rgba(0,0,0,0.06);color:#555}' +
-    '.ped-pill.ped-only{background-color:rgba(217,119,6,0.14);color:#b45309}' +
-    '.ped-eth-inline{margin-left:6px}' +
-    '.ped-card-line{display:flex;justify-content:flex-end;align-items:center;' +
-      'gap:6px;font-size:0.9em;color:#777;margin-top:4px}' +
-    '.ped-card-line .ped-card-amount{font-variant-numeric:tabular-nums}' +
-    '.ped-save-line{margin-top:3px;font-size:0.78em;color:#047857;' +
-      'text-align:right;font-style:italic}' +
-    '[data-article-id^="item-"] .ped-card-line,' +
-    '[data-article-id^="item-"] .ped-save-line{justify-content:flex-end}'
+    // ETH pill: lavender tint, purple text — matches Figma design tokens
+    '.ped-pill.ped-eth{background-color:#f1f3fe;color:#5b2bd9}' +
+    // Fiat pill: muted gray, dark text. The dollar-sign-in-tile icon is
+    // self-contained (its dark background is baked into the SVG), so the
+    // pill itself stays light.
+    '.ped-pill.ped-fiat{background-color:#f2f1f4;color:#160b2b}' +
+    // Fiat amount sits next to the pill, not inside it (so the pill stays
+    // a fixed-width chip while the amount can vary in digit count).
+    '.ped-fiat-amount{font-weight:600;color:#160b2b;' +
+      'font-variant-numeric:tabular-nums}'
   );
 
-  var CARD_SVG = (
-    '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
-    '<path d="M20 4H4c-1.11 0-2 .89-2 2v12c0 1.11.89 2 2 2h16c1.11 0 2-.89 2-2V6c0-1.11-.89-2-2-2zm0 14H4v-6h16v6zm0-10H4V6h16v2z"/>' +
-    '</svg>'
+  // Self-contained dollar-sign-in-tile icon for the Fiat pill. The dark
+  // rounded square is baked into the SVG (Figma `Icon Container` style),
+  // with a white $ glyph centered. Avoids the need for a second pill
+  // background layer in CSS.
+  var FIAT_SVG = (
+    '<svg viewBox="0 0 14 14" fill="none" ' +
+    'xmlns="http://www.w3.org/2000/svg" aria-hidden="true">' +
+    '<rect width="14" height="14" rx="2" fill="#594d73"/>' +
+    '<g transform="translate(1 1)" fill="white">' +
+    // Vertical bar of the $
+    '<path d="M5.625 11V1C5.625 0.793 5.793 0.625 6 0.625C6.207 ' +
+    '0.625 6.375 0.793 6.375 1V11C6.375 11.207 6.207 11.375 6 ' +
+    '11.375C5.793 11.375 5.625 11.207 5.625 11Z"/>' +
+    // S-curve of the $
+    '<path d="M8.625 7.75C8.625 7.385 8.48 7.036 8.222 6.778C7.964 ' +
+    '6.52 7.615 6.375 7.25 6.375H4.75C4.186 6.375 3.646 6.151 3.248 ' +
+    '5.752C2.849 5.354 2.625 4.814 2.625 4.25C2.625 3.686 2.849 ' +
+    '3.146 3.248 2.748C3.646 2.349 4.186 2.125 4.75 2.125H8.5C8.707 ' +
+    '2.125 8.875 2.293 8.875 2.5C8.875 2.707 8.707 2.875 8.5 ' +
+    '2.875H4.75C4.385 2.875 4.036 3.02 3.778 3.278C3.52 3.536 3.375 ' +
+    '3.885 3.375 4.25C3.375 4.615 3.52 4.964 3.778 5.222C4.036 5.48 ' +
+    '4.385 5.625 4.75 5.625H7.25C7.814 5.625 8.354 5.849 8.752 ' +
+    '6.248C9.151 6.646 9.375 7.186 9.375 7.75C9.375 8.314 9.151 ' +
+    '8.854 8.752 9.252C8.354 9.651 7.814 9.875 7.25 9.875H3C2.793 ' +
+    '9.875 2.625 9.707 2.625 9.5C2.625 9.293 2.793 9.125 3 ' +
+    '9.125H7.25C7.615 9.125 7.964 8.98 8.222 8.722C8.48 8.464 8.625 ' +
+    '8.115 8.625 7.75Z"/>' +
+    '</g></svg>'
   );
 
   function injectStyle() {
@@ -1277,9 +1302,19 @@ _ITEM_PRICING_JS_BODY = r"""
     return '$' + s.replace(/\.00$/, '').replace(/(\.[0-9])0$/, '$1');
   }
 
+  // Pill renderer. `kind` drives both the visual treatment (CSS class)
+  // and the label text:
+  //   'eth'  → ETH glyph + "ETH Price"  (used when item also has a fiat
+  //            override; visually pairs with a 'fiat' pill on the next line)
+  //   'fiat' → dollar-sign-in-tile + "Fiat" (sits next to the fiat amount)
+  //   'only' → ETH glyph + "ETH Only"  (used when fiat_disabled; reuses
+  //            the eth visual since both reference the same payment method,
+  //            just signals exclusivity in the label)
   function buildPill(kind) {
     var pill = document.createElement('span');
-    pill.className = 'ped-pill ped-' + kind;
+    // 'only' shares the eth color treatment — just a different label.
+    var visualClass = (kind === 'only') ? 'ped-eth' : ('ped-' + kind);
+    pill.className = 'ped-pill ' + visualClass;
     var iconEl = document.createElement('span');
     iconEl.className = 'ped-icon';
     if (kind === 'eth' || kind === 'only') {
@@ -1287,14 +1322,14 @@ _ITEM_PRICING_JS_BODY = r"""
       img.src = ETH_ICON;
       img.alt = '';
       iconEl.appendChild(img);
-    } else if (kind === 'card') {
-      iconEl.innerHTML = CARD_SVG;
+    } else if (kind === 'fiat') {
+      iconEl.innerHTML = FIAT_SVG;
     }
     pill.appendChild(iconEl);
     var lbl = document.createElement('span');
-    lbl.textContent = (kind === 'eth') ? 'Ethereum' :
-                      (kind === 'card') ? 'Card' :
-                      (kind === 'only') ? 'Ethereum only' : '';
+    lbl.textContent = (kind === 'eth') ? 'ETH Price' :
+                      (kind === 'fiat') ? 'Fiat' :
+                      (kind === 'only') ? 'ETH Only' : '';
     pill.appendChild(lbl);
     return pill;
   }
@@ -1305,9 +1340,9 @@ _ITEM_PRICING_JS_BODY = r"""
     // Only annotate items that have something payment-specific to say.
     // Items without an override and without fiat_disabled (free swag,
     // comps, items where fiat == crypto) get no pill — the listed price
-    // is what every buyer pays, regardless of method. Adding an
-    // "Ethereum" pill on those would falsely imply a per-item payment
-    // choice (payment method is actually a cart-level decision).
+    // is what every buyer pays, regardless of method. Adding pills there
+    // would falsely imply a per-item payment choice (payment method is
+    // actually a cart-level decision).
     var fiat = info.fiat_price_usd != null ? parseFloat(info.fiat_price_usd) : NaN;
     var def = parseFloat(info.default_price);
     var hasMeaningfulOverride = isFinite(fiat) && isFinite(def) && fiat !== def;
@@ -1315,39 +1350,31 @@ _ITEM_PRICING_JS_BODY = r"""
 
     elem.dataset.pedAnnotated = '1';
 
+    // ETH-only items: single pill, stacked under the price.
     if (info.fiat_disabled) {
-      var only = buildPill('only');
-      only.classList.add('ped-eth-inline');
-      elem.appendChild(only);
+      var onlyLine = document.createElement('div');
+      onlyLine.className = 'ped-line';
+      onlyLine.appendChild(buildPill('only'));
+      elem.appendChild(onlyLine);
       return;
     }
 
-    // Has a meaningful fiat override: tag the existing crypto price with
-    // an "Ethereum" pill and append the card-price line below.
-    var ethPill = buildPill('eth');
-    ethPill.classList.add('ped-eth-inline');
-    elem.appendChild(ethPill);
+    // Dual-priced items: two pills stacked under the price. The ETH pill
+    // labels the existing displayed amount; the Fiat pill + amount shows
+    // the card alternative on its own line.
+    var ethLine = document.createElement('div');
+    ethLine.className = 'ped-line';
+    ethLine.appendChild(buildPill('eth'));
+    elem.appendChild(ethLine);
 
-    var cardLine = document.createElement('div');
-    cardLine.className = 'ped-card-line';
-    cardLine.appendChild(buildPill('card'));
+    var fiatLine = document.createElement('div');
+    fiatLine.className = 'ped-line';
+    fiatLine.appendChild(buildPill('fiat'));
     var amt = document.createElement('span');
-    amt.className = 'ped-card-amount';
+    amt.className = 'ped-fiat-amount';
     amt.textContent = fmtMoney(fiat);
-    cardLine.appendChild(amt);
-    elem.appendChild(cardLine);
-
-    // Savings callout — only when the delta is meaningful, so cheap items
-    // (where +$2 to fiat is technically a "saving" but reads as noise)
-    // don't clutter the catalog.
-    var delta = fiat - def;
-    var threshold = Math.max(50, def * 0.10);
-    if (delta >= threshold) {
-      var save = document.createElement('div');
-      save.className = 'ped-save-line';
-      save.textContent = 'Save ' + fmtMoney(delta) + ' with Ethereum';
-      elem.appendChild(save);
-    }
+    fiatLine.appendChild(amt);
+    elem.appendChild(fiatLine);
   }
 
   function applyToDocument(byId) {
