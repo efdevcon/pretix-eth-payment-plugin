@@ -1234,47 +1234,62 @@ _ITEM_PRICING_JS_BODY = r"""
   // tint for the ETH pill, neutral gray for the Fiat pill. Stacked
   // vertically below the existing price so the buyer's eye lands on the
   // price first, then sees the per-method clarification.
+  // Icon-only layout: the payment method is conveyed purely by the
+  // glyph, no text label. Cuts the row width in half compared to the
+  // pill-with-label version, so the whole row (icon + price) always
+  // fits on one line inside Pretix\'s native col-md-2 price column —
+  // no more column-widening hack.
+  //
+  // Visual hierarchy:
+  //   - ETH row gets a soft green pill background so the buyer\'s eye
+  //     lands on it first (it\'s the recommended/cheaper price).
+  //   - Fiat row is plain (no background) — visible but secondary.
+  //   - Same green/18px/bold price text on both rows so the numbers
+  //     read as directly comparable rather than "the real price and
+  //     a footnote".
+  //
+  // Items whose crypto price equals their fiat price (or that have no
+  // fiat metadata at all) don\'t get annotated — they render with the
+  // default Pretix "new price" green treatment only.
   var CSS = (
-    // Inline rows that put a payment-method pill on the LEFT and either
-    // Pretix\'s native price element (catalog <p>, cart <strong>) or our
-    // own fiat amount span on the RIGHT, both right-aligned within
-    // Pretix\'s price column. `flex-wrap: wrap` lets narrow columns
-    // collapse the pill onto its own line gracefully.
-    '.ped-row{display:flex;align-items:center;justify-content:flex-end;' +
-      'gap:6px;flex-wrap:wrap;margin-top:4px}' +
+    // Each row is right-aligned within Pretix\'s price column via
+    // `margin-left:auto` on a fit-content width. Not flex-wrap because
+    // with icons instead of labels, the content always fits.
+    //
+    // Padding lives on `.ped-row` (the shared base), not on the ETH
+    // variant, so the ETH and Fiat rows have identical content boxes.
+    // Only the visual chrome (background + border-radius) is added on
+    // top for ETH. Result: icons and prices align vertically across
+    // rows — the "$" in $499 lines up with the "$" in $999 whether the
+    // ETH row has its green highlight or not.
+    //
+    // Sizing tokens sourced from the devcon.org Figma design (node
+    // 5160:7687 in file aQDeWGxyogMccLpHaONIHG): 4px 6px padding,
+    // 4px border-radius on the chip, 20px icon container, 6px gap.
+    // The Pretix shop mirrors this styling but stacks the rows
+    // vertically instead of horizontally (which is what devcon.org
+    // does since it has more horizontal room per item card).
+    '.ped-row{display:flex;align-items:center;gap:6px;width:fit-content;' +
+      'margin-left:auto;margin-top:4px;padding:4px 6px}' +
     '.ped-row:first-child{margin-top:0}' +
     '.ped-row > p,.ped-row > strong{margin:0}' +
-    '.ped-pill{display:inline-flex;align-items:center;gap:6px;' +
-      'padding:3px 10px;border-radius:999px;font-size:0.78em;' +
-      'font-weight:600;line-height:1.25;white-space:nowrap;' +
-      'letter-spacing:0.01em}' +
-    '.ped-pill .ped-icon{width:14px;height:14px;display:inline-flex;' +
-      'align-items:center;justify-content:center;flex-shrink:0}' +
-    '.ped-pill .ped-icon img,.ped-pill .ped-icon svg{width:14px;height:14px;' +
-      'display:block}' +
-    // ETH pill: lavender tint, purple text — matches Figma design tokens
-    '.ped-pill.ped-eth{background-color:#f1f3fe;color:#5b2bd9}' +
-    // Fiat pill: muted gray, dark text. The dollar-sign-in-tile icon is
-    // self-contained (its dark background is baked into the SVG), so the
-    // pill itself stays light.
-    '.ped-pill.ped-fiat{background-color:#f2f1f4;color:#160b2b}' +
-    // Fiat amount sits next to the pill, not inside it (so the pill stays
-    // a fixed-width chip while the amount can vary in digit count).
-    '.ped-fiat-amount{font-weight:600;color:#160b2b;' +
-      'font-variant-numeric:tabular-nums}' +
-    // Wrapper for the "incl. 18% GST" small that we relocate so the
-    // tax line sits BELOW the pills rather than above them. Keeps the
-    // right-alignment of Pretix\'s price column.
+    // ETH row: soft green highlight. #dff0d8 is Bootstrap 3\'s
+    // alert-success-bg — same green family as Pretix\'s built-in
+    // `<ins>` price color, so the highlight visually reinforces the
+    // "this is the crypto price" association. Padding comes from the
+    // shared `.ped-row` rule above; border-radius matches Figma (4px).
+    '.ped-eth-row{background:#dff0d8;border-radius:4px}' +
+    // Icon container, fixed 20px per Figma\'s `size-[20px]` token.
+    // Renders consistently regardless of surrounding font-size.
+    '.ped-icon{display:inline-flex;align-items:center;justify-content:center;' +
+      'flex-shrink:0;width:20px;height:20px}' +
+    '.ped-icon img,.ped-icon svg{width:20px;height:20px;display:block}' +
+    // Fiat amount matches the ETH price styling (same green, 18px,
+    // bold) so buyers read the two numbers as directly comparable.
+    '.ped-fiat-amount{color:#3c763d;font-size:18px;font-weight:bold;' +
+      'line-height:1.2;font-variant-numeric:tabular-nums}' +
+    // Relocated tax notice at the bottom (see moveTaxNoticeToBottom).
     '.ped-tax-line{text-align:right;margin-top:4px;line-height:1.2}' +
-    // Promote the headline price to the "new price" treatment Pretix
-    // ships for <ins> (green, 18px, bold) regardless of whether the
-    // item has an `original_price` strikethrough. Matches the SCSS
-    // rule from _event.scss `.price ins { ... }`. Targets the bare
-    // <p> wrapper in the catalog (fragment_product_list.html) and the
-    // <strong> wrapper in the cart (fragment_cart.html, both line
-    // items and the rowgroup total). Strikethrough <del> and any tax
-    // <small> children stay muted via the override below so they
-    // don\'t inherit the new color/size.
     // Promote the headline price to Pretix\'s "new price" treatment
     // (green/18px/bold from _event.scss `.price ins`) regardless of
     // whether (a) the item has a strikethrough original, (b) we
@@ -1286,22 +1301,7 @@ _ITEM_PRICING_JS_BODY = r"""
     '.price > p del,.price > p small,.price > small,' +
     '.price .ped-row > p del,.price .ped-row > p small,' +
     '.ped-tax-line small{' +
-      'color:#777;font-size:0.78em;font-weight:normal}' +
-    // Widen the catalog price column on desktop (Bootstrap md+) so the
-    // [ETH Price] pill + price + gap stays on one line. col-md-2 gives
-    // 16.67% (~170px on a 1200px row) which is right at the wrap
-    // threshold for 3-4 digit prices. Bumping price to 22% and
-    // shrinking the description from col-md-8 (66.67%) to 61.33%
-    // recovers ~64px for the price column while only costing the
-    // description ~64px — descriptions on this event use one paragraph
-    // and one or two short lines, so the trim is invisible in practice.
-    // Availability column (col-md-2) is left alone. sm/xs viewports
-    // already render the pill inline because col-sm-3/col-xs-6 give
-    // wider relative space, so the override is md-and-up only.
-    '@media (min-width:992px){' +
-      '.product-row > .price.col-md-2{width:22%}' +
-      '.product-row > .col-md-8{width:61.33%}' +
-    '}'
+      'color:#777;font-size:0.78em;font-weight:normal}'
   );
 
   // Self-contained dollar-sign-in-tile icon for the Fiat pill. The dark
@@ -1349,36 +1349,24 @@ _ITEM_PRICING_JS_BODY = r"""
     return '$' + s.replace(/\.00$/, '').replace(/(\.[0-9])0$/, '$1');
   }
 
-  // Pill renderer. `kind` drives both the visual treatment (CSS class)
-  // and the label text:
-  //   'eth'  → ETH glyph + "ETH Price"  (used when item also has a fiat
-  //            override; visually pairs with a 'fiat' pill on the next line)
-  //   'fiat' → dollar-sign-in-tile + "Fiat" (sits next to the fiat amount)
-  //   'only' → ETH glyph + "ETH Only"  (used when fiat_disabled; reuses
-  //            the eth visual since both reference the same payment method,
-  //            just signals exclusivity in the label)
-  function buildPill(kind) {
-    var pill = document.createElement('span');
-    // 'only' shares the eth color treatment — just a different label.
-    var visualClass = (kind === 'only') ? 'ped-eth' : ('ped-' + kind);
-    pill.className = 'ped-pill ' + visualClass;
+  // Icon builder — glyph only, no label. `kind` selects the asset:
+  //   'eth'  → embedded Ethereum diamond PNG (data URI)
+  //   'fiat' → inline dollar-sign-in-tile SVG (dark bg baked in)
+  // The consumer wraps this icon inside a `.ped-row` next to the
+  // matching price; the row itself carries the "which method?" signal
+  // via its class (`.ped-eth-row` gets the green highlight).
+  function buildIcon(kind) {
     var iconEl = document.createElement('span');
     iconEl.className = 'ped-icon';
-    if (kind === 'eth' || kind === 'only') {
+    if (kind === 'eth') {
       var img = document.createElement('img');
       img.src = ETH_ICON;
       img.alt = '';
       iconEl.appendChild(img);
-    } else if (kind === 'fiat') {
+    } else {  // 'fiat'
       iconEl.innerHTML = FIAT_SVG;
     }
-    pill.appendChild(iconEl);
-    var lbl = document.createElement('span');
-    lbl.textContent = (kind === 'eth') ? 'ETH Price' :
-                      (kind === 'fiat') ? 'Fiat' :
-                      (kind === 'only') ? 'ETH Only' : '';
-    pill.appendChild(lbl);
-    return pill;
+    return iconEl;
   }
 
   // Locate Pretix\'s native price element inside the .price column:
@@ -1392,19 +1380,6 @@ _ITEM_PRICING_JS_BODY = r"""
   function findPriceElement(elem) {
     return elem.querySelector(':scope > p') ||
            elem.querySelector(':scope > strong');
-  }
-
-  // Wrap `priceEl` in a `.ped-row` flex container with `pill` to its
-  // left. Replaces the price element in-place so subsequent siblings
-  // (e.g. orphan <br/> or pre-existing <small>) stay where they were
-  // and our downstream tax-relocation logic still finds them.
-  function wrapPriceWithPill(elem, priceEl, pill) {
-    var row = document.createElement('div');
-    row.className = 'ped-row';
-    priceEl.parentNode.insertBefore(row, priceEl);
-    row.appendChild(pill);
-    row.appendChild(priceEl);  // appendChild moves priceEl out of its old spot
-    return row;
   }
 
   // Remove any <br/> that\'s a direct child of .price. Pretix\'s cart
@@ -1421,12 +1396,13 @@ _ITEM_PRICING_JS_BODY = r"""
   function annotate(elem, info) {
     if (elem.dataset.pedAnnotated === '1') return;
 
-    // Only annotate items that have something payment-specific to say.
-    // Items without an override and without fiat_disabled (free swag,
-    // comps, items where fiat == crypto) get no pill — the listed price
-    // is what every buyer pays, regardless of method. Adding pills there
-    // would falsely imply a per-item payment choice (payment method is
-    // actually a cart-level decision).
+    // Only annotate items that have a payment-specific story:
+    //   - `fiat_disabled` → mark with the ETH-highlight row (single row)
+    //   - `fiat_price_usd` differs from crypto price → dual row layout
+    // Items where fiat matches crypto (or have no metadata) render with
+    // Pretix\'s default green-price styling — no icons, no rows.
+    // Payment method is a cart-level decision, so annotating rows
+    // where both methods pay the same amount would just add noise.
     var fiat = info.fiat_price_usd != null ? parseFloat(info.fiat_price_usd) : NaN;
     var def = parseFloat(info.default_price);
     var hasMeaningfulOverride = isFinite(fiat) && isFinite(def) && fiat !== def;
@@ -1435,39 +1411,30 @@ _ITEM_PRICING_JS_BODY = r"""
     elem.dataset.pedAnnotated = '1';
 
     var priceEl = findPriceElement(elem);
-    if (!priceEl) {
-      // Fall back to a stacked treatment when we can\'t identify the
-      // price wrapper — better to render below the price than to crash
-      // or do nothing.
-      var fallbackPill = buildPill(info.fiat_disabled ? 'only' : 'eth');
-      var fallbackLine = document.createElement('div');
-      fallbackLine.className = 'ped-row';
-      fallbackLine.appendChild(fallbackPill);
-      elem.appendChild(fallbackLine);
-      moveTaxNoticeToBottom(elem);
-      return;
+    if (!priceEl) return;  // unexpected DOM shape; safer to no-op
+
+    // ETH row (always present when annotating): wraps Pretix\'s native
+    // price element with the ETH icon on the left, in a soft-green
+    // highlighted chip. Applies to both ETH-only items and dual-priced
+    // items — same visual treatment.
+    var ethRow = document.createElement('div');
+    ethRow.className = 'ped-row ped-eth-row';
+    priceEl.parentNode.insertBefore(ethRow, priceEl);
+    ethRow.appendChild(buildIcon('eth'));
+    ethRow.appendChild(priceEl);
+
+    // Fiat row (only for dual-priced items — skipped when fiat is
+    // disabled for this item). No highlight, secondary weight.
+    if (!info.fiat_disabled) {
+      var fiatRow = document.createElement('div');
+      fiatRow.className = 'ped-row ped-fiat-row';
+      fiatRow.appendChild(buildIcon('fiat'));
+      var amt = document.createElement('span');
+      amt.className = 'ped-fiat-amount';
+      amt.textContent = fmtMoney(fiat);
+      fiatRow.appendChild(amt);
+      elem.appendChild(fiatRow);
     }
-
-    // ETH-only items: pill sits to the LEFT of the price on the same row.
-    if (info.fiat_disabled) {
-      wrapPriceWithPill(elem, priceEl, buildPill('only'));
-      dropOrphanBrs(elem);
-      moveTaxNoticeToBottom(elem);
-      return;
-    }
-
-    // Dual-priced items: ETH pill + price on the first row, Fiat pill +
-    // amount on a second row below.
-    wrapPriceWithPill(elem, priceEl, buildPill('eth'));
-
-    var fiatRow = document.createElement('div');
-    fiatRow.className = 'ped-row';
-    fiatRow.appendChild(buildPill('fiat'));
-    var amt = document.createElement('span');
-    amt.className = 'ped-fiat-amount';
-    amt.textContent = fmtMoney(fiat);
-    fiatRow.appendChild(amt);
-    elem.appendChild(fiatRow);
 
     dropOrphanBrs(elem);
     moveTaxNoticeToBottom(elem);
