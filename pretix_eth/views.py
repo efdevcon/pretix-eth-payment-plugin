@@ -1157,67 +1157,48 @@ def item_pricing(request, **kwargs):
 # under `ManifestStaticFilesStorage`, which has bitten this plugin before.
 # The credit-card glyph is an inline SVG (~200 bytes).
 _ETH_ICON_PNG_BASE64 = (
-    'iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAIAAAAlC+aJAAAABGdBTUEAALGPC/xhBQAAACBjSFJN'
+    'iVBORw0KGgoAAAANSUhEUgAAACgAAAAoCAYAAACM/rhtAAAABGdBTUEAALGPC/xhBQAAACBjSFJN'
     'AAB6JgAAgIQAAPoAAACA6AAAdTAAAOpgAAA6mAAAF3CculE8AAAARGVYSWZNTQAqAAAACAABh2kA'
-    'BAAAAAEAAAAaAAAAAAADoAEAAwAAAAEAAQAAoAIABAAAAAEAAABAoAMABAAAAAEAAABAAAAAAEZR'
-    'QrAAAAHLaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2Jl'
+    'BAAAAAEAAAAaAAAAAAADoAEAAwAAAAEAAQAAoAIABAAAAAEAAAAooAMABAAAAAEAAAAoAAAAAHrm'
+    'ZqwAAAFZaVRYdFhNTDpjb20uYWRvYmUueG1wAAAAAAA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2Jl'
     'Om5zOm1ldGEvIiB4OnhtcHRrPSJYTVAgQ29yZSA2LjAuMCI+CiAgIDxyZGY6UkRGIHhtbG5zOnJk'
     'Zj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+CiAgICAgIDxy'
-    'ZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICAgICAgICAgIHhtbG5zOmV4aWY9Imh0dHA6'
-    'Ly9ucy5hZG9iZS5jb20vZXhpZi8xLjAvIj4KICAgICAgICAgPGV4aWY6Q29sb3JTcGFjZT4xPC9l'
-    'eGlmOkNvbG9yU3BhY2U+CiAgICAgICAgIDxleGlmOlBpeGVsWERpbWVuc2lvbj4yNTY8L2V4aWY6'
-    'UGl4ZWxYRGltZW5zaW9uPgogICAgICAgICA8ZXhpZjpQaXhlbFlEaW1lbnNpb24+MjU2PC9leGlm'
-    'OlBpeGVsWURpbWVuc2lvbj4KICAgICAgPC9yZGY6RGVzY3JpcHRpb24+CiAgIDwvcmRmOlJERj4K'
-    'PC94OnhtcG1ldGE+CuYattQAAAm/SURBVGgF7Vrbb1THHZ7Lueyuvb5fCQYbY7w2scHYKimENAQF'
-    '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'
-    '9G+3dDh9/wdSrVBGohHF0AAAAABJRU5ErkJggg=='
+    'ZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiCiAgICAgICAgICAgIHhtbG5zOnhtcD0iaHR0cDov'
+    'L25zLmFkb2JlLmNvbS94YXAvMS4wLyI+CiAgICAgICAgIDx4bXA6Q3JlYXRvclRvb2w+RmlnbWE8'
+    'L3htcDpDcmVhdG9yVG9vbD4KICAgICAgPC9yZGY6RGVzY3JpcHRpb24+CiAgIDwvcmRmOlJERj4K'
+    'PC94OnhtcG1ldGE+CgT/XMgAAAVySURBVFgJ5ZfbTxx1FMe/Mzs7uwNdoCAIWOSiRcG2toJBKthW'
+    'bGI0RqrRpA/GxBjffDPx1b9FXohRk4a2qVHaalqk1WCIRZq0tOVWbsulC3ub289zZrm5BXZ3dh6a'
+    '+HtYdmZ/8zufOZfvOUiff7Mo8AQv+Qlmc9D+X4BCArzOF289aAOyZHsK6RGggGnaqKuW8G5nIWzL'
+    'Oz96A0g8kizhTJeG144E0VDjd4C9KEBPAHVDQsfRIF56LgDTAjpf0aAFZAgPHJk3oEV5V1oCvH8q'
+    '4DjMovBWliloPRSEaedP6AGgjfdOBFFWomxGlL3Y0hxAVZmcN2RegIYJNNWreKNF24TjLxzaoCqh'
+    'k+6zgXz86BpQEEXQL/DxaQ2KjwQwbVmWhIYDKuWlCoNd6nK5BjQM4GRbqmJ3su14jZT7+DENxYU+'
+    'uE1HV4AWaV5VuYR3Ov4b2nTQVAHJJD1c3e4CnTsg2aHCxQddBSgqfDy06XdMU8LhF4Ooq1JcQeYM'
+    'qJsCLU0qyQjLSjoOwF7jnJTWfxJ0rfpkp5D8ipSzNuYEyIVRpEn48C2qzk02QUYFVmM2puZs/DFi'
+    'YPS+jnjChs9HvZk2WlTtNZUqXn5BJS+y/7NfW+KVxTOGIXDmlIbqCj/tFuQtgciawMoqEE3woCAh'
+    'GpcwEzYxTrBVT0morVRQsi/lh/YjGsYmddov4Nt6wz0tZw1oUmgbnlVwul0j2RB4RGDLEYGkzq5M'
+    'hdRxqkTG6VSTXmZ8WmBqNoHy/T7UViuOcJ9o1XDuSnQdajMMu0JmBcjCq1D+dJ8sQCQuEF4GQTKW'
+    'vJlr6RY4BznEEDJmwwLzSwaKQzLqCbT+gB/3J83U7+kPpl1nBQj2Chm8cctACxkMaT7KLTbO0pHB'
+    'CxugtHMlYmNg3iDPW05uprHseJkVIAWQpEXg5t8xjNzR0UEtrJk6hMKhJE9mWvwKCd3G4rJJcCYU'
+    '6kCStHd9cuHJ5IW9d21Ypo7AtdfVFkB9jQ/nrq6h92IEEzMG5RsnPG/ckpaNxzjM3EEWlg2MjScR'
+    'j1too3mxtJg6S4ZiluhhB3LjsD3/Uoht8tTQPybOvq3hy7P7oFM36emL4OKvUapKCyoVNgPx4mrm'
+    'tOD798YTmA/raKxX8El3CAHaNxu2acDl9Mi8sgoxH+OjJJxbFug5H8NXn4Zw6HkVP/8ew6XrCYw+'
+    '0HH8qIbWpoDj0SgX0koSqwT4zNN+vH6sAI11Ku5O6Lj+VwIKScz6u2QklHL5x53fWadc4jbX/WYB'
+    'XQnMLJjouxrHwLCBilIfVBqzpuZMhEj72qkHHz4YRAFN10trJnovrGFplXLQqbCMbM6GrD3Iu/mt'
+    'Vb+MC9cSaKxVnEKpKlfwxUchKhwDP/THMf7QxKvUBttooi4iWbEtmdJBoH8whsVHJvxKdmnv0NFH'
+    'ToD8EKcXi3bP+TV8/VkxSkIsdkBzg4qDJOS37lrQgn4nwXkkU6lib4zEcfueTnDZBtY50vnI7XXW'
+    'n+NhYHpeoPdS1AHZOI4BKvYrsGg+5SpViH2SdO/aEOUdC6mL5QqQ7agqCfdwElduUhPetrg/pzRM'
+    'IGHY+GUgimSSdY8Bc4d0DcimZBLA7/sTlHf6NsTUVx4GfvszhocLtmvv8UmuAdkbPEpFYxa+7Ysj'
+    'ntxSXu4wI2NJDN/WnR7+GH0ON/IATFnhqr4zYeJH8iRD84CwsGJS6GMkQtnr3W7MeQPywZyPlwcT'
+    'GBrVnSq/PBhFJMq9dDez2d/PWWZ2OtoZJigpv/spijoapR5MW64kZaezPQHkg3lgCK/w3JfMO++2'
+    'g3oQhK3jWEm4Z3u5PAX0EmzjLNchZjFOXykxTr+b37VrD26H2Q67/X5+aKmn/wU3GfeDPn/uywAA'
+    'AABJRU5ErkJggg=='
 )
-# NOTE: ETH glyph sourced from the Devcon Figma design system (node
-# 5111:7180 in file aQDeWGxyogMccLpHaONIHG), resized to 64x64 to keep
-# the data-URI payload under 5 KB. Regenerate by re-running the figma
-# get_design_context flow and `sips -Z 64 <src.png> --out eth-64.png`.
+# NOTE: ETH icon-container sourced from the Devcon Figma design (node
+# 5160:7688 in file aQDeWGxyogMccLpHaONIHG) — a rounded purple tile
+# with the Ethereum diamond glyph baked in, so the icon self-contains
+# both the background color/radius and the glyph and needs no CSS
+# wrapper. Resized to 40x40 (2x retina for the 20px display size).
+# Regenerate with `sips -Z 40 <src.png> --out eth-container-40.png`.
 _ETH_ICON_DATA_URI = 'data:image/png;base64,' + _ETH_ICON_PNG_BASE64
 
 # Body uses sentinel placeholders that the view substitutes with
@@ -1280,13 +1261,21 @@ _ITEM_PRICING_JS_BODY = r"""
     // shared `.ped-row` rule above; border-radius matches Figma (4px).
     '.ped-eth-row{background:#dff0d8;border-radius:4px}' +
     // Icon container, fixed 20px per Figma\'s `size-[20px]` token.
-    // Renders consistently regardless of surrounding font-size.
+    // Renders consistently regardless of surrounding font-size. The
+    // 1px border-radius on the img/svg matches Figma\'s
+    // `rounded-[1px]` — the ETH PNG has its own rounded corners baked
+    // in, and this clips the Fiat SVG\'s baked-in rounded rect down
+    // to the same 1px radius so both icons visually match.
     '.ped-icon{display:inline-flex;align-items:center;justify-content:center;' +
       'flex-shrink:0;width:20px;height:20px}' +
-    '.ped-icon img,.ped-icon svg{width:20px;height:20px;display:block}' +
-    // Fiat amount matches the ETH price styling (same green, 18px,
-    // bold) so buyers read the two numbers as directly comparable.
-    '.ped-fiat-amount{color:#3c763d;font-size:18px;font-weight:bold;' +
+    '.ped-icon img,.ped-icon svg{width:20px;height:20px;display:block;' +
+      'border-radius:1px}' +
+    // Fiat amount uses Devcon\'s muted-foreground token (#594d73) per
+    // the Figma design — signals "secondary payment method" against
+    // the ETH row\'s highlighted accent-foreground. Same 18px/bold
+    // weight as the ETH price so buyers still read them as directly
+    // comparable, just with different chromatic emphasis.
+    '.ped-fiat-amount{color:#594d73;font-size:18px;font-weight:bold;' +
       'line-height:1.2;font-variant-numeric:tabular-nums}' +
     // Relocated tax notice at the bottom (see moveTaxNoticeToBottom).
     '.ped-tax-line{text-align:right;margin-top:4px;line-height:1.2}' +
@@ -1298,6 +1287,14 @@ _ITEM_PRICING_JS_BODY = r"""
     '.price > p,.price > strong:first-child,' +
     '.price .ped-row > p,.price .ped-row > strong{' +
       'color:#3c763d;font-size:18px;font-weight:bold;line-height:1.2}' +
+    // ETH row price gets Devcon\'s accent-foreground (#221144, dark
+    // purple) instead of Pretix\'s ins-green, per Figma design token
+    // `--general/accent-foreground`. Overrides the green base rule
+    // above; more specific selector wins. Only affects the price text
+    // when it\'s inside the ETH highlight chip — bare non-annotated
+    // items and the Fiat row keep the green color.
+    '.price .ped-eth-row > p,.price .ped-eth-row > strong{' +
+      'color:#221144}' +
     '.price > p del,.price > p small,.price > small,' +
     '.price .ped-row > p del,.price .ped-row > p small,' +
     '.ped-tax-line small{' +
@@ -1488,8 +1485,40 @@ _ITEM_PRICING_JS_BODY = r"""
     });
   }
 
+  // Strip trailing ".00" from any money-shaped text node inside a
+  // .price column. Pretix\'s Django `money` filter always renders with
+  // 2 decimals, so a $349 ticket shows as "$349.00" — visually noisy
+  // when there\'s no fractional cents to communicate. Regex matches a
+  // digit immediately followed by ".00" and a word boundary, so:
+  //   - "$349.00" → "$349"       ✓
+  //   - "$12.50" → "$12.50"      ✓ (non-zero cents preserved)
+  //   - "$1,043.00" → "$1,043"   ✓
+  //   - "18.00%" → "18%"         ✓ (also cleans the tax notice)
+  // Runs on every .price div on the page, so it covers the catalog,
+  // cart line items, cart totals, and any struck-through <del> price.
+  // Works across the DOM tree via TreeWalker so it reaches text nodes
+  // nested inside <p>/<strong>/<ins>/<del>.
+  function stripPriceTrailingZeros() {
+    var priceDivs = document.querySelectorAll('.price');
+    priceDivs.forEach(function (pd) {
+      var walker = document.createTreeWalker(pd, NodeFilter.SHOW_TEXT, null, false);
+      var toUpdate = [];
+      var n;
+      while ((n = walker.nextNode())) {
+        if (/\d\.00\b/.test(n.nodeValue)) toUpdate.push(n);
+      }
+      toUpdate.forEach(function (node) {
+        node.nodeValue = node.nodeValue.replace(/(\d)\.00\b/g, '$1');
+      });
+    });
+  }
+
   function load() {
     injectStyle();
+    // Strip ".00" before we start moving elements around; keeps text
+    // node handling simple and applies to every row regardless of
+    // whether the pricing JSON fetch succeeds.
+    stripPriceTrailingZeros();
     fetch(ENDPOINT, { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
