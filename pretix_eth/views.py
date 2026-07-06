@@ -1369,14 +1369,28 @@ _ITEM_PRICING_JS_BODY = r"""
   // Locate Pretix\'s native price element inside the .price column:
   //   - catalog (fragment_product_list.html): a <p> directly inside
   //     `.price` containing the amount text plus an inline tax <small>.
-  //   - cart (fragment_cart.html): a <strong> directly inside `.price`
-  //     holding the amount, followed by a <br/> and a tax <small>.
+  //   - cart total (fragment_cart.html `.totalprice`): a <strong>
+  //     directly inside `.price`, followed by a <br/> and a tax <small>.
+  //   - cart per-unit (fragment_cart.html `.singleprice`): the amount is
+  //     a BARE TEXT NODE with no wrapper element at all — wrap it in a
+  //     <strong> on the fly so the row builder has an element to move.
   // Returns null when the structure doesn\'t match (rare, e.g. free or
   // ranged-price items) so the caller can fall back to non-inline
   // rendering without crashing.
   function findPriceElement(elem) {
-    return elem.querySelector(':scope > p') ||
-           elem.querySelector(':scope > strong');
+    var el = elem.querySelector(':scope > p') ||
+             elem.querySelector(':scope > strong');
+    if (el) return el;
+    for (var i = 0; i < elem.childNodes.length; i++) {
+      var n = elem.childNodes[i];
+      if (n.nodeType === Node.TEXT_NODE && /\d/.test(n.nodeValue)) {
+        var wrap = document.createElement('strong');
+        elem.insertBefore(wrap, n);
+        wrap.appendChild(n);
+        return wrap;
+      }
+    }
+    return null;
   }
 
   // Remove any <br/> that\'s a direct child of .price. Pretix\'s cart
@@ -1475,12 +1489,17 @@ _ITEM_PRICING_JS_BODY = r"""
       if (priceDiv) annotate(priceDiv, info);
     });
     // Cart: rowgroup with data-article-id="item-{pk}" or "item-{pk}-{var}".
+    // Annotate the per-unit `.singleprice` cell — `fiat_price_usd` is a
+    // per-unit amount, so pairing it with the unit price stays correct at
+    // any quantity (the `.totalprice` cell keeps the plain line total).
+    // Fall back to the first `.price` for cart variants that render
+    // without a singleprice column.
     document.querySelectorAll('[data-article-id^="item-"]').forEach(function (row) {
       var m = row.getAttribute('data-article-id').match(/^item-(\d+)/);
       if (!m) return;
       var info = byId[parseInt(m[1], 10)];
       if (!info) return;
-      var priceDiv = row.querySelector('.price');
+      var priceDiv = row.querySelector('.singleprice.price') || row.querySelector('.price');
       if (priceDiv) annotate(priceDiv, info);
     });
   }
