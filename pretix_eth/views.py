@@ -1279,6 +1279,9 @@ _ITEM_PRICING_JS_BODY = r"""
       'line-height:1.2;font-variant-numeric:tabular-nums}' +
     // Relocated tax notice at the bottom (see moveTaxNoticeToBottom).
     '.ped-tax-line{text-align:right;margin-top:4px;line-height:1.2}' +
+    // Explainer under the relabeled "Card payment fee" cart line.
+    '.ped-fee-note{display:block;color:#777;font-size:0.78em;' +
+      'font-weight:normal;line-height:1.3}' +
     // Promote the headline price to Pretix\'s "new price" treatment
     // (green/18px/bold from _event.scss `.price ins`) regardless of
     // whether (a) the item has a strikethrough original, (b) we
@@ -1532,12 +1535,36 @@ _ITEM_PRICING_JS_BODY = r"""
     });
   }
 
+  // Relabel Pretix\'s generic "Payment fee" cart line. The fee is the
+  // difference between the ETH-denominated base price and the card
+  // price (e.g. $499 base → $999 via card adds a $500 fee line), not a
+  // processing surcharge on top — say so where the buyer decides.
+  // Display-only: invoices, emails, and the organizer backend keep
+  // Pretix\'s standard "Payment fee" naming, which is what accounting
+  // documents should carry. Matched on the English label; other shop
+  // locales fall back to the stock label untouched.
+  function relabelPaymentFee() {
+    document.querySelectorAll('.cart-row strong').forEach(function (el) {
+      if (el.dataset.pedFeeRelabeled === '1') return;
+      if ((el.textContent || '').trim() !== 'Payment fee') return;
+      // Skip the price cell — it also renders its amount in a <strong>.
+      if (el.closest('.price')) return;
+      el.dataset.pedFeeRelabeled = '1';
+      el.textContent = 'Card payment fee';
+      var note = document.createElement('small');
+      note.className = 'ped-fee-note';
+      note.textContent = 'difference between the ETH price and the card price';
+      el.parentNode.appendChild(note);
+    });
+  }
+
   function load() {
     injectStyle();
     // Strip ".00" before we start moving elements around; keeps text
     // node handling simple and applies to every row regardless of
     // whether the pricing JSON fetch succeeds.
     stripPriceTrailingZeros();
+    relabelPaymentFee();
     fetch(ENDPOINT, { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
