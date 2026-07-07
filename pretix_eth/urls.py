@@ -19,7 +19,18 @@ bundle's `urlPrefix` always resolves to the event-scoped form on main domain
 (and to the bare root form on a custom domain via `event_domain_urlconf`).
 """
 from django.urls import path
-from pretix_eth import views, views_x402, views_admin
+from pretix_eth import views, views_x402, views_admin  # noqa: F401 (views_x402 kept for the commented-out x402 routes below)
+
+
+# x402 is DISABLED: every `/plugin/x402/*` payment/admin route below is
+# commented out, so those paths 404 at the routing layer and no x402 view
+# code runs. The code (views_x402, the x402 admin views) stays in the tree —
+# re-enable by uncommenting the routes in `_x402_routes()`.
+#
+# The WalletConnect admin tools (`wc-refund`, `wc-verify`) historically sat
+# under the `/plugin/x402/admin/` path prefix but serve the ACTIVE
+# WalletConnect flow, so they now live in `_wc_routes()` and stay registered
+# (their URL strings and route names are unchanged).
 
 
 # Routes — registered twice with fresh URLPattern instances per registration.
@@ -45,32 +56,40 @@ def _wc_routes():
              views.item_pricing, name='wc_item_pricing'),
         path('plugin/wc/item-pricing.js',
              views.item_pricing_js, name='wc_item_pricing_js'),
+        # WalletConnect admin tools. Kept under the legacy `/plugin/x402/admin/`
+        # path + route names for backward compatibility with existing admin
+        # callers, but grouped here because they serve the WC flow and must
+        # survive the x402 kill-switch (see X402_ENABLED above).
+        path('plugin/x402/admin/wc-refund/', views_admin.admin_wc_refund, name='x402_admin_wc_refund'),
+        path('plugin/x402/admin/wc-verify/', views_admin.admin_wc_verify, name='x402_admin_wc_verify'),
     ]
 
 
 def _x402_routes():
+    # x402 DISABLED — all routes commented out (see module note above).
+    # wc-refund / wc-verify are NOT here: they serve the WalletConnect flow
+    # and stay registered in `_wc_routes()`. Uncomment to re-enable x402.
     return [
         # Public per-event toggle state (read-only). Storefront polls this to
         # decide whether to call the gated endpoints — must remain reachable
         # even when the gates are flipped OFF, so it sits at the top.
-        path('plugin/x402/settings/',              views_x402.settings,              name='x402_settings'),
+        # path('plugin/x402/settings/',              views_x402.settings,              name='x402_settings'),
 
         # x402 purchase flow
-        path('plugin/x402/purchase/',              views_x402.purchase,              name='x402_purchase'),
-        path('plugin/x402/payment-options/',       views_x402.payment_options,       name='x402_payment_options'),
-        path('plugin/x402/relayer/prepare-authorization/',
-             views_x402.prepare_authorization, name='x402_prepare_authorization'),
-        path('plugin/x402/relayer/execute-transfer/',
-             views_x402.execute_transfer, name='x402_execute_transfer'),
-        path('plugin/x402/verify/',                views_x402.verify,                name='x402_verify'),
+        # path('plugin/x402/purchase/',              views_x402.purchase,              name='x402_purchase'),
+        # path('plugin/x402/payment-options/',       views_x402.payment_options,       name='x402_payment_options'),
+        # path('plugin/x402/relayer/prepare-authorization/',
+        #      views_x402.prepare_authorization, name='x402_prepare_authorization'),
+        # path('plugin/x402/relayer/execute-transfer/',
+        #      views_x402.execute_transfer, name='x402_execute_transfer'),
+        # path('plugin/x402/verify/',                views_x402.verify,                name='x402_verify'),
 
-        # x402 admin
-        path('plugin/x402/admin/orders/',  views_admin.admin_orders,  name='x402_admin_orders'),
-        path('plugin/x402/admin/stats/',   views_admin.admin_stats,   name='x402_admin_stats'),
-        path('plugin/x402/admin/refund/',  views_admin.admin_refund,  name='x402_admin_refund'),
-        path('plugin/x402/admin/wc-refund/', views_admin.admin_wc_refund, name='x402_admin_wc_refund'),
-        path('plugin/x402/admin/verify/',  views_admin.admin_verify,  name='x402_admin_verify'),
-        path('plugin/x402/admin/wc-verify/', views_admin.admin_wc_verify, name='x402_admin_wc_verify'),
+        # x402 admin (wc-refund / wc-verify live in _wc_routes — they serve
+        # the WalletConnect flow and stay registered)
+        # path('plugin/x402/admin/orders/',  views_admin.admin_orders,  name='x402_admin_orders'),
+        # path('plugin/x402/admin/stats/',   views_admin.admin_stats,   name='x402_admin_stats'),
+        # path('plugin/x402/admin/refund/',  views_admin.admin_refund,  name='x402_admin_refund'),
+        # path('plugin/x402/admin/verify/',  views_admin.admin_verify,  name='x402_admin_verify'),
     ]
 
 
