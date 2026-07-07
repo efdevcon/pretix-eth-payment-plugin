@@ -250,6 +250,12 @@ def _current_cart_markup_sum(event):
     if request is None:
         return Decimal('0')
 
+    # Order re-pay flow (buyer changing payment method on an existing order):
+    # resolve markup from the order's positions before the cart fallback.
+    order_markup = _markup_sum_from_order_request(request, event)
+    if order_markup is not None:
+        return order_markup
+
     # Fall back to a cart_id lookup from the request session.
     cart_id = None
     try:
@@ -307,6 +313,38 @@ def _markup_sum_from_positions(positions):
         if delta > 0:
             total += delta
     return total
+
+
+def _markup_sum_from_order_request(request, event):
+    """Markup for the 'change payment method' / re-pay flow, where the buyer
+    is paying an EXISTING order — there is no cart and no `_create_order`
+    placement, so the order code lives in the request's `resolver_match`
+    kwargs. Mirrors the order branch in `_install_fiat_provider_restrictor`.
+
+    Returns the summed markup (Decimal) when the request targets an order, or
+    None when there's no order in the URL so callers fall through to the cart
+    lookup. Without this branch the markup resolves to 0 on the order-pay
+    page, letting a buyer who created a crypto order switch it to Card and pay
+    the (lower) ETH-denominated price — security audit HIGH finding.
+    """
+    try:
+        match = getattr(request, 'resolver_match', None)
+        order_code = match.kwargs.get('order') if match else None
+    except Exception:
+        order_code = None
+    if not order_code:
+        return None
+    try:
+        from pretix.base.models import OrderPosition
+        # No addon filter: add-ons contribute markup on their OWN metadata,
+        # matching the cart path and `_markup_sum_from_positions`. The default
+        # manager excludes canceled positions (same as the restrictor).
+        positions = list(OrderPosition.objects.filter(
+            order__code=order_code, order__event=event,
+        ).select_related('item'))
+    except Exception:
+        return None
+    return _markup_sum_from_positions(positions)
 
 
 def _install_fiat_fee_name_decoration():
@@ -457,8 +495,17 @@ def _install_fiat_per_item_markup():
 
         request = getattr(ctx, 'request', None)
         if request is None:
-            log.info('pretix_eth[markup]: no request and no positions in thread-local')
+            log.warning('pretix_eth[markup]: no request and no positions in thread-local')
             return Decimal('0')
+
+        # Order re-pay flow (change payment method on an existing order): the
+        # markup must come from the order's positions since there's no cart
+        # and no _create_order bake. Without this, switching an existing
+        # crypto order to Card pays the base ETH price.
+        order_markup = _markup_sum_from_order_request(request, event)
+        if order_markup is not None:
+            log.info('pretix_eth[markup]: from-order total=%s', order_markup)
+            return order_markup
 
         cart_id = None
         try:
@@ -501,14 +548,18 @@ def _install_fiat_per_item_markup():
             return markup
         return _wrapped
 
-    # CRITICAL: only patch the base class. Pretix-Stripe subclasses
-    # (StripeCC, StripeSEPADirectDebit, …) inherit calculate_fee from
-    # StripeMethod without overriding it. Patching every subclass would
-    # double-wrap because each subclass's `orig` would be the wrapped
-    # version of the previous one.
+    # NOTE: the `calculate_fee` monkey-patch is deliberately installed LAST,
+    # only after the presale request-capture signals are connected (see the
+    # end of this function). Patching it here — before the signal wiring —
+    # created a fail-open window: if the presale-signals import ever broke
+    # (e.g. a Pretix rename), `calculate_fee` was left patched but blind
+    # (no request/cart context), silently resolving every markup to $0. By
+    # ordering the patch after the `.connect()` calls, a signal-wiring
+    # failure returns early WITHOUT patching `calculate_fee`, so Stripe
+    # keeps its native fee behaviour rather than under-charging. New-order
+    # placement stays correct regardless via the `_create_order` price-bake
+    # wrapped just below (which doesn't depend on the signals).
     orig_calc = StripeMethod.calculate_fee
-    StripeMethod.calculate_fee = _make_wrapped_calc(orig_calc)
-    log.info('pretix_eth[install]: per-item markup patched calculate_fee on StripeMethod (subclasses inherit)')
 
     # Wrap the function Pretix uses to compute fees during order placement.
     # The exact name varies across Pretix versions:
@@ -701,9 +752,18 @@ def _install_fiat_per_item_markup():
     try:
         from pretix.presale.signals import process_request, process_response
     except (ImportError, AttributeError) as e:
-        log.warning(
-            'pretix_eth: presale signals not importable (%s); '
-            'fiat-markup exemption will not run.', e,
+        # Fail CLOSED for the fee patch: without request capture, a patched
+        # calculate_fee would resolve every markup to $0 (revenue loss). We
+        # return BEFORE patching calculate_fee, so Stripe keeps its native
+        # fee. New Stripe orders still get the correct fiat price via the
+        # _create_order bake wrapped above (independent of these signals);
+        # only the chooser-preview label and the change-payment-method
+        # markup are unavailable until this is fixed — hence ERROR, not
+        # warning, so ops notices.
+        log.error(
+            'pretix_eth: presale signals not importable (%s); calculate_fee '
+            'markup patch NOT installed (Stripe keeps native fee). New-order '
+            'price-bake is unaffected.', e,
         )
         return
 
@@ -741,6 +801,18 @@ def _install_fiat_per_item_markup():
         'pretix_eth[install]: receivers connected (process_request has %d total receivers)',
         len(process_request.receivers),
     )
+
+    # Request capture is now wired, so it's safe to patch calculate_fee: it
+    # will always have a request/positions context to resolve the markup
+    # from. Installed LAST on purpose (see the note above `orig_calc`).
+    #
+    # CRITICAL: only patch the base class. Pretix-Stripe subclasses
+    # (StripeCC, StripeSEPADirectDebit, …) inherit calculate_fee from
+    # StripeMethod without overriding it. Patching every subclass would
+    # double-wrap because each subclass's `orig` would be the wrapped
+    # version of the previous one.
+    StripeMethod.calculate_fee = _make_wrapped_calc(orig_calc)
+    log.info('pretix_eth[install]: per-item markup patched calculate_fee on StripeMethod (subclasses inherit)')
 
 
 def _install_stripe_mail_render():
