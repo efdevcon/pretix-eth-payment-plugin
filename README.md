@@ -1,6 +1,12 @@
 # Pretix Crypto Payment Plugin
 
-A payment plugin for [Pretix](https://github.com/pretix/pretix) that accepts crypto payments. Two modes: direct WalletConnect checkout (user pays gas) and x402 gasless flow (relayer pays gas for USDC/USDT0). All payments verified directly on-chain — no vendor dependency.
+A payment plugin for [Pretix](https://github.com/pretix/pretix) that accepts crypto payments and layers per-item crypto-vs-card pricing on top of Pretix's fiat (Stripe) checkout. Crypto is paid via direct WalletConnect checkout (user pays gas), verified directly on-chain — no vendor dependency. A gasless x402 flow (relayer pays gas for USDC/USDT0) also exists in the code but is **currently disabled** (see [Status](#status)).
+
+## Status
+
+- **Active crypto flow:** WalletConnect direct-send (`/plugin/wc/*`). This is the crypto path used in production.
+- **Fiat (card) payments:** handled by Pretix's own Stripe plugin; this plugin adds per-item crypto-vs-card pricing, a card-price markup, and dual-currency display in the shop/cart (see [Fiat (card) payments](#fiat-card-payments)).
+- **x402 gasless flow:** fully implemented but **disabled** — all `/plugin/x402/*` routes are commented out in `pretix_eth/urls.py` (`_x402_routes()`), so those paths 404 and no x402 view code runs. The code is retained; re-enable by uncommenting the routes. The two WalletConnect admin tools that historically sat under the `/plugin/x402/admin/` path prefix (`wc-refund`, `wc-verify`) are kept live for the active WC flow. The x402 sections below document the flow as it works when re-enabled.
 
 ## Supported chains & tokens
 
@@ -66,6 +72,25 @@ Both the wc_inject bundle (`pretix_eth/static/wc_inject/src/components/CheckoutS
 
 Console logs (`[wc_inject] tx-hash recovery: WALLET / DISCOVERY / MANUAL path won`) record which path resolved, so stuck-payment reports are diagnosable from a buyer's browser console alone.
 
+## Fiat (card) payments
+
+Card payments themselves are handled by Pretix's own Stripe plugin. This plugin adds a layer on top so the same ticket can be priced differently for crypto vs card, and so buyers see both prices before they choose.
+
+Per-item behavior is driven by two `ItemMetaProperty` values (set per `Item` in the standard Pretix item editor, or bulk-applied):
+
+- **`fiat_price_usd`** — the card price for this item. When set and higher than the item's `default_price` (the crypto price), card buyers pay the difference as a markup. Unset → card buyers pay `default_price`, no markup.
+- **`fiat_disabled`** — set to `true` to hide Stripe entirely for any cart/order containing this item (crypto-only tickets). Add-ons follow their own metadata, not the parent's.
+
+**How the card markup is applied.** The plugin monkey-patches Pretix's Stripe `calculate_fee` and order-placement path so the per-item delta `(fiat_price_usd − price)` is added:
+
+- **New orders:** at placement the fiat price is baked directly into each `OrderPosition` (no separate fee line) when the buyer pays by card.
+- **Change-payment-method / re-pay on an existing order:** the markup is resolved from the order's positions and added as a payment fee.
+- The `calculate_fee` patch is installed only after the request-capture signals connect, so a Pretix signal rename can't leave it silently under-charging (it fails toward Stripe's native fee rather than a $0 markup).
+
+**Buyer-facing display.** A small vanilla-JS bundle (`/plugin/wc/item-pricing.js`, injected on the catalog, cart, checkout, and voucher-redeem pages) annotates each item with both prices — a green "Ethereum" chip for the crypto price and a "Card" price beside it — reading per-event pricing from `/plugin/wc/item-pricing/`. On the cart it also relabels Pretix's generic "Payment fee" line to "Card payment fee" with a "difference between the ETH price and the card price" note. Display-only: invoices, emails, and the organizer backend keep Pretix's standard naming. Items where crypto and card prices match get no annotation.
+
+**Chooser integration.** For crypto-only items (`fiat_disabled`), Stripe is hidden from the payment chooser and blocked on the order re-pay flow (`is_allowed`). For dual-priced items, the Stripe method label is prefixed with the live markup (e.g. "+$500 · Credit Card") so the buyer sees the card premium before committing.
+
 ## Pricing
 
 - **Stablecoins:** 1 USDC = 1 USD (direct mapping)
@@ -78,7 +103,7 @@ Console logs (`[wc_inject] tx-hash recovery: WALLET / DISCOVERY / MANUAL path wo
 
 ## Security
 
-- **Authentication:** all `/plugin/x402/*` endpoints require a valid Pretix API token (`Authorization: Token <token>`) — same token system Pretix uses for its own REST API. No custom secrets to manage.
+- **Authentication:** token-gated endpoints require a valid Pretix `TeamAPIToken` (`Authorization: Token <token>`) — the same token system Pretix uses for its own REST API, so there are no custom secrets to manage. Admin endpoints additionally require the team's `can_view_orders` / `can_change_orders` permission and check that the token's team belongs to the target event's organizer (cross-organizer access is rejected). **Known gap:** the organizer check does not yet honor per-team event scoping (`Team.limit_events`) — a token scoped to one event under an organizer can currently operate on other events under the same organizer. See Known gaps / TODOs.
 - **USDC/USDT0 gasless:** Payer cryptographically bound via EIP-3009 signature (on-chain verified by token contract). Accepts both EOA (`{v, r, s}` object) and smart wallet (`rawSignature` hex) formats.
 - **Native ETH:** Payer bound via `ethPayerSignature` — supports EOA (ECDSA), smart wallets (ERC-1271), counterfactual wallets (ERC-6492), and EIP-7702-delegated EOAs (chain-bound `DOMAIN_SEPARATOR()` retry). 0.5% slippage tolerance on the on-chain `value` to absorb price drift + wallet-side re-quoting (see Payment flows above)
 - **Smart wallet ETH (ERC-4337):** `debug_traceTransaction` fallback walks internal call tree to find the actual ETH transfer from the smart wallet
@@ -86,7 +111,7 @@ Console logs (`[wc_inject] tx-hash recovery: WALLET / DISCOVERY / MANUAL path wo
 - **Relayer binding:** Before sponsoring gas, the plugin verifies `authorization.to == configured recipient`, `authorization.value >= expected amount`, `authorization.from == intendedPayer`, and `validBefore > now` — an attacker with a valid token cannot redirect funds or underpay
 - Transaction hash is single-use (prevents cross-order replay)
 - Chain, token contract, sender, recipient, and amount all verified on-chain
-- Rate limiting on purchase and verify endpoints — verify caps at 120/5min per `paymentReference` and 60/min per IP (sized to fit ~4 minutes of FE 2s polling per payment without false positives)
+- Rate limiting on the tokenless buyer-facing WalletConnect endpoints (challenge, create-quote, verify), keyed per-quote, per-`(order, challenge)`, and per-IP. Limits are env-tunable (see Environment overrides). Client IP is resolved from the trusted-proxy headers (`CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For`) — this assumes the origin is network-locked to the CDN/proxy; if it isn't, those headers are client-spoofable and the per-IP caps can be bypassed (per-quote and per-order budgets still apply). Lock the origin to your proxy's IP ranges in production.
 - Atomic claim + reserve prevents double-spend race conditions
 - **Tx hash dedup is case-insensitive at read** (`tx_hash__iexact`) and lowercased at write — a mixed-case retry of an already-paid hash is rejected, and the unique-constraint race window between concurrent verifies can't be defeated by case twiddling
 - **Admin manual verify** (`/plugin/x402/admin/verify/`) intentionally bypasses the off-chain `ethPayerSignature` check for stuck-payment recovery — payer-binding falls back to the on-chain `tx.from == intended_payer` enforcement inside `verify_native_eth`. The endpoint is auth-gated by the Pretix API token and intended for operator-only use; the bypass is logged at WARNING for audit. Buyer-facing `/plugin/x402/verify/` keeps the signature requirement.
@@ -127,9 +152,15 @@ All settings are configurable via the Pretix admin UI (Settings > Payment). No e
 |---|---|
 | `WC_ALCHEMY_API_KEY` | Overrides Alchemy key (preferred for production — not in DB) |
 | `WC_RELAYER_PRIVATE_KEY` | Overrides relayer key (preferred for production — not in DB) |
-| `WC_VERIFY_RATE_LIMIT_PER_MIN` | Verify endpoint rate limit (default 10) |
+| `WC_VERIFY_RATE_LIMIT_PER_MIN` | Verify attempts per `paymentReference` per minute (default 10) |
+| `WC_VERIFY_IP_RATE_LIMIT_PER_MIN` | Verify attempts per IP per minute (default 120) |
+| `WC_CREATE_QUOTE_IP_RATE_LIMIT_PER_MIN` | Create-quote attempts per IP per minute (default 20) |
+| `WC_CREATE_QUOTE_PER_CHALLENGE_BUDGET` | Create-quote attempts per `(order, challenge)` (default 5) |
+| `WC_BUYER_RATE_LIMIT_PER_MIN` | Per-IP cap on the other buyer endpoints (default 120) |
 
-### 4. x402 proxy integration (devcon-next)
+### 4. x402 proxy integration (devcon-next) — currently disabled
+
+> **Note:** the x402 routes below are commented out in `pretix_eth/urls.py` and will 404 until re-enabled. This section describes the flow as it works once the routes are uncommented.
 
 For the x402 gasless flow, devcon-next API routes proxy to the plugin using the existing Pretix API token (`PRETIX_API_TOKEN_DEV` / `PRETIX_API_TOKEN_PROD`). The plugin validates the token against Pretix's `TeamAPIToken` table via the `Authorization: Token <token>` header. No additional secrets needed.
 
@@ -145,11 +176,16 @@ Plugin endpoints (all accept JSON body with `organizer` + `event` slugs and came
 
 Frontend field names: camelCase (`paymentReference`, `chainId`, `txHash`, `walletAddress`). The plugin's request body parser also accepts snake_case (`payment_reference`, `chain_id`, etc.) for non-frontend clients.
 
+**Always-on admin tools (WalletConnect flow).** These two live under the `/plugin/x402/admin/` path prefix for backward compatibility but serve the active WalletConnect flow, so they stay registered even while x402 is disabled. Both require an admin token with `can_change_orders`:
+- `POST /plugin/x402/admin/wc-refund/?action=initiate|confirm|fail` — refund a WalletConnect payment
+- `POST /plugin/x402/admin/wc-verify/` — manually confirm a stuck WalletConnect payment; requires the order secret and still runs full on-chain verification (can't fake a payment)
+
 ## Known gaps / TODOs
 
 These are documented, non-blocking items for a future iteration:
 
-- **Event-level authorization check**: `require_pretix_token` validates that the token is valid and active, but does not yet check that the token's team has access to the specific `(organizer, event)` being operated on. A `check_team_event_access` helper exists in `x402/auth.py` ready to wire in. Marked as `TODO` in `views_x402.py` and `views_admin.py`.
+- **Event-level authorization scoping**: admin endpoints now enforce a valid token, the required permission flag (`can_view_orders` / `can_change_orders`), AND that the token's team belongs to the target event's **organizer** (`check_team_event_access` in `x402/auth.py`, cross-organizer rejected). What remains: the check is organizer-level only and ignores per-team event scoping (`Team.limit_events`), so a token scoped to one event can still act on sibling events under the same organizer. Fix: have `check_team_event_access` consult `team.all_events` / `team.limit_events` (or reuse Pretix's `team.permission_for_event`). Also note `check_team_event_access` returns `True` when no team is set (a fail-open primitive currently unreachable because the decorator rejects a missing token first — worth flipping to fail-closed defensively).
+- **Order-redirect over `http://`**: the post-payment redirect (`/plugin/wc/order-redirect.js`, driven by the "Frontend order URL template" setting) accepts `http://` templates. The redirect URL carries the order secret in its path, so an `http://` template transmits that secret in cleartext (MITM order-takeover risk). The template is admin-only input (not attacker-controllable), so this is operator-footgun rather than an open redirect — but `http://` should be restricted to loopback hosts. Also note the order secret currently rides in a `?secret=` query param on the injected `<script src>`, which can land in web-server access logs.
 - **Agent endpoint** (`/purchase/[email].ts` in devcon-next): currently stubbed at HTTP 501. If x402 SDK agents need to work, add a `/plugin/x402/purchase-agent/` endpoint that skips the `intendedPayer` requirement.
 - **Verify cooldown**: the 10-second-between-attempts cooldown from devcon's ticketStore was removed during Phase 3 (conflicted with a test that didn't mock time). The 10/hour and 30/minute limits still apply — add the cooldown back with time-mocked tests if spam protection needs tightening.
 - **Direct browser → plugin calls**: the public endpoints (`purchase`, `payment-options`, `relayer/*`, `verify`) currently require a server-side Pretix API token. If we want to skip the devcon-next proxy entirely and have the browser call the plugin directly, we'd need to drop the `Authorization: Token` requirement on those specific endpoints and add CORS.
@@ -218,3 +254,5 @@ For Devconnect IST an effort was made to improve the plugin in a variety of ways
 For Devconnect 2025, the plugin was rewritten to use [Daimo Pay](https://pay.daimo.com), providing any-chain checkout and automatic refunds. See [DIP-64](https://forum.devcon.org/t/dip-64-universal-checkout-for-devcon-nect/5346).
 
 For Devcon 8, the plugin was rebuilt from scratch by [Didier Krux](https://github.com/didierkrux) with two payment modes: direct WalletConnect checkout (user pays gas) and x402 gasless (relayer pays gas for stablecoins). All crypto logic now lives natively in the Pretix plugin — no external database (Supabase retired), no vendor dependency (Daimo Pay removed). Smart wallet support (ERC-1271, ERC-6492, ERC-4337) was added for both payment paths. The devcon-next frontend proxies to the plugin via Pretix API tokens.
+
+Ahead of the Devcon 8 launch the scope was narrowed to WalletConnect direct-send as the sole crypto path, with the x402 gasless flow disabled (routes commented out, code retained) pending a security review. In parallel, a fiat layer was added on top of Pretix's Stripe plugin: per-item crypto-vs-card pricing (`fiat_price_usd` / `fiat_disabled` item metadata), a card-price markup applied as a payment fee, dual-currency price display across the shop/cart/voucher-redeem pages, and Safe (multisig) support for the WalletConnect flow.
