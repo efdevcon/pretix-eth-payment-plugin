@@ -6,6 +6,16 @@ from datetime import timedelta
 from django.utils import timezone
 from django_scopes import scopes_disabled
 
+from pretix_eth import urls as _eth_urls
+
+# The x402 buyer flow is disabled in production (routes commented out in
+# pretix_eth/urls.py). These route-level tests skip themselves when the route
+# isn't registered, and run again automatically once it's uncommented.
+pytestmark = pytest.mark.skipif(
+    not any('plugin/x402/payment-options' in str(getattr(p, 'pattern', '')) for p in _eth_urls.urlpatterns),
+    reason='x402 buyer route disabled (commented out in pretix_eth/urls.py)',
+)
+
 
 @pytest.fixture
 def pending_order_for_options(event):
