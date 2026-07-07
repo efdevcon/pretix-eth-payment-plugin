@@ -20,7 +20,7 @@ def test_admin_orders_lists_all(api_client, event):
         )
 
     resp = api_client.get(
-        f'/plugin/x402/admin/orders/?organizer={event.organizer.slug}&event={event.slug}',
+        f'/plugin/admin/orders/?organizer={event.organizer.slug}&event={event.slug}',
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -67,7 +67,7 @@ def test_admin_orders_pending_row_shape(api_client, event):
         )
 
     resp = api_client.get(
-        f'/plugin/x402/admin/orders/?organizer={event.organizer.slug}&event={event.slug}',
+        f'/plugin/admin/orders/?organizer={event.organizer.slug}&event={event.slug}',
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -110,7 +110,7 @@ def test_admin_orders_includes_legacy_wc_but_not_signed_message(
         )
 
     resp = api_client.get(
-        f'/plugin/x402/admin/orders/?organizer={event.organizer.slug}&event={event.slug}',
+        f'/plugin/admin/orders/?organizer={event.organizer.slug}&event={event.slug}',
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -137,7 +137,7 @@ def test_admin_stats_counts(api_client, event):
         )
 
     resp = api_client.get(
-        f'/plugin/x402/admin/stats/?organizer={event.organizer.slug}&event={event.slug}',
+        f'/plugin/admin/stats/?organizer={event.organizer.slug}&event={event.slug}',
     )
     assert resp.status_code == 200
     body = resp.json()

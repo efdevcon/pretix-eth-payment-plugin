@@ -33,7 +33,7 @@ def test_admin_verify_rejects_missing_pending(api_client, event_with_recipient):
     """Admin verify cannot synthesize a pending order — it's strictly a
     recovery tool for payments that already have one. This prevents an admin
     from creating a Pretix order from an arbitrary tx hash."""
-    resp = api_client.post('/plugin/x402/admin/verify/', data=json.dumps({
+    resp = api_client.post('/plugin/admin/verify/', data=json.dumps({
         'organizer': event_with_recipient.organizer.slug, 'event': event_with_recipient.slug,
         'paymentReference': 'x402_does_not_exist',
         'txHash': '0x' + 'a' * 64,
@@ -46,7 +46,7 @@ def test_admin_verify_rejects_missing_pending(api_client, event_with_recipient):
 
 @pytest.mark.django_db
 def test_admin_verify_rejects_bad_tx_hash(api_client, event_with_recipient, pending_for_admin_verify):
-    resp = api_client.post('/plugin/x402/admin/verify/', data=json.dumps({
+    resp = api_client.post('/plugin/admin/verify/', data=json.dumps({
         'organizer': event_with_recipient.organizer.slug, 'event': event_with_recipient.slug,
         'paymentReference': 'x402_admin_v1',
         'txHash': 'not-a-hash',
@@ -68,7 +68,7 @@ def test_admin_verify_rejects_reused_tx_hash(api_client, event_with_recipient, p
             payer='0x' + '9' * 40, chain_id=8453,
             total_usd=Decimal('1'), token_symbol='USDC',
         )
-    resp = api_client.post('/plugin/x402/admin/verify/', data=json.dumps({
+    resp = api_client.post('/plugin/admin/verify/', data=json.dumps({
         'organizer': event_with_recipient.organizer.slug, 'event': event_with_recipient.slug,
         'paymentReference': 'x402_admin_v1',
         'txHash': '0x' + 'a' * 64,
@@ -84,7 +84,7 @@ def test_admin_verify_rejects_payer_mismatch(api_client, event_with_recipient, p
     """The payer the admin submits must match the intended_payer the buyer
     committed to at purchase time. Prevents an admin from retargeting a
     payment to a different wallet."""
-    resp = api_client.post('/plugin/x402/admin/verify/', data=json.dumps({
+    resp = api_client.post('/plugin/admin/verify/', data=json.dumps({
         'organizer': event_with_recipient.organizer.slug, 'event': event_with_recipient.slug,
         'paymentReference': 'x402_admin_v1',
         'txHash': '0x' + 'b' * 64,
@@ -104,7 +104,7 @@ def test_admin_verify_bypasses_eth_signature_requirement(api_client, event_with_
     `verify_native_eth`. Mirrors the bypass the user-facing verify endpoint
     explicitly forbids; the admin endpoint is auth-gated by the Pretix API
     token and intended for operator use only."""
-    resp = api_client.post('/plugin/x402/admin/verify/', data=json.dumps({
+    resp = api_client.post('/plugin/admin/verify/', data=json.dumps({
         'organizer': event_with_recipient.organizer.slug, 'event': event_with_recipient.slug,
         'paymentReference': 'x402_admin_v1',
         'txHash': '0x' + 'c' * 64,

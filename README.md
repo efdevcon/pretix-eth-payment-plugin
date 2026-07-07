@@ -6,7 +6,8 @@ A payment plugin for [Pretix](https://github.com/pretix/pretix) that accepts cry
 
 - **Active crypto flow:** WalletConnect direct-send (`/plugin/wc/*`). This is the crypto path used in production.
 - **Fiat (card) payments:** handled by Pretix's own Stripe plugin; this plugin adds per-item crypto-vs-card pricing, a card-price markup, and dual-currency display in the shop/cart (see [Fiat (card) payments](#fiat-card-payments)).
-- **x402 gasless flow:** fully implemented but **disabled** — all `/plugin/x402/*` routes are commented out in `pretix_eth/urls.py` (`_x402_routes()`), so those paths 404 and no x402 view code runs. The code is retained; re-enable by uncommenting the routes. The two WalletConnect admin tools that historically sat under the `/plugin/x402/admin/` path prefix (`wc-refund`, `wc-verify`) are kept live for the active WC flow. The x402 sections below document the flow as it works when re-enabled.
+- **x402 gasless flow:** fully implemented but **disabled** — the x402 *buyer* routes (purchase, payment-options, relayer, verify, settings) are commented out in `pretix_eth/urls.py` (`_x402_routes()`), so those paths 404 and no x402 buyer-payment view runs. The code is retained; re-enable by uncommenting the routes. The x402 sections below document the flow as it works when re-enabled.
+- **Admin/operator tools:** always registered under `/plugin/admin/*` (order dashboard, refunds, manual verify) — token- + permission-gated, and the order/stats views aggregate WalletConnect payments too, so the admin dashboard works regardless of the x402 gate. Renamed from the legacy `/plugin/x402/admin/*` misnomer.
 
 ## Supported chains & tokens
 
@@ -58,7 +59,7 @@ USDC/USDT0 transfers stay strict — stables don't drift, and the EIP-3009 typed
 ### Safe wallet support
 
 - **Custom FE (devcon-next, x402 path):** supported, including multi-sig (e.g. 2/3). The FE bridges through Safe Transaction Service / Messages API to recover the on-chain hash for ETH and the assembled ERC-1271 signature for USDC/USDT0. Considered experimental; the buyer is shown a Safe-aware notice with a 30-min keep-tab-open window.
-- **Pretix-native (wc_inject path):** Safe is **excluded** from the AppKit picker via `excludeWalletIds`. The bundle hasn't been ported yet and a Safe payer would land in a stuck state. Admin manual-verify (`/plugin/x402/admin/verify/`) remains the recovery path for any Safe payment that bypasses the gate.
+- **Pretix-native (wc_inject path):** Safe is **excluded** from the AppKit picker via `excludeWalletIds`. The bundle hasn't been ported yet and a Safe payer would land in a stuck state. Admin manual-verify (`/plugin/admin/verify/`) remains the recovery path for any Safe payment that bypasses the gate.
 
 ### Tx-hash recovery (broken WalletConnect sessions)
 
@@ -114,7 +115,7 @@ Per-item behavior is driven by two `ItemMetaProperty` values (set per `Item` in 
 - Rate limiting on the tokenless buyer-facing WalletConnect endpoints (challenge, create-quote, verify), keyed per-quote, per-`(order, challenge)`, and per-IP. Limits are env-tunable (see Environment overrides). Client IP is resolved from the trusted-proxy headers (`CF-Connecting-IP` / `X-Real-IP` / `X-Forwarded-For`) — this assumes the origin is network-locked to the CDN/proxy; if it isn't, those headers are client-spoofable and the per-IP caps can be bypassed (per-quote and per-order budgets still apply). Lock the origin to your proxy's IP ranges in production.
 - Atomic claim + reserve prevents double-spend race conditions
 - **Tx hash dedup is case-insensitive at read** (`tx_hash__iexact`) and lowercased at write — a mixed-case retry of an already-paid hash is rejected, and the unique-constraint race window between concurrent verifies can't be defeated by case twiddling
-- **Admin manual verify** (`/plugin/x402/admin/verify/`) intentionally bypasses the off-chain `ethPayerSignature` check for stuck-payment recovery — payer-binding falls back to the on-chain `tx.from == intended_payer` enforcement inside `verify_native_eth`. The endpoint is auth-gated by the Pretix API token and intended for operator-only use; the bypass is logged at WARNING for audit. Buyer-facing `/plugin/x402/verify/` keeps the signature requirement.
+- **Admin manual verify** (`/plugin/admin/verify/`) intentionally bypasses the off-chain `ethPayerSignature` check for stuck-payment recovery — payer-binding falls back to the on-chain `tx.from == intended_payer` enforcement inside `verify_native_eth`. The endpoint is auth-gated by the Pretix API token and intended for operator-only use; the bypass is logged at WARNING for audit. Buyer-facing `/plugin/x402/verify/` keeps the signature requirement.
 - **Cart-time race protection**: `Quota` rows and `Voucher` rows are locked with `SELECT ... FOR UPDATE` inside the order-creation transaction — concurrent x402 orders (and native-checkout orders, since both paths hit the same rows) can't oversell stock or exceed `Voucher.max_usages`. `require_voucher` is enforced server-side on tickets and addons; addons are also gated to categories actually allowed by a parent ticket so a buyer can't attach an arbitrary item via the API. Free-addon (`ItemAddOn.price_included`) pricing is capped per parent ticket's `max_count` so excess units are charged at full price instead of stacking.
 
 ## Setup
@@ -170,15 +171,20 @@ Plugin endpoints (all accept JSON body with `organizer` + `event` slugs and came
 - `POST /plugin/x402/relayer/prepare-authorization/` — returns EIP-712 typed data for a specific chain/token choice (alternative to payment-options for clients that don't want balances)
 - `POST /plugin/x402/relayer/execute-transfer/` — relayer broadcasts the signed `transferWithAuthorization`; validates authorization terms against the pending order before spending gas
 - `POST /plugin/x402/verify/` — verifies on-chain tx, creates Pretix order + `OrderPosition` rows (variations/addons/answers/voucher), confirms payment
-- `GET /plugin/x402/admin/orders/` — list completed + pending orders
-- `GET /plugin/x402/admin/stats/` — dashboard aggregates (counts, total_usd via DB aggregate)
-- `POST /plugin/x402/admin/refund/?action=initiate|confirm|fail` — refund state machine
-
 Frontend field names: camelCase (`paymentReference`, `chainId`, `txHash`, `walletAddress`). The plugin's request body parser also accepts snake_case (`payment_reference`, `chain_id`, etc.) for non-frontend clients.
 
-**Always-on admin tools (WalletConnect flow).** These two live under the `/plugin/x402/admin/` path prefix for backward compatibility but serve the active WalletConnect flow, so they stay registered even while x402 is disabled. Both require an admin token with `can_change_orders`:
-- `POST /plugin/x402/admin/wc-refund/?action=initiate|confirm|fail` — refund a WalletConnect payment
-- `POST /plugin/x402/admin/wc-verify/` — manually confirm a stuck WalletConnect payment; requires the order secret and still runs full on-chain verification (can't fake a payment)
+### Admin/operator endpoints (always on, `/plugin/admin/*`)
+
+These are registered independently of the x402 buyer-flow gate — they're the operator tools behind the `/tickets/admin` dashboard, and `orders`/`stats` aggregate WalletConnect payments too. All require an admin token with the relevant permission (`can_view_orders` / `can_change_orders`) and are organizer-scoped.
+
+- `GET /plugin/admin/orders/` — list completed + pending orders (WC + x402)
+- `GET /plugin/admin/stats/` — dashboard aggregates (counts, total_usd via DB aggregate)
+- `POST /plugin/admin/refund/?action=initiate|confirm|fail` — x402 refund state machine
+- `POST /plugin/admin/verify/` — manually confirm a stuck x402 payment (bypasses the off-chain ETH signature; still runs on-chain verification)
+- `POST /plugin/admin/wc-refund/?action=initiate|confirm|fail` — refund a WalletConnect payment
+- `POST /plugin/admin/wc-verify/` — manually confirm a stuck WalletConnect payment; requires the order secret and still runs full on-chain verification (can't fake a payment)
+
+> Renamed from the legacy `/plugin/x402/admin/*` prefix (these are shared crypto-admin tools, not x402-only). The devcon-next proxies at `/api/x402/admin/*` were updated to target the new paths; their own frontend-facing URLs are unchanged.
 
 ## Known gaps / TODOs
 

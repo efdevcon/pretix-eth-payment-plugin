@@ -18,7 +18,7 @@ def completed_order(event):
 
 @pytest.mark.django_db
 def test_initiate_refund(api_client, event, completed_order):
-    resp = api_client.post('/plugin/x402/admin/refund/?action=initiate', data=json.dumps({
+    resp = api_client.post('/plugin/admin/refund/?action=initiate', data=json.dumps({
         'organizer': event.organizer.slug, 'event': event.slug,
         'payment_reference': 'x402_refx',
         'admin_address': '0x' + '9' * 40,
@@ -34,13 +34,13 @@ def test_initiate_refund(api_client, event, completed_order):
 
 @pytest.mark.django_db
 def test_confirm_refund(api_client, event, completed_order):
-    api_client.post('/plugin/x402/admin/refund/?action=initiate', data=json.dumps({
+    api_client.post('/plugin/admin/refund/?action=initiate', data=json.dumps({
         'organizer': event.organizer.slug, 'event': event.slug,
         'payment_reference': 'x402_refx',
         'admin_address': '0x' + '9' * 40,
     }), content_type='application/json')
 
-    resp = api_client.post('/plugin/x402/admin/refund/?action=confirm', data=json.dumps({
+    resp = api_client.post('/plugin/admin/refund/?action=confirm', data=json.dumps({
         'organizer': event.organizer.slug, 'event': event.slug,
         'payment_reference': 'x402_refx',
         'refund_tx_hash': '0x' + 'f' * 64,
@@ -57,13 +57,13 @@ def test_confirm_refund(api_client, event, completed_order):
 
 @pytest.mark.django_db
 def test_fail_refund(api_client, event, completed_order):
-    api_client.post('/plugin/x402/admin/refund/?action=initiate', data=json.dumps({
+    api_client.post('/plugin/admin/refund/?action=initiate', data=json.dumps({
         'organizer': event.organizer.slug, 'event': event.slug,
         'payment_reference': 'x402_refx',
         'admin_address': '0x' + '9' * 40,
     }), content_type='application/json')
 
-    resp = api_client.post('/plugin/x402/admin/refund/?action=fail', data=json.dumps({
+    resp = api_client.post('/plugin/admin/refund/?action=fail', data=json.dumps({
         'organizer': event.organizer.slug, 'event': event.slug,
         'payment_reference': 'x402_refx',
         'error': 'out of gas',
