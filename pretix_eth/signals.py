@@ -241,6 +241,8 @@ def inject_item_pricing(sender, request, **kwargs):
       - `event.index` — main catalog (item list + optional cart sidebar)
       - `event.checkout` / `event.checkout.*` — checkout funnel steps
       - `event.cart.*` — cart manipulation routes (cart preview, add, etc.)
+      - `event.redeem` — voucher redemption page; renders the voucher's
+        items with the same catalog markup, so the same annotations apply
 
     Deliberately NOT injected on `event.order.*`. Once an order exists,
     the buyer has either already paid (showing "Card: $999" hints next
@@ -258,6 +260,7 @@ def inject_item_pricing(sender, request, **kwargs):
         'event.index',
         'event.checkout',
         'event.cart',
+        'event.redeem',
     )
     if not any(url_name == p or url_name.startswith(p + '.') for p in allowed_prefixes):
         return ''
