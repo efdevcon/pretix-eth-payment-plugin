@@ -1400,10 +1400,12 @@ _ITEM_PRICING_JS_BODY = r"""
     '.price .ped-row > p del,.price .ped-row > p small,' +
     '.ped-tax-line small{' +
       'color:#777;font-size:0.78em;font-weight:normal}' +
-    // Struck list card price shown before the voucher-discounted amount
-    // on the Fiat row — mirrors the ETH row\'s original-price treatment.
-    '.ped-fiat-row del.ped-fiat-list{color:#777;font-size:0.78em;' +
-      'font-weight:normal;text-decoration:line-through;margin-right:3px}'
+    // Struck list price shown before the voucher-discounted amount on the
+    // ETH and Fiat rows (list → discounted). Same gray treatment as Pretix\'s
+    // own struck original price.
+    '.ped-eth-row del.ped-eth-list,.ped-fiat-row del.ped-fiat-list{' +
+      'color:#777;font-size:0.78em;font-weight:normal;' +
+      'text-decoration:line-through;margin-right:3px}'
   );
 
   // Self-contained dollar-sign-in-tile icon for the Fiat pill. The dark
@@ -1537,6 +1539,19 @@ _ITEM_PRICING_JS_BODY = r"""
     ethRow.className = 'ped-row ped-eth-row';
     priceEl.parentNode.insertBefore(ethRow, priceEl);
     ethRow.appendChild(buildIcon('eth'));
+    // When the item is voucher-discounted but Pretix rendered only the final
+    // crypto price (the cart does this; the redeem page strikes the original
+    // itself), prepend the struck list crypto price so the ETH chip matches
+    // the Fiat chip\'s original→discounted treatment. Skipped when Pretix
+    // already shows a <del> (redeem page) to avoid a double strike.
+    var ethDiscounted = info.fiat_after_voucher != null;
+    var ethAlreadyStruck = !!(priceEl.querySelector && priceEl.querySelector('del'));
+    if (ethDiscounted && !ethAlreadyStruck && isFinite(def)) {
+      var ethDel = document.createElement('del');
+      ethDel.className = 'ped-eth-list';
+      ethDel.textContent = fmtMoney(def);
+      ethRow.appendChild(ethDel);
+    }
     ethRow.appendChild(priceEl);
 
     // Fiat row (only for dual-priced items — skipped when fiat is
