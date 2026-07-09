@@ -1511,7 +1511,7 @@ _ITEM_PRICING_JS_BODY = r"""
     for (var i = 0; i < brs.length; i++) brs[i].remove();
   }
 
-  function annotate(elem, info) {
+  function annotate(elem, info, isAddon) {
     if (elem.dataset.pedAnnotated === '1') return;
 
     // Only annotate items that have a payment-specific story:
@@ -1548,7 +1548,10 @@ _ITEM_PRICING_JS_BODY = r"""
 
     // Same price for both methods: one neutral row, both icons, single price.
     // No green highlight — neither method is cheaper, so it shouldn\'t imply one.
+    // Skipped for add-ons: the dual-icon hint would just clutter secondary
+    // rows (shirts, chess sets, etc.) — leave them at Pretix\'s plain price.
     if (samePrice) {
+      if (isAddon) return;
       var bothRow = document.createElement('div');
       bothRow.className = 'ped-row ped-both-row';
       priceEl.parentNode.insertBefore(bothRow, priceEl);
@@ -1636,7 +1639,9 @@ _ITEM_PRICING_JS_BODY = r"""
       if (!info) return;
       var priceDiv = article.querySelector(':scope > .row .price') ||
                      article.querySelector('.price');
-      if (priceDiv) annotate(priceDiv, info);
+      // `.addon-signifier` (the "+" prefix Pretix renders on add-on lines)
+      // marks a row as an add-on, so we can skip the same-price dual-icon hint.
+      if (priceDiv) annotate(priceDiv, info, !!article.querySelector('.addon-signifier'));
     });
     // Cart: rowgroup with data-article-id="item-{pk}" or "item-{pk}-{var}".
     // Annotate the per-unit `.singleprice` cell — `fiat_price_usd` is a
@@ -1650,7 +1655,7 @@ _ITEM_PRICING_JS_BODY = r"""
       var info = byId[parseInt(m[1], 10)];
       if (!info) return;
       var priceDiv = row.querySelector('.singleprice.price') || row.querySelector('.price');
-      if (priceDiv) annotate(priceDiv, info);
+      if (priceDiv) annotate(priceDiv, info, !!row.querySelector('.addon-signifier'));
     });
   }
 
