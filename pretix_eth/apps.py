@@ -460,7 +460,7 @@ def _install_fiat_per_item_markup():
     """
     import logging
     import threading
-    from decimal import Decimal, InvalidOperation
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
     log = logging.getLogger(__name__)
     try:
         from pretix.plugins.stripe.payment import StripeMethod
@@ -699,10 +699,16 @@ def _install_fiat_per_item_markup():
                 # Recompute gross-inclusive tax_value. tax_rate is in
                 # percent (e.g. Decimal('18.00') for 18%). When the
                 # position is tax-exempt (rate=0), tax_value stays 0.
+                # Quantize to cents (ROUND_HALF_UP) to match Pretix's
+                # stored precision — an unrounded, full-precision tax_value
+                # shows slightly-off tax figures on invoices and can drift
+                # against Pretix's own line rounding.
                 tax_rate = getattr(p, 'tax_rate', None)
                 if tax_rate and tax_rate > 0:
                     try:
-                        p.tax_value = fiat * tax_rate / (Decimal('100') + tax_rate)
+                        p.tax_value = (fiat * tax_rate / (Decimal('100') + tax_rate)).quantize(
+                            Decimal('0.01'), rounding=ROUND_HALF_UP
+                        )
                     except (InvalidOperation, ValueError, TypeError):
                         pass
                 log.info(
