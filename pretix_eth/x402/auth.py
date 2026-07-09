@@ -111,7 +111,7 @@ def require_pretix_admin_token(perm):
             event = _resolve_event_from_request(request)
             if event is not None and not check_team_event_access(request, event):
                 return JsonResponse(
-                    {'success': False, 'error': 'forbidden — token does not cover this organizer'},
+                    {'success': False, 'error': 'forbidden — token does not cover this event'},
                     status=403,
                 )
             team = getattr(request, '_pretix_team', None)
@@ -128,12 +128,28 @@ def require_pretix_admin_token(perm):
 
 
 def check_team_event_access(request, event) -> bool:
-    """Verify the authenticated team has access to this event's organizer.
-    Returns True if authorized, False if the token doesn't cover this organizer."""
+    """Verify the authenticated team has access to THIS event, matching Pretix
+    core's REST authz (CVE-2026-5600): organizer membership AND event scope.
+
+    V76: this previously checked organizer membership ONLY, ignoring
+    `Team.all_events` / `Team.limit_events`. That let a token legitimately
+    scoped to a single event drive the money-moving /plugin/admin/* tools
+    (admin_wc_verify, admin_refund, admin_wc_refund) against any sibling event
+    under the same organizer. Core's REST layer honors limit_events, so the
+    plugin must too or the core CVE fix doesn't extend to this surface.
+
+    Returns True if authorized, False otherwise."""
     team = getattr(request, '_pretix_team', None)
     if team is None:
         return True  # no team on request = auth was bypassed (tests / no-auth mode)
-    return team.organizer_id == event.organizer_id
+    if team.organizer_id != event.organizer_id:
+        return False
+    if getattr(team, 'all_events', False):
+        return True
+    try:
+        return team.limit_events.filter(pk=event.pk).exists()
+    except Exception:
+        return False
 
 
 def noop_auth(view_func):

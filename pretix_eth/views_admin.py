@@ -66,7 +66,7 @@ def _check_event_access_or_403(request, event):
     from pretix_eth.x402.auth import check_team_event_access
     if not check_team_event_access(request, event):
         return JsonResponse(
-            {'success': False, 'error': 'forbidden — token does not cover this organizer'},
+            {'success': False, 'error': 'forbidden — token does not cover this event'},
             status=403,
         )
     return None
