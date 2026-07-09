@@ -278,6 +278,54 @@ def _current_cart_markup_sum(event):
     return _markup_sum_from_positions(positions)
 
 
+def _list_price(p):
+    """Pre-voucher / pre-discount listed price of a position — the denominator
+    for the discount ratio. Prefers Pretix's `listed_price` (the catalog price
+    before any voucher; `price_after_voucher`/`price` is what's left after),
+    falling back to the variation or item default price for older rows that
+    predate `listed_price`. Returns a positive Decimal, or None if none is
+    resolvable.
+    """
+    from decimal import Decimal, InvalidOperation
+    for val in (
+        getattr(p, 'listed_price', None),
+        getattr(getattr(p, 'variation', None), 'price', None),
+        getattr(getattr(p, 'item', None), 'default_price', None),
+    ):
+        if val is None:
+            continue
+        try:
+            d = val if isinstance(val, Decimal) else Decimal(str(val))
+        except (InvalidOperation, ValueError, TypeError):
+            continue
+        if d > 0:
+            return d
+    return None
+
+
+def _effective_fiat(p, fiat):
+    """The fiat (card) price for a position after mirroring whatever discount
+    Pretix applied to its crypto price.
+
+    `fiat_price_usd` is the LIST fiat price (no discount). When a voucher (or
+    any Pretix discount) lowers the crypto `price` below the listed price, the
+    same ratio is applied to the fiat price, so a 20%-off voucher comes off
+    BOTH the ETH and the card price rather than only ETH. The ratio is
+    per-position, so a voucher scoped to only the ticket leaves add-ons at
+    full fiat automatically. Returns the full `fiat` when no discount is
+    detectable. Result is quantized to cents (ROUND_HALF_UP).
+    """
+    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+    try:
+        price = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
+    except (InvalidOperation, ValueError, TypeError):
+        return fiat
+    list_price = _list_price(p)
+    if list_price is not None and list_price > 0 and price < list_price:
+        fiat = fiat * price / list_price
+    return fiat.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
 def _markup_sum_from_positions(positions):
     """Sum of per-item fiat markups (`fiat_price_usd - position.price`,
     clamped at 0) over an iterable of CartPosition or OrderPosition rows.
@@ -309,7 +357,10 @@ def _markup_sum_from_positions(positions):
             price = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
         except (InvalidOperation, ValueError, TypeError):
             continue
-        delta = fiat - price
+        # Discount the fiat price by the same ratio Pretix applied to the
+        # crypto price (voucher etc.), so the markup shrinks accordingly and
+        # the card buyer gets the discount too. See _effective_fiat.
+        delta = _effective_fiat(p, fiat) - price
         if delta > 0:
             total += delta
     return total
@@ -700,6 +751,11 @@ def _install_fiat_per_item_markup():
                     current = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
                 except (InvalidOperation, ValueError, TypeError):
                     continue
+                # Discount the fiat price by the same ratio Pretix applied to
+                # the crypto price (voucher etc.), so a discounted ticket bakes
+                # to its discounted fiat price — the card buyer gets the same
+                # discount as the ETH buyer. See _effective_fiat.
+                fiat = _effective_fiat(p, fiat)
                 if fiat <= current:
                     continue
                 # Apply fiat price
