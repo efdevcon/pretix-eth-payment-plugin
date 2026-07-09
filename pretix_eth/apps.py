@@ -305,25 +305,55 @@ def _list_price(p):
 
 def _effective_fiat(p, fiat):
     """The fiat (card) price for a position after mirroring whatever discount
-    Pretix applied to its crypto price.
+    Pretix applied to its crypto price, so vouchers come off BOTH prices.
 
-    `fiat_price_usd` is the LIST fiat price (no discount). When a voucher (or
-    any Pretix discount) lowers the crypto `price` below the listed price, the
-    same ratio is applied to the fiat price, so a 20%-off voucher comes off
-    BOTH the ETH and the card price rather than only ETH. The ratio is
-    per-position, so a voucher scoped to only the ticket leaves add-ons at
-    full fiat automatically. Returns the full `fiat` when no discount is
-    detectable. Result is quantized to cents (ROUND_HALF_UP).
+    `fiat_price_usd` is the LIST fiat price (no discount). Behaviour depends on
+    the position's voucher price mode (Pretix Voucher.PRICE_MODES):
+
+      - 'set'      → set the card price to the SAME flat value V as crypto, so
+                     the deal is a single price with no card premium
+                     (fiat' = V).
+      - 'subtract' → take the SAME absolute value V off the card price as off
+                     crypto (fiat' = fiat - V), preserving the original premium.
+      - 'percent' / 'none' / no voucher / automatic discounts → scale the fiat
+                     price by the ratio the crypto price actually moved by
+                     (fiat' = fiat * price / listed_price). For 'percent' this
+                     is exactly the same percentage; for 'none' the ratio is 1.
+
+    The mode is read per-position, so a voucher scoped to only the ticket
+    leaves add-ons at full fiat automatically. Returns the full `fiat` when no
+    discount is detectable. Result is clamped at 0 and quantized to cents
+    (ROUND_HALF_UP).
     """
     from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+    cents = Decimal('0.01')
+
+    def q(v):
+        return max(Decimal('0'), v).quantize(cents, rounding=ROUND_HALF_UP)
+
+    voucher = getattr(p, 'voucher', None)
+    if voucher is not None:
+        mode = getattr(voucher, 'price_mode', None)
+        raw = getattr(voucher, 'value', None)
+        if mode in ('set', 'subtract') and raw is not None:
+            try:
+                value = raw if isinstance(raw, Decimal) else Decimal(str(raw))
+            except (InvalidOperation, ValueError, TypeError):
+                value = None
+            if value is not None:
+                if mode == 'set':
+                    return q(value)          # flat deal: card = crypto = V
+                return q(fiat - value)       # subtract: same V off both
+
+    # percent / none / no voucher / automatic discounts → proportional.
     try:
         price = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
     except (InvalidOperation, ValueError, TypeError):
-        return fiat
+        return q(fiat)
     list_price = _list_price(p)
     if list_price is not None and list_price > 0 and price < list_price:
         fiat = fiat * price / list_price
-    return fiat.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return q(fiat)
 
 
 def _markup_sum_from_positions(positions):
