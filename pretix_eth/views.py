@@ -1058,6 +1058,24 @@ def order_redirect_js(request, **kwargs):
     return HttpResponse(js, content_type='application/javascript; charset=utf-8')
 
 
+class _VoucherPriceShim:
+    """Duck-typed stand-in for a cart/order position so `apps._effective_fiat`
+    can be reused at the item level (the redeem/catalog page has no cart
+    position yet). Exposes just the attributes `_effective_fiat` reads:
+    `voucher`, `listed_price`, `price_after_voucher` (and `price`). Keeps the
+    displayed voucher discount identical to the one actually charged.
+    """
+    __slots__ = ('voucher', 'listed_price', 'price_after_voucher', 'price', 'variation', 'item')
+
+    def __init__(self, voucher, listed_price, price_after_voucher):
+        self.voucher = voucher
+        self.listed_price = listed_price
+        self.price_after_voucher = price_after_voucher
+        self.price = price_after_voucher
+        self.variation = None
+        self.item = None
+
+
 @csrf_exempt
 @require_http_methods(['GET'])
 def item_pricing(request, **kwargs):
@@ -1113,6 +1131,36 @@ def item_pricing(request, **kwargs):
         for row in meta_rows:
             per_item_meta.setdefault(row['item_id'], {})[row['property__name']] = row['value']
 
+        # Voucher-aware card pricing (redeem page: ?voucher=CODE). When the
+        # buyer is redeeming a voucher we surface the discounted CARD price so
+        # the fiat chip can show a strikethrough that mirrors the ETH one. The
+        # discounted value is computed with the same `_effective_fiat` used for
+        # the actual charge, so the display always matches what's billed.
+        fiat_after_by_id: dict = {}
+        vcode = (request.GET.get('voucher') or '').strip()
+        if vcode:
+            from pretix.base.models import Voucher
+            from decimal import Decimal, InvalidOperation
+            from .apps import _effective_fiat
+            voucher = Voucher.objects.filter(event=event, code=vcode).first()
+            if voucher is not None:
+                item_objs = {i.pk: i for i in event.items.filter(active=True)}
+                for it in items:
+                    iid = it['id']
+                    fiat_raw = (per_item_meta.get(iid, {}).get('fiat_price_usd') or '').strip()
+                    item_obj = item_objs.get(iid)
+                    if not fiat_raw or item_obj is None or not voucher.applies_to(item_obj):
+                        continue
+                    try:
+                        listed = Decimal(str(it['default_price']))
+                        fiat_dec = Decimal(fiat_raw)
+                    except (InvalidOperation, ValueError, TypeError):
+                        continue
+                    shim = _VoucherPriceShim(voucher, listed, voucher.calculate_price(listed))
+                    eff = _effective_fiat(shim, fiat_dec)
+                    if eff != fiat_dec:
+                        fiat_after_by_id[iid] = str(eff)
+
     out = []
     for it in items:
         meta = per_item_meta.get(it['id'], {})
@@ -1121,6 +1169,7 @@ def item_pricing(request, **kwargs):
             'id': it['id'],
             'default_price': str(it['default_price']),
             'fiat_price_usd': fiat_raw,  # null when not overridden (fiat = default_price)
+            'fiat_after_voucher': fiat_after_by_id.get(it['id']),  # null unless a voucher discounts the card price
             'fiat_disabled': _truthy(meta.get('fiat_disabled')),
         })
     response = JsonResponse({'items': out})
@@ -1301,7 +1350,11 @@ _ITEM_PRICING_JS_BODY = r"""
     '.price > p del,.price > p small,.price > small,' +
     '.price .ped-row > p del,.price .ped-row > p small,' +
     '.ped-tax-line small{' +
-      'color:#777;font-size:0.78em;font-weight:normal}'
+      'color:#777;font-size:0.78em;font-weight:normal}' +
+    // Struck list card price shown before the voucher-discounted amount
+    // on the Fiat row — mirrors the ETH row\'s original-price treatment.
+    '.ped-fiat-row del.ped-fiat-list{color:#777;font-size:0.78em;' +
+      'font-weight:normal;text-decoration:line-through;margin-right:3px}'
   );
 
   // Self-contained dollar-sign-in-tile icon for the Fiat pill. The dark
@@ -1443,10 +1496,24 @@ _ITEM_PRICING_JS_BODY = r"""
       var fiatRow = document.createElement('div');
       fiatRow.className = 'ped-row ped-fiat-row';
       fiatRow.appendChild(buildIcon('fiat'));
-      var amt = document.createElement('span');
-      amt.className = 'ped-fiat-amount';
-      amt.textContent = fmtMoney(fiat);
-      fiatRow.appendChild(amt);
+      var fiatAfter = info.fiat_after_voucher != null ? parseFloat(info.fiat_after_voucher) : NaN;
+      if (isFinite(fiatAfter) && fiatAfter !== fiat) {
+        // Voucher discounts the card price too: show the list price struck
+        // through, then the discounted price — mirrors the ETH row.
+        var del = document.createElement('del');
+        del.className = 'ped-fiat-list';
+        del.textContent = fmtMoney(fiat);
+        fiatRow.appendChild(del);
+        var amtD = document.createElement('span');
+        amtD.className = 'ped-fiat-amount';
+        amtD.textContent = fmtMoney(fiatAfter);
+        fiatRow.appendChild(amtD);
+      } else {
+        var amt = document.createElement('span');
+        amt.className = 'ped-fiat-amount';
+        amt.textContent = fmtMoney(fiat);
+        fiatRow.appendChild(amt);
+      }
       elem.appendChild(fiatRow);
     }
 
@@ -1565,7 +1632,12 @@ _ITEM_PRICING_JS_BODY = r"""
     // whether the pricing JSON fetch succeeds.
     stripPriceTrailingZeros();
     relabelPaymentFee();
-    fetch(ENDPOINT, { credentials: 'same-origin' })
+    // Forward the redeem-page voucher (?voucher=CODE) so the endpoint can
+    // return the discounted card price for the fiat chip's strikethrough.
+    var ep = ENDPOINT;
+    var vm = location.search.match(/[?&]voucher=([^&#]+)/);
+    if (vm) ep += (ep.indexOf('?') === -1 ? '?' : '&') + 'voucher=' + vm[1];
+    fetch(ep, { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data || !data.items) return;

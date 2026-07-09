@@ -315,15 +315,25 @@ def _effective_fiat(p, fiat):
                      (fiat' = V).
       - 'subtract' → take the SAME absolute value V off the card price as off
                      crypto (fiat' = fiat - V), preserving the original premium.
-      - 'percent' / 'none' / no voucher / automatic discounts → scale the fiat
-                     price by the ratio the crypto price actually moved by
-                     (fiat' = fiat * price / listed_price). For 'percent' this
-                     is exactly the same percentage; for 'none' the ratio is 1.
+      - 'percent' / 'none' / no voucher → scale the fiat price by the ratio the
+                     crypto price moved by (fiat' = fiat * price_after_voucher /
+                     listed_price). For 'percent' this is exactly the same
+                     percentage; for 'none' the ratio is 1.
 
     The mode is read per-position, so a voucher scoped to only the ticket
     leaves add-ons at full fiat automatically. Returns the full `fiat` when no
     discount is detectable. Result is clamped at 0 and quantized to cents
     (ROUND_HALF_UP).
+
+    IMPORTANT: the proportional branch keys off `price_after_voucher`, NOT
+    `p.price`. The placement bake overwrites `p.price` with the (discounted)
+    fiat value, so a ratio derived from `p.price` would read as "no discount"
+    on the post-bake re-run of calculate_fee and re-add a spurious markup —
+    causing an "order total has changed" mismatch. `price_after_voucher` and
+    `listed_price` are stable across the bake (and copied onto OrderPositions),
+    so the effective fiat stays consistent before and after baking, making the
+    post-bake markup resolve to 0. Likewise 'set'/'subtract' key off the
+    voucher value, not `p.price`, so they're bake-stable too.
     """
     from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
     cents = Decimal('0.01')
@@ -345,14 +355,18 @@ def _effective_fiat(p, fiat):
                     return q(value)          # flat deal: card = crypto = V
                 return q(fiat - value)       # subtract: same V off both
 
-    # percent / none / no voucher / automatic discounts → proportional.
+    # percent / none / no voucher → proportional, keyed off the STABLE
+    # price_after_voucher (see the docstring note on why not p.price).
+    pav = getattr(p, 'price_after_voucher', None)
+    if pav is None:
+        pav = getattr(p, 'price', None)
     try:
-        price = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
+        base = pav if isinstance(pav, Decimal) else Decimal(str(pav))
     except (InvalidOperation, ValueError, TypeError):
         return q(fiat)
     list_price = _list_price(p)
-    if list_price is not None and list_price > 0 and price < list_price:
-        fiat = fiat * price / list_price
+    if list_price is not None and list_price > 0 and base < list_price:
+        fiat = fiat * base / list_price
     return q(fiat)
 
 
