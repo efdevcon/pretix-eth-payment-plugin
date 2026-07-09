@@ -1526,6 +1526,10 @@ _ITEM_PRICING_JS_BODY = r"""
     // Same amount for both methods (and fiat not disabled) → both-icons row.
     var samePrice = !info.fiat_disabled && !hasMeaningfulOverride;
 
+    // Free items ($0) have no payment-method distinction to communicate —
+    // no icons at all (covers free tickets like "Core Devs" and $0 add-ons).
+    if (!isFinite(def) || def <= 0) return;
+
     elem.dataset.pedAnnotated = '1';
 
     var priceEl = findPriceElement(elem);
@@ -1629,6 +1633,16 @@ _ITEM_PRICING_JS_BODY = r"""
     }
   }
 
+  // Detect whether a row is an add-on so the same-price dual-icon hint can be
+  // skipped. Two contexts:
+  //   - cart: Pretix marks add-on lines with `.addon-signifier` (the "+").
+  //   - add-on SELECTION step ("Additional options for …"): items are nested
+  //     under `.panel-group.addons` / `.cross-selling` panels.
+  function isAddonRow(el) {
+    if (el.querySelector && el.querySelector('.addon-signifier')) return true;
+    return !!(el.closest && el.closest('.addons, .cross-selling'));
+  }
+
   function applyToDocument(byId) {
     // Catalog: <article id="…item-{pk}">. We only annotate the main row;
     // variations under the same item inherit the parent's metadata.
@@ -1639,9 +1653,7 @@ _ITEM_PRICING_JS_BODY = r"""
       if (!info) return;
       var priceDiv = article.querySelector(':scope > .row .price') ||
                      article.querySelector('.price');
-      // `.addon-signifier` (the "+" prefix Pretix renders on add-on lines)
-      // marks a row as an add-on, so we can skip the same-price dual-icon hint.
-      if (priceDiv) annotate(priceDiv, info, !!article.querySelector('.addon-signifier'));
+      if (priceDiv) annotate(priceDiv, info, isAddonRow(article));
     });
     // Cart: rowgroup with data-article-id="item-{pk}" or "item-{pk}-{var}".
     // Annotate the per-unit `.singleprice` cell — `fiat_price_usd` is a
@@ -1655,7 +1667,7 @@ _ITEM_PRICING_JS_BODY = r"""
       var info = byId[parseInt(m[1], 10)];
       if (!info) return;
       var priceDiv = row.querySelector('.singleprice.price') || row.querySelector('.price');
-      if (priceDiv) annotate(priceDiv, info, !!row.querySelector('.addon-signifier'));
+      if (priceDiv) annotate(priceDiv, info, isAddonRow(row));
     });
   }
 
