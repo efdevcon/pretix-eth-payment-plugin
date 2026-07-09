@@ -619,17 +619,25 @@ def _install_fiat_per_item_markup():
         # `_create_order(event, *, email, positions, now_dt, payment_requests, ...)`,
         # so positions and payment_requests are always keyword arguments.
         #
-        # Two jobs at this point:
-        #   1) Set the thread-local positions context for the entire
-        #      duration of order creation, so calculate_fee inside
-        #      `_apply_rounding_and_fees` can find them.
-        #   2) Path 3b: if the buyer is paying with Stripe, BAKE each
-        #      position's `fiat_price_usd` metadata into its `price`
-        #      (and update `tax_value` accordingly). When the inner
-        #      calculate_fee runs, every position already has its fiat
-        #      price, so the markup sum is 0 and Pretix doesn't add a
-        #      payment-fee row. The resulting order has the fiat price
-        #      directly on each OrderPosition — no separate fee line.
+        # Job at this point: set the thread-local positions context for the
+        # entire duration of order creation, so calculate_fee inside
+        # `_apply_rounding_and_fees` can find them and add the fiat markup as
+        # a payment fee (same representation used on the cart/preview pages).
+        #
+        # NOTE: we deliberately do NOT bake the fiat price into the positions
+        # for Stripe orders (`_bake_fiat_into_positions` below is retained for
+        # reference but no longer invoked). Baking produced a DIFFERENT tax
+        # base at placement ($999 on the ticket) than the fee-based preview
+        # ($499 ticket + $500 fee), so under the "compute taxes based on net
+        # total with stable gross prices" rounding mode the two totals rounded
+        # a cent apart on mixed-rate carts (18% ticket + 5% add-on), tripping
+        # Pretix's "order total has changed" guard at placement. Using the fee
+        # representation on BOTH preview and placement makes the two totals
+        # come from the identical computation, so they agree under any tax
+        # rounding mode. Trade-off: the final order/invoice shows the ticket at
+        # its crypto price plus a "Card payment fee" line (rather than the
+        # ticket at its full fiat price with no fee line) — the chosen
+        # representation.
         def _is_stripe_payment(payment_requests, payment_provider):
             """Detect Stripe across two Pretix-version call shapes:
 
@@ -731,8 +739,11 @@ def _install_fiat_per_item_markup():
                     _os.getpid(),
                 )
                 if _is_stripe_payment(payment_requests, payment_provider):
-                    log.info('pretix_eth[create]: Stripe payment detected — baking fiat prices')
-                    _bake_fiat_into_positions(positions)
+                    # Fee representation (no bake): leave positions at their
+                    # crypto price so the inner calculate_fee adds the fiat
+                    # delta as a payment fee — matching the preview total under
+                    # every tax-rounding mode. See the block comment above.
+                    log.info('pretix_eth[create]: Stripe payment detected — using fee representation (no bake)')
                 prev = getattr(ctx, 'positions', None)
                 ctx.positions = positions
                 try:
