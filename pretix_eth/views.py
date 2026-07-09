@@ -1137,11 +1137,16 @@ def item_pricing(request, **kwargs):
         # discounted value is computed with the same `_effective_fiat` used for
         # the actual charge, so the display always matches what's billed.
         fiat_after_by_id: dict = {}
+        personalized = False  # True once the response depends on this buyer's
+        # session (cart), so it must not be shared-cached.
+        from decimal import Decimal, InvalidOperation
+        from .apps import _effective_fiat
+
+        # Source 1 — redeem page (?voucher=CODE): no cart yet, so compute the
+        # discounted card price for each item the voucher applies to.
         vcode = (request.GET.get('voucher') or '').strip()
         if vcode:
             from pretix.base.models import Voucher
-            from decimal import Decimal, InvalidOperation
-            from .apps import _effective_fiat
             voucher = Voucher.objects.filter(event=event, code=vcode).first()
             if voucher is not None:
                 item_objs = {i.pk: i for i in event.items.filter(active=True)}
@@ -1161,6 +1166,44 @@ def item_pricing(request, **kwargs):
                     if eff != fiat_dec:
                         fiat_after_by_id[iid] = str(eff)
 
+        # Source 2 — cart page: the voucher isn't in the URL there, so read the
+        # buyer's actual cart positions (which carry the applied voucher /
+        # discount) and compute the discounted card price straight from them
+        # with the same _effective_fiat used to charge. Fills in items not
+        # already resolved from a ?voucher= param.
+        cart_id = None
+        try:
+            from pretix.presale.views.cart import get_or_create_cart_id
+            cart_id = get_or_create_cart_id(request, create=False)
+        except Exception:
+            cart_id = None
+        if not cart_id:
+            try:
+                cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
+            except Exception:
+                cart_id = None
+        if cart_id:
+            from pretix.base.models import CartPosition
+            cps = list(CartPosition.objects.filter(
+                cart_id=cart_id, event=event,
+            ).select_related('item', 'variation', 'voucher'))
+            if cps:
+                personalized = True  # response now depends on this session's cart
+            for cp in cps:
+                iid = cp.item_id
+                if iid in fiat_after_by_id:
+                    continue
+                fiat_raw = (per_item_meta.get(iid, {}).get('fiat_price_usd') or '').strip()
+                if not fiat_raw:
+                    continue
+                try:
+                    fiat_dec = Decimal(fiat_raw)
+                except (InvalidOperation, ValueError, TypeError):
+                    continue
+                eff = _effective_fiat(cp, fiat_dec)
+                if eff != fiat_dec:
+                    fiat_after_by_id[iid] = str(eff)
+
     out = []
     for it in items:
         meta = per_item_meta.get(it['id'], {})
@@ -1173,9 +1216,15 @@ def item_pricing(request, **kwargs):
             'fiat_disabled': _truthy(meta.get('fiat_disabled')),
         })
     response = JsonResponse({'items': out})
-    # Short cache: item config doesn't change every second, but admins
-    # editing prices want to see updates within a minute. CDN can override.
-    response['Cache-Control'] = 'public, max-age=60'
+    if personalized:
+        # Response reflects THIS buyer's cart — never share-cache it, or one
+        # buyer's voucher pricing could be served to another.
+        response['Cache-Control'] = 'private, no-store'
+    else:
+        # Generic item config (incl. deterministic ?voucher= responses, which
+        # vary by URL): short cache. Admins editing prices see updates within
+        # a minute; CDN can override.
+        response['Cache-Control'] = 'public, max-age=60'
     return response
 
 
