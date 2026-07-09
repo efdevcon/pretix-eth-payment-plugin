@@ -768,11 +768,14 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
     Skipped vs the buyer flow:
       - The SIWE-lite signature (admin can't recover the in-session sig)
       - The IP rate limit (admin endpoint is token-auth-gated)
-      - The quote freshness window (admin recovery may happen days later;
-        the tx_hash uniqueness check + on-chain payer match are still
-        enforced, so this is safe)
     Still enforced:
       - tx_hash uniqueness (no completed WCPaymentAttempt with this hash)
+      - payer = the order quote's bound intended_payer (V68 — the admin cannot
+        supply an arbitrary payer; the buyer address is fixed by the quote even
+        when the admin overrides the symbol/chain the buyer actually paid on)
+      - the quote freshness window on the settlement tx's block timestamp (V68 —
+        a historical/unrelated transfer of the right amount is mined outside the
+        window and rejected; the buyer's real payment is mined inside it)
       - payer = on-chain tx.from
       - amount = expected (per admin's chosen symbol + order.total)
       - recipient = provider.receive_address
@@ -831,6 +834,23 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 'error': 'no walletconnect payment in created state on this order',
             }, status=404)
 
+        # V68: bind the manual verify to the order's OWN quote. Without this the
+        # endpoint took `payer` from the request body and matched any on-chain
+        # transfer of the right amount to the shared receive_address, letting an
+        # unrelated/historical transfer settle a fresh order. The payer is the
+        # buyer regardless of which token/chain they actually paid on, so this
+        # binding is compatible with the admin symbol/chain override below.
+        quote = (payment.info_data or {}).get('quote') or {}
+        if not quote or not quote.get('intended_payer'):
+            return JsonResponse({
+                'success': False, 'error': 'no quote/intended_payer on this order',
+            }, status=409)
+        if (body['payer'] or '').lower() != (quote['intended_payer'] or '').lower():
+            return JsonResponse({
+                'success': False, 'error': 'payer does not match the order quote',
+            }, status=400)
+        payer = quote['intended_payer']  # source of truth, not the request body
+
         # V46 parity: re-check WC enabled + per-chain + per-token toggles
         _, err = _wc_config_or_403(event, chain_id=chain_id, symbol=symbol)
         if err is not None:
@@ -874,7 +894,7 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
         if symbol == 'ETH':
             vr = verify_native_eth(
                 w3=w3, tx_hash=tx_hash,
-                expected_from=body['payer'],
+                expected_from=payer,
                 expected_to=receive_address,
                 expected_amount_wei=amount_raw,
                 min_confirmations=min_conf,
@@ -885,7 +905,7 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 return JsonResponse({'success': False, 'error': f'no contract for {symbol} on chain {chain_id}'}, status=400)
             vr = verify_erc20_transfer(
                 w3=w3, chain_id=chain_id, tx_hash=tx_hash,
-                expected_from=body['payer'],
+                expected_from=payer,
                 expected_to=receive_address,
                 expected_token=token_contract['address'],
                 expected_amount=amount_raw,
@@ -904,6 +924,29 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 'confirmations_required': vr.min_confirmations,
             }, status=400)
 
+        # V68: re-impose the quote freshness window on the settlement tx. A
+        # historical/unrelated transfer of the right amount is mined outside the
+        # window, so this rejects the replay the manual-verify tool otherwise
+        # allowed. The buyer flow enforces the same window (V49); parity. The
+        # buyer's real payment is mined during the window even if the admin
+        # recovers it days later, so this does not block legitimate recovery.
+        try:
+            block_ts = int(w3.eth.get_block(vr.block_number).timestamp)
+        except Exception as e:
+            return JsonResponse({
+                'success': False, 'error': f'failed to fetch block timestamp: {e}',
+            }, status=400)
+        quote_created = int(quote.get('created_at', 0))
+        quote_expires = int(quote.get('expires_at', 0))
+        if quote_created and block_ts < quote_created:
+            return JsonResponse({
+                'success': False, 'error': 'tx mined before quote was issued',
+            }, status=400)
+        if quote_expires and block_ts > quote_expires:
+            return JsonResponse({
+                'success': False, 'error': 'tx mined after quote expired',
+            }, status=400)
+
         log.warning(
             '[wc admin verify] BYPASS — buyer signature skipped for order=%s tx=%s (auth: admin token)',
             order.code, tx_hash,
@@ -920,7 +963,7 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 WCPaymentAttempt.objects.create(
                     tx_hash=tx_hash,
                     quote_id=(payment.info_data or {}).get('quote', {}).get('quote_id', f'admin_{tx_hash[:16]}'),
-                    order_code=order.code, payer=body['payer'],
+                    order_code=order.code, payer=payer,
                     chain_id=chain_id, state='completed',
                 )
 
@@ -930,7 +973,7 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 info['token_symbol'] = symbol
                 token_contract = get_token_contract(chain_id, symbol)
                 info['token_address'] = token_contract['address'] if token_contract else None
-                info['payer'] = body['payer']
+                info['payer'] = payer
                 info['amount'] = str(amount_raw)
                 info['block_number'] = vr.block_number
                 info['admin_manual_verify'] = True

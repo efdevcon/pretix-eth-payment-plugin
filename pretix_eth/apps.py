@@ -115,38 +115,44 @@ def _install_order_placed_email_suppressor():
 
 
 def _install_fiat_provider_restrictor():
-    """Monkey-patch `pretix.plugins.stripe.payment.StripeMethod.is_allowed`
-    so that Stripe (and every concrete payment method that inherits from it
-    — card, SEPA, etc.) is hidden whenever the current cart or order
-    contains an item whose `meta_data.fiat_disabled` is truthy.
+    """Monkey-patch `pretix.base.payment.BasePaymentProvider.is_allowed`
+    so that EVERY non-crypto (fiat) payment method — Stripe card/SEPA, PayPal,
+    bank transfer, gift card, offline, any other card plugin — is hidden
+    whenever the current cart or order contains an item whose
+    `meta_data.fiat_disabled` is truthy. The crypto rail (`walletconnect`) is
+    exempt via `_is_crypto_provider_ident`.
+
+    V73: this used to patch only `StripeMethod`, so any other fiat rail an
+    operator enabled would still let a buyer pay a fiat_disabled (crypto-only)
+    item. Patching the base class covers all current and future non-crypto
+    rails; concrete providers that override is_allowed all call
+    `super().is_allowed()`, so the base hook still fires for them.
 
     Storage model: each `Item` carries its own `fiat_disabled` value via
     Pretix's `ItemMetaProperty` / `ItemMetaValue` (set in the standard
     Items > Edit > Metadata tab, or via the API). A truthy value
-    ("true", "yes", "1") on any base position in the cart hides Stripe.
+    ("true", "yes", "1") on any base position in the cart hides fiat rails.
 
     Why monkey-patch: Pretix has no first-class "this item bans this
     payment method" config. Overriding `is_allowed` covers BOTH checkout
     flows (cart → pay, and order → change payment method) with one
     server-side hook that can't be bypassed by hand-crafting a URL.
-
-    If Stripe's plugin is missing or renamed in a future Pretix version,
-    the import fails cleanly and item-level blocking becomes a no-op
-    (warning logged) rather than crashing the worker.
     """
     import logging
     log = logging.getLogger(__name__)
     try:
-        from pretix.plugins.stripe.payment import StripeMethod
+        from pretix.base.payment import BasePaymentProvider
     except (ImportError, AttributeError) as e:
         log.warning(
-            'pretix_eth: Stripe payment plugin not importable (%s); '
+            'pretix_eth: BasePaymentProvider not importable (%s); '
             'per-item fiat_disabled blocking will have no effect.',
             e,
         )
         return
 
-    orig_is_allowed = StripeMethod.is_allowed
+    orig_is_allowed = BasePaymentProvider.is_allowed
+    if getattr(orig_is_allowed, '_ped_fiat_wrapped', False):
+        return  # idempotent: already patched (worker reload)
 
     def _is_truthy(v):
         if v is None:
@@ -214,11 +220,15 @@ def _install_fiat_provider_restrictor():
         return False
 
     def _wrapped_is_allowed(self, request, total=None):
+        # Crypto rail (walletconnect) is never restricted by fiat_disabled.
+        if _is_crypto_provider_ident(getattr(self, 'identifier', '')):
+            return orig_is_allowed(self, request, total)
         if _is_blocked_for_fiat(self, request):
             return False
         return orig_is_allowed(self, request, total)
 
-    StripeMethod.is_allowed = _wrapped_is_allowed
+    _wrapped_is_allowed._ped_fiat_wrapped = True
+    BasePaymentProvider.is_allowed = _wrapped_is_allowed
 
 
 def _current_cart_markup_sum(event):
@@ -276,6 +286,101 @@ def _current_cart_markup_sum(event):
         cart_id=cart_id, event=event,
     ).select_related('item'))
     return _markup_sum_from_positions(positions)
+
+
+# ---------------------------------------------------------------------------
+# Fiat / crypto provider classification (V73) + metadata parsing (V81/V69/V82).
+# Shared by the chooser restrictor, the calculate_fee preview, the re-pay flow,
+# and the placement bake so all four paths agree on which rails are fiat and how
+# each position's card price / tax is computed.
+# ---------------------------------------------------------------------------
+
+# The plugin's own crypto rails. Every OTHER payment provider is a fiat rail
+# that must charge the card price (fiat_price_usd) and honor fiat_disabled.
+CRYPTO_PROVIDER_IDENTIFIERS = ('walletconnect',)
+
+
+def _is_crypto_provider_ident(ident):
+    """True if `ident` is one of the plugin's crypto payment rails."""
+    ident = ident or ''
+    return any(ident == c or ident.startswith(c) for c in CRYPTO_PROVIDER_IDENTIFIERS)
+
+
+def _is_fiat_payment(payment_requests, payment_provider):
+    """True when ANY selected rail is non-crypto, i.e. needs the card markup +
+    bake. Replaces the old Stripe-only detection (V73): a fiat rail is simply
+    'not the walletconnect/crypto rail', so bank transfer, PayPal, offline, gift
+    card, or any other card plugin are all covered, not just Stripe."""
+    for p in payment_requests or []:
+        if not _is_crypto_provider_ident(p.get('provider')):
+            return True
+    if payment_provider is not None:
+        if not _is_crypto_provider_ident(getattr(payment_provider, 'identifier', '')):
+            return True
+    return False
+
+
+def _parse_fiat(fiat_str):
+    """Parse an operator-supplied `fiat_price_usd` metadata string into a finite,
+    positive Decimal, or return None to skip the line (V81). Rejects the
+    footguns: NaN and Infinity (both are 'valid' Decimals that later raise in a
+    comparison — a 500 order-creation DoS — or persist a non-finite price),
+    values <= 0, and the underscore form '1_000' (Python's Decimal silently
+    reads it as 1000, a 1000x overcharge). Only a plain [0-9.] shape is accepted,
+    which also rejects '1,000', signs, and whitespace-embedded values."""
+    from decimal import Decimal, InvalidOperation
+    s = (fiat_str or '').strip()
+    if not s or any(c not in '0123456789.' for c in s):
+        return None
+    try:
+        d = Decimal(s)
+    except (InvalidOperation, ValueError, TypeError):
+        return None
+    if not d.is_finite() or d <= 0:
+        return None
+    return d
+
+
+def _fiat_meta_str(p):
+    """`fiat_price_usd` for a position, reading VARIATION-level metadata first and
+    falling back to the item level (V69). Pretix ItemVariation.meta_data
+    aggregates the variation's own metadata rows; without the variation read a
+    single item-level price applied to every variation, letting the expensive
+    variation dodge the card markup."""
+    variation = getattr(p, 'variation', None)
+    if variation is not None:
+        vmeta = getattr(variation, 'meta_data', None) or {}
+        v = (vmeta.get('fiat_price_usd') or '').strip()
+        if v:
+            return v
+    item = getattr(p, 'item', None)
+    imeta = (getattr(item, 'meta_data', None) or {}) if item is not None else {}
+    return (imeta.get('fiat_price_usd') or '').strip()
+
+
+def _gross_and_tax_for(fiat, tax_rate, tax_rule):
+    """Return (price, tax_value) for a baked card price, branching on the tax
+    rule's direction (V82) instead of always assuming gross-inclusive:
+      - price_includes_tax (default, matches Pretix core when no rule is set):
+        fiat is GROSS -> price = fiat, tax = fiat*rate/(100+rate).
+      - not price_includes_tax: fiat is NET -> tax = fiat*rate/100,
+        price = fiat + tax.
+    tax_value is quantized to cents (ROUND_HALF_UP). Tax-exempt (rate 0/None)
+    yields tax 0 and price = fiat."""
+    from decimal import Decimal, ROUND_HALF_UP
+    cents = Decimal('0.01')
+    if not tax_rate or tax_rate <= 0:
+        return fiat, Decimal('0')
+    includes = getattr(tax_rule, 'price_includes_tax', True)
+    if includes:
+        price = fiat
+        tax_value = (fiat * tax_rate / (Decimal('100') + tax_rate)).quantize(
+            cents, rounding=ROUND_HALF_UP)
+    else:
+        tax_value = (fiat * tax_rate / Decimal('100')).quantize(
+            cents, rounding=ROUND_HALF_UP)
+        price = fiat + tax_value
+    return price, tax_value
 
 
 def _list_price(p):
@@ -341,6 +446,23 @@ def _effective_fiat(p, fiat):
     def q(v):
         return max(Decimal('0'), v).quantize(cents, rounding=ROUND_HALF_UP)
 
+    # V63 residual: a $0 position (comp / 100%-off FREEPASS / sponsor comp, from
+    # a voucher OR any other Pretix mechanism) must stay free on the card lane
+    # too. Without this, a comp with no voucher object (or an admin price
+    # override) would fall through to the proportional branch, find no discount
+    # ratio, and re-bake the full fiat price — silently charging a card buyer for
+    # a comped ticket.
+    cur = getattr(p, 'price_after_voucher', None)
+    if cur is None:
+        cur = getattr(p, 'price', None)
+    try:
+        if cur is not None:
+            cur_d = cur if isinstance(cur, Decimal) else Decimal(str(cur))
+            if cur_d <= 0:
+                return q(Decimal('0'))
+    except (InvalidOperation, ValueError, TypeError):
+        pass
+
     voucher = getattr(p, 'voucher', None)
     if voucher is not None:
         mode = getattr(voucher, 'price_mode', None)
@@ -382,20 +504,22 @@ def _markup_sum_from_positions(positions):
 
     Add-ons contribute on their OWN metadata, not the parent's — gives
     operators independent control of add-on fiat pricing.
+
+    Bundled children (V69) are skipped: a Pretix item-bundle child is priced at
+    the bundle-internal designated_price (often $0, "included"), so marking it up
+    to its standalone fiat price would charge a card buyer for an item a crypto
+    buyer gets free. Per-variation metadata is read first via _fiat_meta_str.
     """
     from decimal import Decimal, InvalidOperation
     total = Decimal('0')
     for p in positions:
+        if getattr(p, 'is_bundled', False):
+            continue
         item = getattr(p, 'item', None)
         if item is None:
             continue
-        meta = item.meta_data or {}
-        fiat_str = (meta.get('fiat_price_usd') or '').strip()
-        if not fiat_str:
-            continue
-        try:
-            fiat = Decimal(fiat_str)
-        except (InvalidOperation, ValueError, TypeError):
+        fiat = _parse_fiat(_fiat_meta_str(p))
+        if fiat is None:
             continue
         try:
             price = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
@@ -555,13 +679,13 @@ def _install_fiat_per_item_markup():
     """
     import logging
     import threading
-    from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+    from decimal import Decimal, InvalidOperation
     log = logging.getLogger(__name__)
     try:
-        from pretix.plugins.stripe.payment import StripeMethod
+        from pretix.base.payment import BasePaymentProvider
     except (ImportError, AttributeError) as e:
         log.warning(
-            'pretix_eth: Stripe payment plugin not importable (%s); '
+            'pretix_eth: BasePaymentProvider not importable (%s); '
             'per-item fiat markup disabled.',
             e,
         )
@@ -631,16 +755,25 @@ def _install_fiat_per_item_markup():
 
     def _make_wrapped_calc(orig):
         def _wrapped(self, price):
-            import os
             cls_name = type(self).__name__
-            log.info('pretix_eth[calc]: %s.calculate_fee(price=%s) called pid=%s', cls_name, price, os.getpid())
+            # V73: crypto rail (walletconnect) keeps its native fee — no markup.
+            if _is_crypto_provider_ident(getattr(self, 'identifier', '')):
+                return orig(self, price)
+            log.debug('pretix_eth[calc]: %s.calculate_fee(price=%s) called pid=%s',
+                      cls_name, price, _os.getpid())
             try:
                 markup = _markup_for(self.event)
             except Exception as e:
                 log.warning('pretix_eth[calc]: markup calc failed: %s; falling back to original fee', e)
                 return orig(self, price)
-            log.info('pretix_eth[calc]: %s markup=%s (original fee bypassed)', cls_name, markup)
-            return markup
+            # Only override when there IS a dual-pricing markup. For carts with
+            # no fiat_price_usd items (including other events on this instance)
+            # the provider keeps its own configured fee — patching the BASE class
+            # must not wipe legitimately-configured payment fees.
+            if markup and markup > 0:
+                log.debug('pretix_eth[calc]: %s markup=%s (original fee bypassed)', cls_name, markup)
+                return markup
+            return orig(self, price)
         return _wrapped
 
     # NOTE: the `calculate_fee` monkey-patch is deliberately installed LAST,
@@ -654,7 +787,7 @@ def _install_fiat_per_item_markup():
     # keeps its native fee behaviour rather than under-charging. New-order
     # placement stays correct regardless via the `_create_order` price-bake
     # wrapped just below (which doesn't depend on the signals).
-    orig_calc = StripeMethod.calculate_fee
+    orig_calc = BasePaymentProvider.calculate_fee
 
     # Wrap the function Pretix uses to compute fees during order placement.
     # The exact name varies across Pretix versions:
@@ -733,39 +866,11 @@ def _install_fiat_per_item_markup():
         #      cent apart, tripping Pretix's "order total has changed" guard at
         #      placement — the fee representation is consistent under every
         #      mode, so it's the safe fallback.
-        def _is_stripe_payment(payment_requests, payment_provider):
-            """Detect Stripe across two Pretix-version call shapes:
-
-            - Modern (Pretix 4.18+, including 5.2.14 and 2026.x): payment
-              is passed as `payment_requests: List[dict]`, where each
-              dict has a `provider` key holding the identifier
-              (`'stripe_cc'`, `'stripe_sepa_debit'`, etc.).
-            - Legacy fallback: some Pretix versions/code paths still
-              pass a single `payment_provider` instance with an
-              `.identifier` attribute. Older 4.x or hot-patched 5.x
-              builds may use this shape; harmless on newer versions
-              where the kwarg is absent.
-
-            Returns True if ANY payment in the request set is a Stripe
-            method. Multi-payment orders that mix Stripe with other
-            methods are still treated as Stripe-paid for our purposes;
-            partial-Stripe baking would need split logic we don't
-            attempt here (rare scenario for Devcon).
-            """
-            for p in payment_requests or []:
-                if (p.get('provider') or '').startswith('stripe'):
-                    return True
-            if payment_provider is not None:
-                ident = getattr(payment_provider, 'identifier', '') or ''
-                if ident.startswith('stripe'):
-                    return True
-            return False
-
         def _bake_fiat_into_positions(positions):
-            """In-place mutation: for each position whose item carries a
-            `fiat_price_usd` metadata override greater than its current
-            price, swap `price` to the fiat amount and recompute
-            `tax_value` (gross-inclusive: tax = price * rate / (100 + rate)).
+            """In-place mutation: for each position whose item/variation carries a
+            `fiat_price_usd` metadata override greater than its current price,
+            swap `price` to the fiat amount and recompute `tax_value` per the
+            position's tax-rule direction (V82).
 
             Mutates the CartPosition Python objects only. They have not
             yet been persisted as OrderPositions at this point —
@@ -774,54 +879,49 @@ def _install_fiat_per_item_markup():
             directly in the DB without us touching the CartPosition
             table.
 
-            Skipped for items where `free_price` is True (buyer chose
-            their own price — overriding would lose that input).
+            Skipped for:
+              - `free_price` items (buyer chose their own price)
+              - `is_bundled` children (V69 — priced at the bundle-internal
+                designated_price; marking them up would charge a card buyer for
+                an included item a crypto buyer gets free)
+            Reads variation-level metadata first (V69) and validates the metadata
+            value (V81). The fiat is discounted by the same ratio Pretix applied
+            to the crypto price so vouchers/comps come off the card lane too
+            (V63, see _effective_fiat).
             """
             for p in positions or []:
+                if getattr(p, 'is_bundled', False):
+                    continue
                 item = getattr(p, 'item', None)
                 if item is None:
                     continue
                 if getattr(item, 'free_price', False):
                     continue  # buyer-chosen price wins; don't override
-                meta = item.meta_data or {}
-                fiat_str = (meta.get('fiat_price_usd') or '').strip()
-                if not fiat_str:
-                    continue
-                try:
-                    fiat = Decimal(fiat_str)
-                except (InvalidOperation, ValueError, TypeError):
+                fiat = _parse_fiat(_fiat_meta_str(p))
+                if fiat is None:
                     continue
                 try:
                     current = p.price if isinstance(p.price, Decimal) else Decimal(str(p.price))
                 except (InvalidOperation, ValueError, TypeError):
                     continue
-                # Discount the fiat price by the same ratio Pretix applied to
-                # the crypto price (voucher etc.), so a discounted ticket bakes
-                # to its discounted fiat price — the card buyer gets the same
-                # discount as the ETH buyer. See _effective_fiat.
                 fiat = _effective_fiat(p, fiat)
+                # _effective_fiat clamps/quantizes to a finite non-negative cents
+                # value, so the compare below can't raise on NaN/Infinity (V81).
                 if fiat <= current:
                     continue
-                # Apply fiat price
-                p.price = fiat
-                # Recompute gross-inclusive tax_value. tax_rate is in
-                # percent (e.g. Decimal('18.00') for 18%). When the
-                # position is tax-exempt (rate=0), tax_value stays 0.
-                # Quantize to cents (ROUND_HALF_UP) to match Pretix's
-                # stored precision — an unrounded, full-precision tax_value
-                # shows slightly-off tax figures on invoices and can drift
-                # against Pretix's own line rounding.
+                # Apply fiat price + tax, branching on the tax-rule direction
+                # (V82). tax_rate is in percent (e.g. Decimal('18.00') for 18%).
                 tax_rate = getattr(p, 'tax_rate', None)
-                if tax_rate and tax_rate > 0:
-                    try:
-                        p.tax_value = (fiat * tax_rate / (Decimal('100') + tax_rate)).quantize(
-                            Decimal('0.01'), rounding=ROUND_HALF_UP
-                        )
-                    except (InvalidOperation, ValueError, TypeError):
-                        pass
-                log.info(
+                tax_rule = getattr(p, 'tax_rule', None)
+                try:
+                    new_price, new_tax = _gross_and_tax_for(fiat, tax_rate, tax_rule)
+                    p.price = new_price
+                    p.tax_value = new_tax
+                except (InvalidOperation, ValueError, TypeError):
+                    p.price = fiat  # keep the price bake even if tax recompute fails
+                log.debug(
                     'pretix_eth[bake]: position item=%s price %s -> %s tax_value -> %s (rate=%s)',
-                    getattr(item, 'pk', '?'), current, fiat,
+                    getattr(item, 'pk', '?'), current, getattr(p, 'price', None),
                     getattr(p, 'tax_value', None), tax_rate,
                 )
 
@@ -865,14 +965,14 @@ def _install_fiat_per_item_markup():
                     getattr(payment_provider, 'identifier', None),
                     _os.getpid(),
                 )
-                if _is_stripe_payment(payment_requests, payment_provider):
+                if _is_fiat_payment(payment_requests, payment_provider):
                     event = kwargs.get('event') or (args[0] if args else None)
                     if event is not None and _bake_is_safe(event):
                         # Bake representation: swap each position to its fiat
                         # price so the order/invoice shows the full fiat gross
                         # ($999) with no separate fee line. Safe only under
                         # per-line tax rounding (see _bake_is_safe).
-                        log.info('pretix_eth[create]: Stripe payment + per-line rounding — baking fiat prices')
+                        log.info('pretix_eth[create]: fiat payment + per-line rounding — baking fiat prices')
                         _bake_fiat_into_positions(positions)
                     else:
                         # Fee representation (no bake): leave positions at their
@@ -880,7 +980,7 @@ def _install_fiat_per_item_markup():
                         # delta as a payment fee. Consistent with the preview
                         # total under every tax-rounding mode, so it can't trip
                         # the "order total has changed" guard.
-                        log.info('pretix_eth[create]: Stripe payment, non-per-line rounding — using fee representation (no bake)')
+                        log.info('pretix_eth[create]: fiat payment, non-per-line rounding — using fee representation (no bake)')
                 prev = getattr(ctx, 'positions', None)
                 ctx.positions = positions
                 try:
@@ -960,13 +1060,19 @@ def _install_fiat_per_item_markup():
     # will always have a request/positions context to resolve the markup
     # from. Installed LAST on purpose (see the note above `orig_calc`).
     #
-    # CRITICAL: only patch the base class. Pretix-Stripe subclasses
-    # (StripeCC, StripeSEPADirectDebit, …) inherit calculate_fee from
-    # StripeMethod without overriding it. Patching every subclass would
-    # double-wrap because each subclass's `orig` would be the wrapped
-    # version of the previous one.
-    StripeMethod.calculate_fee = _make_wrapped_calc(orig_calc)
-    log.info('pretix_eth[install]: per-item markup patched calculate_fee on StripeMethod (subclasses inherit)')
+    # V73: patch the BASE class so every non-crypto (fiat) rail gets the card
+    # markup, not just Stripe. Concrete providers inherit calculate_fee from
+    # BasePaymentProvider (Stripe's StripeMethod does not override it), and the
+    # wrapper (a) exempts the crypto rail via _is_crypto_provider_ident and
+    # (b) preserves each provider's native configured fee when there is no
+    # dual-pricing markup, so patching the base class can't wipe legitimate
+    # payment fees elsewhere. Idempotent against worker reloads.
+    if not getattr(BasePaymentProvider.calculate_fee, '_ped_fiat_wrapped', False):
+        wrapped_calc = _make_wrapped_calc(orig_calc)
+        wrapped_calc._ped_fiat_wrapped = True
+        BasePaymentProvider.calculate_fee = wrapped_calc
+        log.info('pretix_eth[install]: per-item markup patched calculate_fee on BasePaymentProvider '
+                 '(all non-crypto rails; crypto exempt)')
 
 
 def _install_stripe_mail_render():

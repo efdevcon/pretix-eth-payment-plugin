@@ -208,8 +208,17 @@ def usd_to_token_raw(usd_amount: Decimal, symbol: str, chain_id: int,
 def build_quote(*, order_code: str, order_total_usd: Decimal,
                 chain_id: int, symbol: str, payer: str,
                 receive_address: str, eth_price: Optional[float],
-                ttl_seconds: int = 600) -> dict:
-    """Build a payment quote dict for the given order + chain + token."""
+                ttl_seconds: int = 600, signature: Optional[str] = None,
+                signed_message: Optional[str] = None,
+                sig_chain_id: Optional[int] = None,
+                payer_code_prefix: Optional[str] = None) -> dict:
+    """Build a payment quote dict for the given order + chain + token.
+
+    The signer-binding fields (`signature`, `signed_message`, `sig_chain_id`,
+    `payer_code_prefix`) capture the exact signature that validated at quote time
+    so the settlement paths can RE-verify the signer. Without them a validator
+    that was only transiently authorized (ERC-1271 toggle, EIP-7702 delegation)
+    could bind a quote that settles after it stopped validating (TOCTOU)."""
     amount_raw = usd_to_token_raw(order_total_usd, symbol, chain_id, eth_price)
     contract = get_token_contract(chain_id, symbol)
     now = int(time.time())
@@ -226,6 +235,11 @@ def build_quote(*, order_code: str, order_total_usd: Decimal,
         'created_at': now,
         'expires_at': now + ttl_seconds,
         'order_total_usd': str(order_total_usd),
+        # Signer binding for settlement-time re-validation (V75/V79 TOCTOU).
+        'signature': signature,
+        'signed_message': signed_message,
+        'sig_chain_id': sig_chain_id,
+        'payer_code_prefix': payer_code_prefix,
     }
 
 

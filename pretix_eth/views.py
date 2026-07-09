@@ -569,6 +569,11 @@ def create_quote(request, **kwargs):
             except Exception as e:
                 log.warning('wc_create_quote: failed to record sig failure: %s', e)
 
+        # Signer-binding fields captured for settlement-time re-validation
+        # (V75/V79 TOCTOU): the exact chain that validated, and (for smart
+        # wallets) the payer's on-chain code prefix at quote time.
+        validated_chain = None
+        payer_code_prefix = None
         if sig_len_bytes == 65 and not claimed_payer:
             # EOA path (backward-compatible with clients that don't send payer_address)
             try:
@@ -578,6 +583,9 @@ def create_quote(request, **kwargs):
                 _record_sig_failure()
                 return JsonResponse({'error': f'signature recovery failed: {e}'}, status=400)
             payer = to_checksum_address(recovered)
+            # EOA recovery is chain-independent; record the settlement chain so
+            # the settlement re-check has a concrete chain to re-recover on.
+            validated_chain = chain_id
         else:
             if not claimed_payer:
                 # Shape error, not a sig failure — don't burn the budget.
@@ -645,6 +653,17 @@ def create_quote(request, **kwargs):
                         w3=w3_for_sig, payer=claimed_payer, message=message, signature=signature_hex,
                     ):
                         sig_ok = True
+                        validated_chain = cid
+                        # Snapshot the payer's code prefix on the validating
+                        # chain. A later EIP-7702 revoke/redelegate (V75) changes
+                        # this, so settlement can detect the delegation is no
+                        # longer the one that authorized the quote.
+                        try:
+                            code = w3_for_sig.eth.get_code(to_checksum_address(claimed_payer))
+                            payer_code_prefix = '0x' + bytes(code[:23]).hex()
+                        except Exception as e:
+                            log.warning('wc_create_quote: get_code snapshot failed for %s: %s',
+                                        claimed_payer, e)
                         break
                 except Exception as e:
                     log.warning('eth_payer_signature chain %s verify errored: %s', cid, e)
@@ -678,6 +697,8 @@ def create_quote(request, **kwargs):
             chain_id=chain_id, symbol=symbol, payer=payer,
             receive_address=receive_address,
             eth_price=eth_price, ttl_seconds=ttl,
+            signature=signature_hex, signed_message=message,
+            sig_chain_id=validated_chain, payer_code_prefix=payer_code_prefix,
         )
 
         info['quote'] = quote
@@ -698,6 +719,47 @@ def _verify_bad(reason: str, status: int = 400, **extra):
     frontend retry logic keeps working."""
     log.warning('wc_verify rejected: %s (extra=%s)', reason, extra or '-')
     return JsonResponse({'error': reason}, status=status)
+
+
+def _revalidate_quote_signer(quote, settings_key):
+    """Re-run the quote-time signer check at settlement. Closes the smart-wallet
+    TOCTOU (V79 ERC-1271 toggle, V75 EIP-7702 revoke/redelegate): a validator
+    that was only transiently authorized at quote time no longer validates here.
+    EOA quotes re-recover cheaply (chain-independent); smart-wallet quotes
+    re-eth_call isValidSignature on the chain that validated at quote time.
+    Returns (ok: bool, reason: str)."""
+    from pretix_eth.verification import verify_eth_payer_signature
+    sig = quote.get('signature')
+    msg = quote.get('signed_message')
+    cid = quote.get('sig_chain_id')
+    payer = quote.get('intended_payer')
+    if not (sig and msg and cid and payer):
+        # Legacy quote minted before signer binding existed — refuse to settle
+        # rather than trust an unverifiable one-block snapshot.
+        return False, 'quote has no bound signer (re-quote required)'
+    try:
+        w3 = _get_web3(int(cid), settings_key)
+    except Exception as e:
+        return False, f'signer re-check web3 error: {e}'
+    try:
+        if not verify_eth_payer_signature(w3=w3, payer=payer, message=msg, signature=sig):
+            return False, 'signer no longer validates for this quote'
+    except Exception as e:
+        return False, f'signer re-check errored: {e}'
+    # V75: if a code prefix was snapshotted (smart wallet / EIP-7702), require it
+    # to be unchanged. A revoke or redelegate to a different validator changes
+    # the 0xef0100||<impl> designator, so a quote bound at one delegation cannot
+    # settle after the delegation moved.
+    prefix = quote.get('payer_code_prefix')
+    if prefix:
+        try:
+            code = w3.eth.get_code(to_checksum_address(payer))
+            now_prefix = '0x' + bytes(code[:23]).hex()
+        except Exception as e:
+            return False, f'signer code re-check errored: {e}'
+        if now_prefix != prefix:
+            return False, 'payer code changed since quote (delegation revoked/redelegated)'
+    return True, ''
 
 
 @csrf_exempt
@@ -813,6 +875,13 @@ def verify(request, **kwargs):
         provider = WalletConnectPayment(order.event)
         settings_key = provider.settings.get('alchemy_api_key', default=None)
         min_conf = int(provider.settings.get('min_confirmations', default=1))
+
+        # V75/V79: re-establish the signer against the order's OWN stored quote
+        # before settling. A validator that was only transiently authorized at
+        # quote time (ERC-1271 toggle, EIP-7702 delegation) no longer validates.
+        signer_ok, signer_reason = _revalidate_quote_signer(quote, settings_key)
+        if not signer_ok:
+            return _verify_bad(signer_reason, tx_hash=tx_hash)
 
         w3 = _get_web3(chain_id, settings_key)
 

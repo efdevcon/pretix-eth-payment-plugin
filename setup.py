@@ -122,7 +122,7 @@ setup(
     license='Apache Software License',
     install_requires=[
         "pretix>=4.16",
-        "web3>=7.12.0",
+        "web3>=7.15.0",
         "eth-typing",
         "eth-abi",
         "eth-account>=0.13.6",

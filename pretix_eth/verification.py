@@ -100,52 +100,83 @@ def verify_erc20_transfer(*, w3, chain_id: int, tx_hash: str,
     return VerificationResult(False, error='no matching transfer found in tx')
 
 
-def _find_internal_eth_transfer(w3, tx_hash: str, from_lower: str,
-                                to_lower: str, min_value: int) -> str:
-    """Walk debug_traceTransaction call tree looking for an internal ETH
-    transfer from `from_lower` to `to_lower` with value >= `min_value`.
-    Supports ERC-4337 bundler flows (e.g. Coinbase Smart Wallet + paymaster)
-    where the outer tx.from is a bundler EOA. Requires Alchemy or enterprise RPC.
+def _prestate_diff(w3, tx_hash: str):
+    """Fetch prestateTracer diffMode for the EXACT tx hash. Returns the diff
+    dict {'pre': {...}, 'post': {...}} or None if the RPC gave no usable diff
+    (unsupported debug_*, transient error). Requires Alchemy/enterprise RPC.
 
-    Returns one of: 'match' | 'no_match' | 'trace_unavailable' — so callers can
-    distinguish "RPC doesn't support tracing" from "RPC traced and found nothing",
-    which matters for error classification (the first is transient-ish; the
-    second is a real verification failure)."""
+    This replaces the old callTracer frame-walk: matching a single {from,to,value}
+    frame settles a native-ETH order PAID while the recipient nets 0 ETH. Six
+    classes defeat frame-walking (reverted inner CALL, value-bearing DELEGATECALL,
+    ancestor-revert, pay-then-forward, doctored trace, SELFDESTRUCT-in-reverted
+    subtree). The only question that survives all of them is "did the recipient's
+    balance actually go up and stay up, and did the payer actually pay" — which is
+    exactly a net-balance delta, not a per-frame inspection."""
     try:
-        trace = w3.provider.make_request('debug_traceTransaction', [tx_hash, {'tracer': 'callTracer'}])
+        resp = w3.provider.make_request(
+            'debug_traceTransaction',
+            [tx_hash, {'tracer': 'prestateTracer', 'tracerConfig': {'diffMode': True}}],
+        )
     except Exception as e:
-        log.warning('debug_traceTransaction request failed for %s: %s', tx_hash, e)
-        return 'trace_unavailable'
-    if not isinstance(trace, dict):
-        return 'trace_unavailable'
-    if trace.get('error'):
-        log.warning('debug_traceTransaction returned error for %s: %s', tx_hash, trace.get('error'))
-        return 'trace_unavailable'
-    result = trace.get('result')
+        log.warning('prestateTracer diffMode request failed for %s: %s', tx_hash, e)
+        return None
+    if not isinstance(resp, dict) or resp.get('error'):
+        log.warning('prestateTracer diffMode error for %s: %s', tx_hash,
+                    resp.get('error') if isinstance(resp, dict) else resp)
+        return None
+    result = resp.get('result')
     if not isinstance(result, dict):
+        return None
+    return result
+
+
+def _net_balance_delta(diff: dict, addr: str) -> int:
+    """post[addr].balance - pre[addr].balance under diffMode. diffMode lists
+    only accounts whose net state changed; an account absent from both pre and
+    post had an unchanged (zero) net balance. An account present only in `pre`
+    (state read but net-unchanged) defaults post to its pre balance (delta 0);
+    an account present only in `post` had a pre balance of 0."""
+    def _hexbal(v):
+        if v is None:
+            return 0
+        return int(v, 16) if isinstance(v, str) else int(v)
+    addr = _normalize_hex(addr).lower()
+    pre = {_normalize_hex(k).lower(): v for k, v in (diff.get('pre') or {}).items()}
+    post = {_normalize_hex(k).lower(): v for k, v in (diff.get('post') or {}).items()}
+    in_pre, in_post = addr in pre, addr in post
+    if not in_pre and not in_post:
+        return 0
+    pre_b = _hexbal(pre.get(addr, {}).get('balance')) if in_pre else 0
+    post_b = _hexbal(post.get(addr, {}).get('balance')) if in_post else pre_b
+    return post_b - pre_b
+
+
+def _verify_eth_net_delta(w3, tx_hash: str, from_lower: str, to_lower: str,
+                          min_value: int) -> str:
+    """Value-question oracle replacing the callTracer frame walk. Asks 'did the
+    recipient actually gain >= min_value ETH net, and did the payer actually pay
+    for it, in THIS tx?' — the only question that survives every phantom class:
+      - reverted subtree contributes no net diff (kills v62/v66/v67/v80)
+      - an in-tx forward-out nets recipient to 0 (kills v74)
+      - same-node prestate reconciliation detects a doctored callTracer (kills v78)
+    Returns 'match' | 'no_match' | 'trace_unavailable'. Requires a trace-capable
+    (Alchemy/enterprise) RPC; public fallbacks without debug_* classify as
+    'trace_unavailable' rather than false-rejecting."""
+    diff = _prestate_diff(w3, tx_hash)
+    if diff is None:
         return 'trace_unavailable'
-    try:
-        stack = [result]
-        while stack:
-            node = stack.pop()
-            if not isinstance(node, dict):
-                continue
-            val_hex = node.get('value', '0x0')
-            try:
-                node_value = int(val_hex, 16) if isinstance(val_hex, str) else int(val_hex)
-            except (TypeError, ValueError):
-                node_value = 0
-            if (node_value >= min_value
-                    and _normalize_hex(node.get('from', '')).lower() == from_lower
-                    and _normalize_hex(node.get('to', '')).lower() == to_lower):
-                return 'match'
-            calls = node.get('calls')
-            if isinstance(calls, list):
-                stack.extend(calls)
-        return 'no_match'
-    except Exception as e:
-        log.warning('debug_traceTransaction walk failed for %s: %s', tx_hash, e)
-        return 'trace_unavailable'
+    recipient_delta = _net_balance_delta(diff, to_lower)
+    payer_delta = _net_balance_delta(diff, from_lower)
+    # Recipient must NET a gain of at least min_value; payer must NET a debit of
+    # at least min_value. When payer == tx.from, gas makes the debit strictly
+    # larger, so `<= -min_value` is safe either way. Requiring both closes
+    # pay-then-forward (recipient credited then debited nets 0) and reverted /
+    # delegatecall / phantom classes (recipient never nets the gain).
+    if recipient_delta >= min_value and payer_delta <= -min_value:
+        return 'match'
+    log.info('eth net-delta reject %s: recipient_delta=%s payer_delta=%s min=%s',
+             tx_hash, recipient_delta, payer_delta, min_value)
+    return 'no_match'
 
 
 SLIPPAGE_BPS = 50  # 0.50%
@@ -192,46 +223,36 @@ def verify_native_eth(*, w3, tx_hash: str, expected_from: str,
         )
 
     min_wei = _min_acceptable_wei(expected_amount_wei)
-
-    # Happy path: EOA direct send
-    from_match = _addr_eq(tx.get('from', ''), expected_from)
-    to_match = _addr_eq(tx.get('to', ''), expected_to)
-    if from_match and to_match:
-        actual = int(tx.get('value', 0))
-        if actual < min_wei:
-            return VerificationResult(
-                False,
-                error=f'tx value too low: {actual} < {min_wei} '
-                      f'(expected ≥{min_wei}, quote was {expected_amount_wei}, slippage tolerance {SLIPPAGE_BPS / 100:.2f}%)',
-            )
-        return VerificationResult(True, block_number=block)
-
-    # Smart wallet / ERC-4337 fallback: trace internal calls. Use the same
-    # slippage-adjusted minimum so we don't reject 7702/UserOp transfers that
-    # underpay the quote by tiny amounts due to wallet-side re-quoting.
     from_lower = _normalize_hex(expected_from).lower()
     to_lower = _normalize_hex(expected_to).lower()
-    trace_outcome = _find_internal_eth_transfer(
-        w3, tx_hash, from_lower, to_lower, min_wei,
-    )
-    if trace_outcome == 'match':
+
+    # Authoritative check for EVERY native-ETH settlement, EOA direct sends
+    # included. The old tx.value happy path is unsafe: v74's pay-then-forward
+    # settles a genuinely-successful, nothing-reverts tx where the recipient is
+    # credited then debited in the same tx (net 0). Only a net-balance delta on
+    # the recipient (plus a matching payer debit), keyed to this exact tx hash and
+    # cross-checked against receipt.status (already enforced above), answers the
+    # single question that survives every phantom class: did the money actually
+    # reach the recipient and stay there, and did the payer pay for it?
+    outcome = _verify_eth_net_delta(w3, tx_hash, from_lower, to_lower, min_wei)
+    if outcome == 'match':
         return VerificationResult(True, block_number=block)
-    if trace_outcome == 'trace_unavailable':
-        # RPC didn't give us a usable trace — could be a transient indexer
-        # lag or the RPC provider doesn't support debug_*. Returning an
-        # "rpc error" message makes the frontend auto-retry. If it's really
-        # unsupported, the retries will all produce the same result and
-        # eventually surface to the user.
+    if outcome == 'trace_unavailable':
+        # RPC didn't give us a usable prestate diff — could be transient indexer
+        # lag or the RPC provider doesn't support debug_*. Returning an "rpc
+        # error" message makes the frontend auto-retry. A trace-capable
+        # (Alchemy/enterprise) RPC is required for native-ETH settlement.
         return VerificationResult(
             False,
-            error=f'RPC error: debug_traceTransaction unavailable for {tx_hash}; '
-                  f'tx.from={tx.get("from")} does not match expected_from={expected_from}',
+            error=f'RPC error: prestateTracer diffMode unavailable for {tx_hash}',
         )
 
     return VerificationResult(
         False,
-        error=f'tx from/to mismatch: tx.from={tx.get("from")}, tx.to={tx.get("to")} '
-              f'(expected from={expected_from} to={expected_to}); no matching internal transfer found',
+        error=f'no net ETH transfer: recipient {expected_to} did not net ≥{min_wei} wei '
+              f'from {expected_from} in {tx_hash} '
+              f'(reverted / forwarded-out / delegatecall / phantom); '
+              f'quote was {expected_amount_wei}, slippage tolerance {SLIPPAGE_BPS / 100:.2f}%',
     )
 
 
@@ -259,6 +280,13 @@ EIP7702_PREFIX = bytes.fromhex('ef0100')
 DOMAIN_SEPARATOR_SELECTOR = bytes.fromhex('3644e515')
 
 
+# V86: bound the per-call cost of the ERC-1271 isValidSignature eth_call. A
+# hostile 1271 validator can burn the node's block-gas-limit of compute per
+# create-quote (IP-independent DoS) if the call runs uncapped. 200k gas is ample
+# for real ERC-1271 / Safe / Coinbase-Smart-Wallet validators.
+ISVALIDSIG_GAS_CAP = 200_000
+
+
 def _try_erc1271(w3, payer_cs: str, hash_to_check: bytes, sig_bytes: bytes) -> Optional[bytes]:
     """Call isValidSignature(bytes32, bytes) on `payer_cs`. Returns the magic
     bytes (or whatever the contract returned) on success, or None if the call
@@ -268,14 +296,17 @@ def _try_erc1271(w3, payer_cs: str, hash_to_check: bytes, sig_bytes: bytes) -> O
     try:
         encoded_args = abi_encode(['bytes32', 'bytes'], [hash_to_check, sig_bytes])
         calldata = '0x' + (selector + encoded_args).hex()
-        result = w3.eth.call({'to': payer_cs, 'data': calldata})
+        result = w3.eth.call({'to': payer_cs, 'data': calldata, 'gas': ISVALIDSIG_GAS_CAP})
     except Exception as e:
         log.warning(
             'eth_payer_signature: isValidSignature eth_call reverted on %s: %s',
             payer_cs, e,
         )
         return None
+    # ERC-1271 magic is 32 bytes; anything longer is a garbage/grief return.
     if isinstance(result, (bytes, bytearray)):
+        if len(result) > 64:
+            return None
         return bytes(result[:4])
     try:
         return bytes.fromhex(result.hex()[:8])
@@ -356,6 +387,27 @@ def verify_eth_payer_signature(*, w3, payer: str, message: str, signature: str) 
     except Exception as e:
         log.warning('eth_payer_signature: invalid hex signature: %s', e)
         return False
+
+    # V77 hardening: refuse the Safe approved-hash static part
+    # {r=owner, s=0, v in (0,1)}. It carries NO ECDSA material — the owner
+    # pre-approves the digest on-chain via approveHash() and then submits a
+    # purely static 65-byte blob. `s == 0` makes ECDSA recovery raise (so the
+    # V19 recovered!=payer reject above never fires), and the v58 zero-sig probe
+    # only tests v==0, so this shape would otherwise reach the ERC-1271 branch
+    # and validate with no signature ever produced. `v==0/s==0` is the probe
+    # shape and `v==1/s==0` is the Safe approveHash shape; neither is a real
+    # signature. Legitimate ECDSA uses v in (27,28) — or (0,1) only with a
+    # non-zero s — and real multi-owner Safe bundles are >65 bytes, so this
+    # rejects only the no-material shapes.
+    if len(sig_bytes) == 65:
+        v = sig_bytes[64]
+        s = int.from_bytes(sig_bytes[32:64], 'big')
+        if s == 0 and v in (0, 1):
+            log.warning(
+                'eth_payer_signature: refusing v=%d/s=0 static part for payer=%s '
+                '(no ECDSA material; V77 hardening)', v, payer,
+            )
+            return False
 
     # Unwrap ERC-6492 (counterfactual wallets) if present. If the suffix
     # matches, the payload is ABI-encoded (factory, factoryCalldata, innerSig).
