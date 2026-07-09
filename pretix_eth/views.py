@@ -1517,41 +1517,57 @@ _ITEM_PRICING_JS_BODY = r"""
     // Only annotate items that have a payment-specific story:
     //   - `fiat_disabled` → mark with the ETH-highlight row (single row)
     //   - `fiat_price_usd` differs from crypto price → dual row layout
-    // Items where fiat matches crypto (or have no metadata) render with
-    // Pretix\'s default green-price styling — no icons, no rows.
-    // Payment method is a cart-level decision, so annotating rows
-    // where both methods pay the same amount would just add noise.
+    //   - same price for both (fiat == crypto, or no override) → single row
+    //     with BOTH icons before the price, so it\'s clear the amount applies
+    //     to Ethereum and Card alike.
     var fiat = info.fiat_price_usd != null ? parseFloat(info.fiat_price_usd) : NaN;
     var def = parseFloat(info.default_price);
     var hasMeaningfulOverride = isFinite(fiat) && isFinite(def) && fiat !== def;
-    if (!info.fiat_disabled && !hasMeaningfulOverride) return;
+    // Same amount for both methods (and fiat not disabled) → both-icons row.
+    var samePrice = !info.fiat_disabled && !hasMeaningfulOverride;
 
     elem.dataset.pedAnnotated = '1';
 
     var priceEl = findPriceElement(elem);
     if (!priceEl) return;  // unexpected DOM shape; safer to no-op
 
-    // ETH row (always present when annotating): wraps Pretix\'s native
-    // price element with the ETH icon on the left, in a soft-green
-    // highlighted chip. Applies to both ETH-only items and dual-priced
-    // items — same visual treatment.
+    // When a voucher discounts this item but Pretix rendered only the final
+    // price (the cart does this; the redeem page strikes the original itself),
+    // prepend the struck list price so our chip matches Pretix\'s original→
+    // discounted treatment. Skipped when Pretix already shows a <del>.
+    var discounted = info.fiat_after_voucher != null;
+    var alreadyStruck = !!(priceEl.querySelector && priceEl.querySelector('del'));
+    function prependStruckList(row) {
+      if (discounted && !alreadyStruck && isFinite(def)) {
+        var d = document.createElement('del');
+        d.className = 'ped-eth-list';
+        d.textContent = fmtMoney(def);
+        row.appendChild(d);
+      }
+    }
+
+    // Same price for both methods: one neutral row, both icons, single price.
+    // No green highlight — neither method is cheaper, so it shouldn\'t imply one.
+    if (samePrice) {
+      var bothRow = document.createElement('div');
+      bothRow.className = 'ped-row ped-both-row';
+      priceEl.parentNode.insertBefore(bothRow, priceEl);
+      bothRow.appendChild(buildIcon('eth'));
+      bothRow.appendChild(buildIcon('fiat'));
+      prependStruckList(bothRow);
+      bothRow.appendChild(priceEl);
+      dropOrphanBrs(elem);
+      moveTaxNoticeToBottom(elem);
+      return;
+    }
+
+    // ETH row (fiat_disabled or dual-priced): wraps Pretix\'s native price
+    // element with the ETH icon on the left, in a soft-green highlighted chip.
     var ethRow = document.createElement('div');
     ethRow.className = 'ped-row ped-eth-row';
     priceEl.parentNode.insertBefore(ethRow, priceEl);
     ethRow.appendChild(buildIcon('eth'));
-    // When the item is voucher-discounted but Pretix rendered only the final
-    // crypto price (the cart does this; the redeem page strikes the original
-    // itself), prepend the struck list crypto price so the ETH chip matches
-    // the Fiat chip\'s original→discounted treatment. Skipped when Pretix
-    // already shows a <del> (redeem page) to avoid a double strike.
-    var ethDiscounted = info.fiat_after_voucher != null;
-    var ethAlreadyStruck = !!(priceEl.querySelector && priceEl.querySelector('del'));
-    if (ethDiscounted && !ethAlreadyStruck && isFinite(def)) {
-      var ethDel = document.createElement('del');
-      ethDel.className = 'ped-eth-list';
-      ethDel.textContent = fmtMoney(def);
-      ethRow.appendChild(ethDel);
-    }
+    prependStruckList(ethRow);
     ethRow.appendChild(priceEl);
 
     // Fiat row (only for dual-priced items — skipped when fiat is
