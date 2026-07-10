@@ -566,6 +566,95 @@ def _markup_sum_from_order_request(request, event):
     return _markup_sum_from_positions(positions)
 
 
+def _rebake_order_for_fiat(order):
+    """Re-price a crypto-created order's line items to the card price and drop
+    the card markup fee, so an order that was created on the crypto rail and
+    then paid by a fiat rail shows the clean fiat price with NO separate fee —
+    matching a fresh fiat order. Called at fiat-payment confirmation (the only
+    safe point: the order can no longer switch back to crypto, so this never
+    breaks the crypto quote, which derives from order.total).
+
+    SECURITY — strictly total-preserving. The line-item increases must exactly
+    equal the payment fee(s) removed, so `order.total` is unchanged (no under-
+    or over-charge). If that invariant cannot be met (e.g. tax-exclusive events,
+    an unrelated fee, or already baked), it makes NO changes and leaves the
+    already-correct fee representation intact. Best-effort: never raises to the
+    caller, so it can never block payment confirmation.
+    """
+    import logging
+    from decimal import Decimal
+    from django.db import transaction
+    log = logging.getLogger(__name__)
+    try:
+        cents = Decimal('0.01')
+
+        def _dec(v):
+            return v if isinstance(v, Decimal) else Decimal(str(v))
+
+        positions = list(order.positions.all())  # default manager excludes canceled
+        planned = []          # (position, new_price, new_tax)
+        increase = Decimal('0')
+        for p in positions:
+            if getattr(p, 'is_bundled', False):
+                continue
+            item = getattr(p, 'item', None)
+            if item is None or getattr(item, 'free_price', False):
+                continue
+            fiat = _parse_fiat(_fiat_meta_str(p))
+            if fiat is None:
+                continue
+            eff = _effective_fiat(p, fiat)
+            cur = _dec(p.price)
+            if eff <= cur:
+                continue  # already baked / nothing to add for this line
+            new_price, new_tax = _gross_and_tax_for(
+                eff, getattr(p, 'tax_rate', None), getattr(p, 'tax_rule', None),
+            )
+            planned.append((p, new_price, new_tax))
+            increase += (_dec(new_price) - cur)
+
+        if not planned or increase <= 0:
+            return  # nothing to re-bake (e.g. already a fresh baked fiat order)
+
+        from pretix.base.models import OrderFee
+        payment_fees = [
+            f for f in order.fees.all()
+            if f.fee_type == OrderFee.FEE_TYPE_PAYMENT and not getattr(f, 'canceled', False)
+        ]
+        fee_sum = sum((_dec(f.value) for f in payment_fees), Decimal('0'))
+
+        # The load-bearing security check: only proceed when removing the fee(s)
+        # exactly cancels the line-item increase, so the total can't move.
+        if (increase - fee_sum).copy_abs() > cents:
+            log.info(
+                'pretix_eth[rebake]: skip order=%s — line increase %s != payment fee %s '
+                '(would change total); keeping fee representation',
+                order.code, increase, fee_sum,
+            )
+            return
+
+        old_total = _dec(order.total)
+        with transaction.atomic():
+            for p, new_price, new_tax in planned:
+                p.price = new_price
+                p.tax_value = new_tax
+                p.save(update_fields=['price', 'tax_value'])
+            for f in payment_fees:
+                f.delete()
+            new_total = sum((_dec(p.price) for p in order.positions.all()), Decimal('0')) \
+                + sum((_dec(f.value) for f in order.fees.all() if not getattr(f, 'canceled', False)), Decimal('0'))
+            if (new_total - old_total).copy_abs() > cents:
+                # Never let the total drift — abort the whole re-bake.
+                raise ValueError(f'total would change {old_total} -> {new_total}')
+            order.total = new_total
+            order.save(update_fields=['total'])
+        log.info('pretix_eth[rebake]: order=%s re-baked to fiat (total preserved at %s)',
+                 order.code, old_total)
+    except Exception as e:
+        log.warning('pretix_eth[rebake]: order=%s re-bake skipped (%s)',
+                    getattr(order, 'code', '?'), e)
+
+
 def _install_fiat_fee_name_decoration():
     """Prefix the buyer-facing Stripe payment-method label with the
     actual markup the current cart will pay, so the chooser shows
@@ -1214,6 +1303,16 @@ def _install_payment_info_autofill():
     orig_confirm = OrderPayment.confirm
 
     def _wrapped_confirm(self, *args, **kwargs):
+        # Fiat payment on a crypto-created order: re-bake the line items to the
+        # card price and drop the markup fee so the paid order shows the clean
+        # fiat price (matching a fresh fiat order) instead of crypto-price + fee.
+        # Total-preserving + best-effort (see _rebake_order_for_fiat); crypto
+        # payments are never re-baked, so the crypto quote is unaffected.
+        try:
+            if not _is_crypto_provider_ident(getattr(self, 'provider', '')):
+                _rebake_order_for_fiat(self.order)
+        except Exception as e:
+            log.debug('pretix_eth[rebake]: skipped on confirm: %s', e)
         # Only auto-fill when the caller passed nothing (or an empty
         # string). Crypto already supplies its own mail_text; we don't
         # want to overwrite it.
