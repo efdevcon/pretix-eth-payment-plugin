@@ -49,6 +49,11 @@ def quoted_order(event, django_db_reset_sequences):
                 'created_at': now,
                 'expires_at': now + 600,
                 'order_total_usd': '50.00',
+                # Signer binding (post-create-quote); settlement re-validates it.
+                'signature': '0x' + '11' * 65,
+                'signed_message': 'Devcon ticket payment',
+                'sig_chain_id': 8453,
+                'payer_code_prefix': None,
             }
         }
         payment.save()
@@ -131,7 +136,8 @@ def test_verify_happy_path(client, event_configured, quoted_order):
         token='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
         amount=50_000_000,
     )
-    with mock.patch('pretix_eth.views._get_web3', return_value=fake):
+    with mock.patch('pretix_eth.views._get_web3', return_value=fake), \
+         mock.patch('pretix_eth.views._revalidate_quote_signer', return_value=(True, '')):
         resp = client.post('/plugin/wc/verify/', data=json.dumps({
             'quote_id': 'q_test_12345',
             'tx_hash': '0x' + 'c' * 64,
@@ -166,7 +172,8 @@ def test_verify_on_chain_failure(client, event_configured, quoted_order):
         token='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
         amount=50_000_000,
     )
-    with mock.patch('pretix_eth.views._get_web3', return_value=fake):
+    with mock.patch('pretix_eth.views._get_web3', return_value=fake), \
+         mock.patch('pretix_eth.views._revalidate_quote_signer', return_value=(True, '')):
         resp = client.post('/plugin/wc/verify/', data=json.dumps({
             'quote_id': 'q_test_12345',
             'tx_hash': '0x' + 'd' * 64,

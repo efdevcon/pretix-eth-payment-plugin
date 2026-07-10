@@ -282,9 +282,17 @@ DOMAIN_SEPARATOR_SELECTOR = bytes.fromhex('3644e515')
 
 # V86: bound the per-call cost of the ERC-1271 isValidSignature eth_call. A
 # hostile 1271 validator can burn the node's block-gas-limit of compute per
-# create-quote (IP-independent DoS) if the call runs uncapped. 200k gas is ample
-# for real ERC-1271 / Safe / Coinbase-Smart-Wallet validators.
-ISVALIDSIG_GAS_CAP = 200_000
+# create-quote (IP-independent DoS) if the call runs uncapped.
+#
+# The cap must clear the most expensive LEGITIMATE validator: Coinbase Smart
+# Wallet (and other passkey wallets) verify a WebAuthn P256/secp256r1 signature
+# inside isValidSignature. On chains WITHOUT the RIP-7212 precompile (e.g.
+# Ethereum mainnet — which CSW's chain-1 sig fallback frequently targets), a
+# pure-Solidity P256 verifier costs ~200-330k gas, so a 200k cap would starve it
+# and false-reject a legitimate CSW payment. 1,000,000 comfortably fits P256 /
+# Safe / ERC-6492 while still bounding a hostile validator far below the block
+# gas limit.
+ISVALIDSIG_GAS_CAP = 1_000_000
 
 
 def _try_erc1271(w3, payer_cs: str, hash_to_check: bytes, sig_bytes: bytes) -> Optional[bytes]:

@@ -927,9 +927,18 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
         # V68: re-impose the quote freshness window on the settlement tx. A
         # historical/unrelated transfer of the right amount is mined outside the
         # window, so this rejects the replay the manual-verify tool otherwise
-        # allowed. The buyer flow enforces the same window (V49); parity. The
-        # buyer's real payment is mined during the window even if the admin
-        # recovers it days later, so this does not block legitimate recovery.
+        # allowed. The buyer flow enforces the same window (V49); parity.
+        #
+        # Explicit admin override: a multi-owner Safe can take hours to collect
+        # signatures, so its payment can legitimately mine AFTER the quote's
+        # short TTL. `override_quote_window=true` lets the admin recover such a
+        # payment. It skips ONLY the timestamp window; the payer<->quote binding
+        # (above), the on-chain verification, and the one-time tx_hash dedup all
+        # still apply, so it cannot settle an already-used or wrong-payer
+        # transfer. The override is loudly logged + flagged on the payment for
+        # audit, and is admin-token gated like the rest of this endpoint.
+        _ov = body.get('override_quote_window')
+        override_window = _ov is True or str(_ov).strip().lower() in ('1', 'true', 'yes')
         try:
             block_ts = int(w3.eth.get_block(vr.block_number).timestamp)
         except Exception as e:
@@ -938,14 +947,23 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
             }, status=400)
         quote_created = int(quote.get('created_at', 0))
         quote_expires = int(quote.get('expires_at', 0))
-        if quote_created and block_ts < quote_created:
-            return JsonResponse({
-                'success': False, 'error': 'tx mined before quote was issued',
-            }, status=400)
-        if quote_expires and block_ts > quote_expires:
-            return JsonResponse({
-                'success': False, 'error': 'tx mined after quote expired',
-            }, status=400)
+        if override_window:
+            log.warning(
+                '[wc admin verify] OUT-OF-WINDOW OVERRIDE order=%s tx=%s block_ts=%s '
+                'quote_window=[%s,%s] payer=%s (auth: admin token)',
+                order.code, tx_hash, block_ts, quote_created, quote_expires, payer,
+            )
+        else:
+            if quote_created and block_ts < quote_created:
+                return JsonResponse({
+                    'success': False, 'error': 'tx mined before quote was issued',
+                }, status=400)
+            if quote_expires and block_ts > quote_expires:
+                return JsonResponse({
+                    'success': False,
+                    'error': ('tx mined after quote expired; set override_quote_window=true '
+                              'to recover a legitimately-slow payment (e.g. Safe multisig)'),
+                }, status=400)
 
         log.warning(
             '[wc admin verify] BYPASS — buyer signature skipped for order=%s tx=%s (auth: admin token)',
@@ -977,6 +995,8 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 info['amount'] = str(amount_raw)
                 info['block_number'] = vr.block_number
                 info['admin_manual_verify'] = True
+                if override_window:
+                    info['admin_out_of_window_override'] = True
                 payment.info_data = info
                 payment.save()
 
