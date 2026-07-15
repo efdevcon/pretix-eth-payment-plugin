@@ -272,6 +272,31 @@ def inject_item_pricing(sender, request, **kwargs):
     return format_html('<script src="{}"></script>', url)
 
 
+@receiver(html_head, dispatch_uid='wc_matomo_bridge_inject')
+def inject_matomo_bridge(sender, request, **kwargs):
+    """Inject the Matomo cookie-domain bridge on EVERY presale page.
+
+    The "Tracking codes" plugin boots Matomo on all shop pages but has no
+    `setCookieDomain` setting, so the shop's visitor cookie never matches
+    the marketing site's `.devcon.org`-scoped one and cross-domain funnels
+    break. The bridge JS (see `views.matomo_bridge_js`) pre-queues
+    `setCookieDomain`/`setDomains` pushes so both domains share one
+    first-party visitor id.
+
+    Unlike the item-pricing inject there is deliberately NO url-name
+    allowlist: the Matomo funnel tracks the full journey including the
+    checkout funnel and `/order/…` pages, so the config must be queued on
+    every page the tracker runs on. The script is a ~200-byte static
+    response and no-ops when Matomo (or a shared parent domain) is absent.
+    """
+    try:
+        from pretix.multidomain.urlreverse import eventreverse
+        url = eventreverse(sender, 'plugins:pretix_eth:wc_matomo_bridge_js')
+    except Exception:
+        return ''
+    return format_html('<script src="{}"></script>', url)
+
+
 @receiver(pre_save, sender=OrderFee, dispatch_uid='wc_stripe_fee_label')
 def set_stripe_fee_label(sender, instance, **kwargs):
     """Set OrderFee.description on Stripe payment fees so the line shown

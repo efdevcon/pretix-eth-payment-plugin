@@ -64,6 +64,8 @@ def _wc_routes():
              views.item_pricing, name='wc_item_pricing'),
         path('plugin/wc/item-pricing.js',
              views.item_pricing_js, name='wc_item_pricing_js'),
+        path('plugin/wc/matomo-bridge.js',
+             views.matomo_bridge_js, name='wc_matomo_bridge_js'),
     ]
 
 

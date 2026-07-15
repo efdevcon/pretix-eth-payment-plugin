@@ -1936,3 +1936,75 @@ def item_pricing_js(request, **kwargs):
         .replace('__PED_ETH_ICON__', json.dumps(_ETH_ICON_DATA_URI))
     )
     return HttpResponse(js, content_type='application/javascript; charset=utf-8')
+
+
+def _matomo_cookie_domain(host):
+    """Derive the Matomo cookie-domain pattern (`*.<registrable-domain>`) from
+    a request host, so the shop shares the SAME first-party `_pk_id` cookie as
+    the marketing site on a sibling subdomain (tickets.devcon.org ↔
+    devcon.org → `*.devcon.org`).
+
+    Naive eTLD+1: takes the last two DNS labels. Correct for our deployments
+    (devcon.org, ticketh.xyz) but wrong for multi-label public suffixes like
+    `.co.uk` — if the shop ever moves to one, swap this for a real
+    public-suffix lookup. Returns None (→ no pushes emitted) for hosts where
+    a shared parent-domain cookie can't work or would be dangerous:
+    single-label hosts (localhost, testserver), IP literals, and empty hosts.
+    """
+    host = (host or '').split(':')[0].strip().lower()
+    if not host:
+        return None
+    labels = host.split('.')
+    if len(labels) < 2:
+        return None  # localhost / testserver — no parent domain to share
+    # IPv4 literal (all-numeric labels) or IPv6 — cookies can't use wildcards
+    if all(l.isdigit() for l in labels) or ':' in host:
+        return None
+    return '*.' + '.'.join(labels[-2:])
+
+
+@require_http_methods(['GET'])
+def matomo_bridge_js(request, **kwargs):
+    """Serve a tiny JS that pre-queues Matomo cookie/domain config so the
+    Pretix shop and the marketing site (sibling subdomains, same Matomo
+    site id) share ONE first-party visitor cookie — the piece that makes a
+    cross-domain Matomo funnel possible.
+
+    Why this exists: the "Tracking codes" plugin renders the Matomo
+    bootstrap but exposes no `setCookieDomain` setting. Without it, the
+    tracker on tickets.devcon.org computes a cookie name hashed from its
+    own host and never reads the `_pk_id.<site>.<hash>` cookie devcon.org
+    set for `.devcon.org` — verified empirically: same browser sends a
+    different `_id` per domain, so Matomo splits the journey into two
+    visitors and a devcon.org → tickets funnel can never connect.
+
+    Ordering: `_paq` is a queue processed in push order when matomo.js
+    loads. This script is loaded synchronously at parse time (plain
+    `<script src>` in head, via `html_head`), while the tracking plugin's
+    bootstrap pushes happen at DOM-ready — so these config pushes are
+    guaranteed to precede its `trackPageView`.
+
+    No-ops harmlessly when Matomo isn't configured (the `_paq` array is
+    just never consumed) or when the shop still runs in cookieless mode
+    (`disableCookies` wins regardless of cookie domain). Served from a
+    plugin URL because Pretix's presale CSP blocks inline scripts.
+    """
+    domain = _matomo_cookie_domain(request.get_host())
+    if domain is None:
+        js = '/* matomo-bridge: no registrable domain for this host; nothing to configure */\n'
+    else:
+        import json
+        d = json.dumps(domain)
+        js = (
+            '(function(){\n'
+            "  'use strict';\n"
+            '  var _paq = window._paq = window._paq || [];\n'
+            # Share the visitor cookie across all subdomains of the
+            # registrable domain (must be queued before trackPageView).
+            "  _paq.push(['setCookieDomain', " + d + ']);\n'
+            # Treat sibling subdomains as internal so shop→site links
+            # aren't logged as outlinks.
+            "  _paq.push(['setDomains', [" + d + ']]);\n'
+            '})();\n'
+        )
+    return HttpResponse(js, content_type='application/javascript; charset=utf-8')
