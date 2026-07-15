@@ -100,3 +100,64 @@ def test_item_pricing_returns_voucher_discounted_card_price_from_cart(client, ev
     row = next(i for i in resp.json()['items'] if i['id'] == item.id)
     assert row['fiat_price_usd'] == '999'           # list card price, undiscounted
     assert row['fiat_after_voucher'] == '849.15'    # discounted the same 15% as crypto
+
+
+@pytest.mark.django_db
+def test_item_pricing_per_cart_line_when_same_item_has_two_vouchers(client, event):
+    """Two cart positions of the SAME item with DIFFERENT vouchers must each get
+    their own discounted card price. The per-item `fiat_after_voucher` field
+    collapses them (first-writer-wins), so the endpoint also emits `cart_lines`
+    keyed by (item_id, voucher code) that the client matches per row.
+
+    Item: card list price 999, crypto list 500.
+      - voucher SET1CENT (price_mode='set' 0.01)  -> card 0.01
+      - voucher PCT10     (price_mode='percent' 10) -> card 999 * 0.9 = 899.10
+    """
+    from datetime import timedelta
+    from django.utils import timezone
+    from pretix.base.models import (
+        Item, ItemCategory, ItemMetaProperty, ItemMetaValue, Voucher, CartPosition,
+    )
+    with scopes_disabled():
+        cat = ItemCategory.objects.create(event=event, name='Admission', position=0)
+        item = Item.objects.create(
+            event=event, name='GA', admission=True,
+            default_price=Decimal('500.00'), category=cat,
+        )
+        prop = ItemMetaProperty.objects.create(event=event, name='fiat_price_usd')
+        ItemMetaValue.objects.create(item=item, property=prop, value='999')
+        v_set = Voucher.objects.create(
+            event=event, code='SET1CENT', price_mode='set', value=Decimal('0.01'),
+        )
+        v_pct = Voucher.objects.create(
+            event=event, code='PCT10', price_mode='percent', value=Decimal('10.00'),
+        )
+        cart_id = 'testcart@two-vouchers'
+        CartPosition.objects.create(
+            event=event, cart_id=cart_id, item=item, price=Decimal('0.01'),
+            listed_price=Decimal('500.00'), price_after_voucher=Decimal('0.01'),
+            voucher=v_set, datetime=timezone.now(),
+            expires=timezone.now() + timedelta(minutes=30),
+        )
+        CartPosition.objects.create(
+            event=event, cart_id=cart_id, item=item, price=Decimal('450.00'),
+            listed_price=Decimal('500.00'), price_after_voucher=Decimal('450.00'),
+            voucher=v_pct, datetime=timezone.now(),
+            expires=timezone.now() + timedelta(minutes=30),
+        )
+
+    session = client.session
+    session['current_cart_event_{}'.format(event.pk)] = cart_id
+    session.save()
+
+    resp = _get_pricing(client, event)
+    assert resp.status_code == 200, resp.content
+    data = resp.json()
+
+    lines = data.get('cart_lines')
+    assert lines is not None, 'endpoint must emit cart_lines for per-position pricing'
+    by_code = {ln['voucher']: ln for ln in lines if ln['item_id'] == item.id}
+    assert by_code.get('SET1CENT', {}).get('fiat_after_voucher') == '0.01'
+    assert by_code.get('PCT10', {}).get('fiat_after_voucher') == '899.10'
+    # The two lines must NOT collapse to the same value (the reported bug).
+    assert by_code['SET1CENT']['fiat_after_voucher'] != by_code['PCT10']['fiat_after_voucher']

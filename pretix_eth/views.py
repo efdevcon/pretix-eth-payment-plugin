@@ -1268,6 +1268,15 @@ def item_pricing(request, **kwargs):
                 cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
             except Exception:
                 cart_id = None
+        # Per-cart-line discounted card prices. The per-item `fiat_after_by_id`
+        # map can only hold ONE value per item, so when the same item sits in
+        # the cart TWICE with DIFFERENT vouchers (e.g. a 100%-off code on one
+        # ticket and a 10%-off code on another), the second position's card
+        # price would inherit the first's (first-writer-wins). Vouchers are
+        # per-position, so we emit a per-line list the client matches back to
+        # each cart row by (item_id, voucher code) — the voucher code is
+        # rendered on every discounted cart row (`fragment_cart.html`).
+        cart_lines: list = []
         if cart_id:
             from pretix.base.models import CartPosition
             cps = list(CartPosition.objects.filter(
@@ -1275,8 +1284,6 @@ def item_pricing(request, **kwargs):
             ).select_related('item', 'variation', 'voucher'))
             for cp in cps:
                 iid = cp.item_id
-                if iid in fiat_after_by_id:
-                    continue
                 fiat_raw = (per_item_meta.get(iid, {}).get('fiat_price_usd') or '').strip()
                 if not fiat_raw:
                     continue
@@ -1285,8 +1292,19 @@ def item_pricing(request, **kwargs):
                 except (InvalidOperation, ValueError, TypeError):
                     continue
                 eff = _effective_fiat(cp, fiat_dec)
-                if eff != fiat_dec:
+                if eff == fiat_dec:
+                    continue  # no card-side discount on this position
+                # Per-item field (first occurrence wins) — kept for the catalog
+                # sidebar / any single-position cart, where the client falls back
+                # to it when a row carries no voucher-code hint.
+                if iid not in fiat_after_by_id:
                     fiat_after_by_id[iid] = str(eff)
+                # Per-position line — the authoritative source for cart rows.
+                cart_lines.append({
+                    'item_id': iid,
+                    'voucher': cp.voucher.code if cp.voucher_id else None,
+                    'fiat_after_voucher': str(eff),
+                })
 
     out = []
     for it in items:
@@ -1299,7 +1317,7 @@ def item_pricing(request, **kwargs):
             'fiat_after_voucher': fiat_after_by_id.get(it['id']),  # null unless a voucher discounts the card price
             'fiat_disabled': _truthy(meta.get('fiat_disabled')),
         })
-    response = JsonResponse({'items': out})
+    response = JsonResponse({'items': out, 'cart_lines': cart_lines})
     # NEVER cache this response — not even the "generic" (empty-cart) variant.
     # `fiat_after_voucher` is cart-dependent (Source 2 reads the buyer's
     # CartPositions), but the endpoint URL is STABLE as the buyer moves
@@ -1730,7 +1748,22 @@ _ITEM_PRICING_JS_BODY = r"""
     return !!(el.closest && el.closest('.addons, .cross-selling'));
   }
 
-  function applyToDocument(byId) {
+  // Read the voucher code shown on a cart row. Pretix renders it as
+  // `<div class="cart-icon-details"><dt><span class="fa fa-tags"></span>
+  // Voucher code used:</dt><dd>CODE</dd></div>` (fragment_cart.html). We key
+  // off the `.fa-tags` glyph rather than the localized "Voucher code used:"
+  // label so it works in every shop language. Returns '' when the row has no
+  // voucher.
+  function getRowVoucherCode(row) {
+    var tag = row.querySelector('.cart-icon-details .fa-tags');
+    if (!tag) return '';
+    var box = tag.closest('.cart-icon-details');
+    if (!box) return '';
+    var dd = box.querySelector('dd');
+    return dd ? (dd.textContent || '').trim() : '';
+  }
+
+  function applyToDocument(byId, byLine) {
     // Catalog: <article id="…item-{pk}">. We only annotate the main row;
     // variations under the same item inherit the parent's metadata.
     document.querySelectorAll('article[id]').forEach(function (article) {
@@ -1751,10 +1784,34 @@ _ITEM_PRICING_JS_BODY = r"""
     document.querySelectorAll('[data-article-id^="item-"]').forEach(function (row) {
       var m = row.getAttribute('data-article-id').match(/^item-(\d+)/);
       if (!m) return;
-      var info = byId[parseInt(m[1], 10)];
+      var pk = parseInt(m[1], 10);
+      var info = byId[pk];
       if (!info) return;
+      // Per-position card price: the same item can appear on multiple cart rows
+      // with different vouchers, so resolve THIS row's discount by its voucher
+      // code instead of the shared per-item `info.fiat_after_voucher`. Falls
+      // back to the per-item value only when the row carries a voucher we
+      // couldn't match (defensive) — a row with no voucher gets no discount.
+      var voucherCode = getRowVoucherCode(row);
+      var rowInfo = info;
+      if (voucherCode) {
+        var lineFiat = byLine[pk + '\n' + voucherCode];
+        var resolved = lineFiat != null ? lineFiat
+          : (info.fiat_after_voucher != null ? info.fiat_after_voucher : null);
+        if (resolved !== info.fiat_after_voucher) {
+          rowInfo = {};
+          for (var k in info) rowInfo[k] = info[k];
+          rowInfo.fiat_after_voucher = resolved;
+        }
+      } else if (info.fiat_after_voucher != null) {
+        // No voucher on this row -> no card discount, regardless of what a
+        // sibling row of the same item is discounted to.
+        rowInfo = {};
+        for (var k2 in info) rowInfo[k2] = info[k2];
+        rowInfo.fiat_after_voucher = null;
+      }
       var priceDiv = row.querySelector('.singleprice.price') || row.querySelector('.price');
-      if (priceDiv) annotate(priceDiv, info, isAddonRow(row));
+      if (priceDiv) annotate(priceDiv, rowInfo, isAddonRow(row));
     });
   }
 
@@ -1827,7 +1884,14 @@ _ITEM_PRICING_JS_BODY = r"""
         if (!data || !data.items) return;
         var byId = {};
         data.items.forEach(function (it) { byId[it.id] = it; });
-        applyToDocument(byId);
+        // Per-cart-line discounts, keyed "<itemId>\n<voucherCode>" so a cart
+        // row can resolve its OWN voucher's card price (two rows of the same
+        // item with different vouchers no longer share one value).
+        var byLine = {};
+        (data.cart_lines || []).forEach(function (ln) {
+          if (ln && ln.voucher) byLine[ln.item_id + '\n' + ln.voucher] = ln.fiat_after_voucher;
+        });
+        applyToDocument(byId, byLine);
       })
       .catch(function () {});
   }
