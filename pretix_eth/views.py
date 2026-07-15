@@ -717,6 +717,7 @@ def create_quote(request, **kwargs):
                 'token_address': quote.get('token_address'),
                 'intended_payer': quote['intended_payer'],
                 'amount_raw': quote['amount_raw'],
+                'order_total_usd': quote.get('order_total_usd'),
                 'created_at': quote['created_at'],
                 'expires_at': quote['expires_at'],
             })

@@ -491,6 +491,7 @@ def admin_orders(request: HttpRequest, **kwargs):
                         'symbol': q.get('symbol'),
                         'intendedPayer': q.get('intended_payer'),
                         'amountRaw': q.get('amount_raw'),
+                        'orderTotalUsd': q.get('order_total_usd'),
                         'createdAt': q.get('created_at'),
                         'expiresAt': q.get('expires_at'),
                     }
