@@ -17,6 +17,7 @@ import {
   getBlockNumber,
   sendCalls,
   getConnectorClient,
+  getAccount,
 } from 'wagmi/actions'
 import { erc20Abi, encodeFunctionData } from 'viem'
 import {
@@ -1415,7 +1416,12 @@ export function CheckoutStep({
       // different wallet — sending from it would produce a tx whose sender ≠ the
       // quote's payer, which the backend verify rejects → the payment strands.
       // Abort with a clear message so they retry with a single wallet.
-      if (!address || q.intended_payer.toLowerCase() !== address.toLowerCase()) {
+      // Read the LIVE connected account, not the render-closure `address` — the
+      // closure matches the quote by construction, so comparing against it would
+      // never catch anything. `getAccount` reflects an injected wallet that
+      // swapped its active account between signing the quote and paying.
+      const liveAddress = getAccount(wagmiConfig).address
+      if (!liveAddress || q.intended_payer.toLowerCase() !== liveAddress.toLowerCase()) {
         throw new Error(
           'Your connected wallet changed after the quote was created. Please retry and use the same wallet to sign and pay.',
         )

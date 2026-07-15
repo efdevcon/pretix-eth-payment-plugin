@@ -38,37 +38,51 @@ def _truthy(v) -> bool:
     return v is True or str(v or '').strip().lower() in ('1', 'true', 'yes')
 
 
-def _recover_wc_quote(order):
-    """Most-recent WalletConnect quote (raw dict) carrying an ``intended_payer``
-    from ANY of the order's walletconnect payments (created + canceled), newest
-    first — or ``None``.
+def _all_wc_quotes(order):
+    """Every WC quote on the order, newest-first, deduped by ``quote_id``.
 
-    Buyers retry a lot: Pretix cancels the old WC payment and creates a fresh
-    ``created`` one on each attempt, and that fresh payment usually holds only a
-    challenge nonce with NO quote. The real quote therefore lives on a now-
-    canceled payment. This mirrors the unpaid-list view's scan so the manual
-    verify binds to the buyer's real quote instead of only the current payment.
+    Sources, so no attempt is missed:
+      * each payment's current ``info['quote']``, AND
+      * each payment's append-only ``info['quotes']`` history — a buyer who
+        re-quotes on the same payment (wallet/token switch) overwrites
+        ``info['quote']`` but the history preserves the earlier attempts.
+    Across ALL of the order's WC payments (created + canceled), because retries
+    also spawn fresh payments that supersede the prior one.
     """
-    wc_payments = sorted(
-        (p for p in order.payments.all() if p.provider == 'walletconnect'),
-        key=lambda p: p.created or order.datetime,
-        reverse=True,
-    )
-    for p in wc_payments:
-        q = (p.info_data or {}).get('quote') or {}
+    seen = set()
+    out = []
+    for p in order.payments.all():
+        if p.provider != 'walletconnect':
+            continue
+        info = p.info_data or {}
+        candidates = list(info.get('quotes') or [])
+        cur = info.get('quote')
+        if cur:
+            candidates.append(cur)
+        for q in candidates:
+            qid = q.get('quote_id')
+            if not qid or qid in seen:
+                continue
+            seen.add(qid)
+            out.append(q)
+    out.sort(key=lambda q: q.get('created_at') or 0, reverse=True)
+    return out
+
+
+def _recover_wc_quote(order):
+    """Most-recent WC quote carrying an ``intended_payer`` (fallback when the
+    admin doesn't pick a specific quote_id)."""
+    for q in _all_wc_quotes(order):
         if q.get('intended_payer'):
             return q
     return None
 
 
 def _find_wc_quote(order, quote_id: str):
-    """The order's WC quote with this exact ``quote_id`` (across all payments), or
-    ``None``. Lets the admin pick the specific attempt matching the real on-chain
-    payment when a buyer created several quotes (different wallet/token/amount)."""
-    for p in order.payments.all():
-        if p.provider != 'walletconnect':
-            continue
-        q = (p.info_data or {}).get('quote') or {}
+    """The order's WC quote with this exact ``quote_id`` (across all payments +
+    history), or ``None`` — lets the admin bind to the specific attempt matching
+    the real on-chain payment when a buyer made several (wallet/token/amount)."""
+    for q in _all_wc_quotes(order):
         if q.get('quote_id') == quote_id:
             return q
     return None
@@ -463,40 +477,26 @@ def admin_orders(request: HttpRequest, **kwargs):
             for porder in wc_unpaid_qs:
                 if porder.code in already_completed_codes:
                     continue
-                # Surface the most recent quote (if any) so the manual-verify
-                # modal can pre-fill chain + symbol + payer from what the
-                # buyer originally signed. Admin can override any of these.
-                #
-                # The quote lives per-OrderPayment. When a buyer retries,
-                # Pretix cancels the old payment and creates a fresh
-                # `created` one — which often has only a challenge nonce and
-                # no quote yet. So we scan ALL walletconnect payments
-                # (created + canceled), newest first, and take the first
-                # one carrying a quote. That recovers the buyer's last real
-                # selection even when it lives on a now-superseded payment.
-                # Collect ALL quotes across the order's WC payments (newest first)
-                # so the manual-verify modal can show a picker — a buyer who
-                # retried with different wallets/tokens leaves several quotes with
-                # different payers/amounts. `quote` (singular) stays as the newest
-                # one for pre-fill / backwards compat.
-                quotes_list = []
-                wc_payments = sorted(
-                    (p for p in porder.payments.all() if p.provider == 'walletconnect'),
-                    key=lambda p: p.created or porder.datetime,
-                    reverse=True,
-                )
-                for p in wc_payments:
-                    q = (p.info_data or {}).get('quote') or {}
-                    if q and q.get('intended_payer'):
-                        quotes_list.append({
-                            'quoteId': q.get('quote_id'),
-                            'chainId': q.get('chain_id'),
-                            'symbol': q.get('symbol'),
-                            'intendedPayer': q.get('intended_payer'),
-                            'amountRaw': q.get('amount_raw'),
-                            'createdAt': q.get('created_at'),
-                            'expiresAt': q.get('expires_at'),
-                        })
+                # All quotes for this order — current + append-only history,
+                # across every WC payment (created + canceled), newest first — so
+                # the manual-verify modal can show a picker. A buyer who retries
+                # (new payment) or re-quotes in the widget (wallet/token switch,
+                # overwriting the payment's current quote) leaves several quotes
+                # with different payers/amounts; the history preserves them all.
+                # `quote` (singular) stays the newest for pre-fill / backwards compat.
+                quotes_list = [
+                    {
+                        'quoteId': q.get('quote_id'),
+                        'chainId': q.get('chain_id'),
+                        'symbol': q.get('symbol'),
+                        'intendedPayer': q.get('intended_payer'),
+                        'amountRaw': q.get('amount_raw'),
+                        'createdAt': q.get('created_at'),
+                        'expiresAt': q.get('expires_at'),
+                    }
+                    for q in _all_wc_quotes(porder)
+                    if q.get('intended_payer')
+                ]
                 quote_info = quotes_list[0] if quotes_list else None
                 wc_unpaid.append({
                     'orderCode': porder.code,

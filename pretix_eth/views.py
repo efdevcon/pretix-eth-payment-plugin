@@ -702,6 +702,25 @@ def create_quote(request, **kwargs):
         )
 
         info['quote'] = quote
+        # Append-only quote history. A buyer who re-quotes on the SAME payment
+        # (e.g. switching wallet/token in the widget) would otherwise overwrite
+        # `info['quote']` and lose the earlier attempts — leaving admin recovery
+        # blind to which wallets/amounts were tried. Keep slim entries (no
+        # signature blob, to bound info_data size), deduped by quote_id and
+        # capped. Admin recovery + the manual-verify picker read this history.
+        hist = list(info.get('quotes') or [])
+        if not any(h.get('quote_id') == quote['quote_id'] for h in hist):
+            hist.append({
+                'quote_id': quote['quote_id'],
+                'chain_id': quote['chain_id'],
+                'symbol': quote['symbol'],
+                'token_address': quote.get('token_address'),
+                'intended_payer': quote['intended_payer'],
+                'amount_raw': quote['amount_raw'],
+                'created_at': quote['created_at'],
+                'expires_at': quote['expires_at'],
+            })
+        info['quotes'] = hist[-25:]
         # V53: clear the failed-sig counter on success so a buyer who hit
         # one bad sig and corrected it doesn't carry the budget tax into
         # future quote builds on the same challenge.
