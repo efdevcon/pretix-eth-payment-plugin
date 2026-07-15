@@ -820,6 +820,18 @@ export function CheckoutStep({
     return () => { cancelled = true }
   }, [address, config.urlPrefix, config.orderCode, config.orderSecret, organizer, event])
 
+  // ── Invalidate a stale quote on wallet switch ──
+  // A quote's `intended_payer` is fixed to whoever signed the challenge. If the
+  // connected wallet changes, the existing quote no longer belongs to it — that's
+  // the "same quote_id, different address" state, and paying it would send from a
+  // wallet the quote isn't bound to (verify rejects payer mismatch → stuck order).
+  // Drop it so `handlePay` re-creates a fresh quote for the now-connected wallet.
+  useEffect(() => {
+    setQuote(prev =>
+      prev && address && prev.intended_payer.toLowerCase() !== address.toLowerCase() ? null : prev,
+    )
+  }, [address])
+
   // ── Client-info telemetry beacon ──
   // Reports which wallet brand + connection type buyers use, in two
   // phases (greppable separately as `[wc-client] phase=connect` and
@@ -1396,6 +1408,18 @@ export function CheckoutStep({
         receiveAddress: q.receive_address,
         expiresAt: q.expires_at,
       })
+
+      // ── Guard: the paying wallet must still be the one the quote is bound to ──
+      // The quote's `intended_payer` was fixed when the challenge was signed. If
+      // the buyer switched wallets between signing and paying, `address` is now a
+      // different wallet — sending from it would produce a tx whose sender ≠ the
+      // quote's payer, which the backend verify rejects → the payment strands.
+      // Abort with a clear message so they retry with a single wallet.
+      if (!address || q.intended_payer.toLowerCase() !== address.toLowerCase()) {
+        throw new Error(
+          'Your connected wallet changed after the quote was created. Please retry and use the same wallet to sign and pay.',
+        )
+      }
 
       // ── Step 4: Capability probe ──
       //
