@@ -1958,7 +1958,7 @@ def _matomo_cookie_domain(host):
     if len(labels) < 2:
         return None  # localhost / testserver — no parent domain to share
     # IPv4 literal (all-numeric labels) or IPv6 — cookies can't use wildcards
-    if all(l.isdigit() for l in labels) or ':' in host:
+    if all(label.isdigit() for label in labels) or ':' in host:
         return None
     return '*.' + '.'.join(labels[-2:])
 

@@ -19,7 +19,7 @@ from pretix_eth.views import _matomo_cookie_domain
     ('tickets.devcon.org', '*.devcon.org'),      # prod shop
     ('devcon.org', '*.devcon.org'),              # apex
     ('dcdev2.ticketh.xyz', '*.ticketh.xyz'),     # dev shop
-    ('tickets.devcon.org:8443', '*.devcon.org'), # port stripped
+    ('tickets.devcon.org:8443', '*.devcon.org'),  # port stripped
     ('TICKETS.DEVCON.ORG', '*.devcon.org'),      # case-normalized
     ('localhost', None),                         # no parent domain to share
     ('testserver', None),
