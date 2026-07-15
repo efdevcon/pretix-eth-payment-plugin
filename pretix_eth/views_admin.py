@@ -28,7 +28,50 @@ _CAMEL_TO_SNAKE_ADMIN = {
     'ethPayerSignature': 'eth_payer_signature',
     'orderCode': 'order_code',
     'orderSecret': 'order_secret',
+    'overrideQuoteWindow': 'override_quote_window',
+    'overrideNoQuote': 'override_no_quote',
+    'quoteId': 'quote_id',
 }
+
+
+def _truthy(v) -> bool:
+    return v is True or str(v or '').strip().lower() in ('1', 'true', 'yes')
+
+
+def _recover_wc_quote(order):
+    """Most-recent WalletConnect quote (raw dict) carrying an ``intended_payer``
+    from ANY of the order's walletconnect payments (created + canceled), newest
+    first — or ``None``.
+
+    Buyers retry a lot: Pretix cancels the old WC payment and creates a fresh
+    ``created`` one on each attempt, and that fresh payment usually holds only a
+    challenge nonce with NO quote. The real quote therefore lives on a now-
+    canceled payment. This mirrors the unpaid-list view's scan so the manual
+    verify binds to the buyer's real quote instead of only the current payment.
+    """
+    wc_payments = sorted(
+        (p for p in order.payments.all() if p.provider == 'walletconnect'),
+        key=lambda p: p.created or order.datetime,
+        reverse=True,
+    )
+    for p in wc_payments:
+        q = (p.info_data or {}).get('quote') or {}
+        if q.get('intended_payer'):
+            return q
+    return None
+
+
+def _find_wc_quote(order, quote_id: str):
+    """The order's WC quote with this exact ``quote_id`` (across all payments), or
+    ``None``. Lets the admin pick the specific attempt matching the real on-chain
+    payment when a buyer created several quotes (different wallet/token/amount)."""
+    for p in order.payments.all():
+        if p.provider != 'walletconnect':
+            continue
+        q = (p.info_data or {}).get('quote') or {}
+        if q.get('quote_id') == quote_id:
+            return q
+    return None
 
 
 def _read_body(request) -> dict:
@@ -431,7 +474,12 @@ def admin_orders(request: HttpRequest, **kwargs):
                 # (created + canceled), newest first, and take the first
                 # one carrying a quote. That recovers the buyer's last real
                 # selection even when it lives on a now-superseded payment.
-                quote_info = None
+                # Collect ALL quotes across the order's WC payments (newest first)
+                # so the manual-verify modal can show a picker — a buyer who
+                # retried with different wallets/tokens leaves several quotes with
+                # different payers/amounts. `quote` (singular) stays as the newest
+                # one for pre-fill / backwards compat.
+                quotes_list = []
                 wc_payments = sorted(
                     (p for p in porder.payments.all() if p.provider == 'walletconnect'),
                     key=lambda p: p.created or porder.datetime,
@@ -439,16 +487,17 @@ def admin_orders(request: HttpRequest, **kwargs):
                 )
                 for p in wc_payments:
                     q = (p.info_data or {}).get('quote') or {}
-                    if q:
-                        quote_info = {
+                    if q and q.get('intended_payer'):
+                        quotes_list.append({
+                            'quoteId': q.get('quote_id'),
                             'chainId': q.get('chain_id'),
                             'symbol': q.get('symbol'),
                             'intendedPayer': q.get('intended_payer'),
                             'amountRaw': q.get('amount_raw'),
                             'createdAt': q.get('created_at'),
                             'expiresAt': q.get('expires_at'),
-                        }
-                        break
+                        })
+                quote_info = quotes_list[0] if quotes_list else None
                 wc_unpaid.append({
                     'orderCode': porder.code,
                     'orderSecret': porder.secret,
@@ -457,6 +506,7 @@ def admin_orders(request: HttpRequest, **kwargs):
                     'createdAt': int(porder.datetime.timestamp()) if porder.datetime else None,
                     'testmode': bool(porder.testmode),
                     'quote': quote_info,
+                    'quotes': quotes_list,
                 })
         except (ProgrammingError, Exception):
             log.exception('[admin_orders] wc_unpaid list failed; returning empty')
@@ -834,22 +884,56 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 'error': 'no walletconnect payment in created state on this order',
             }, status=404)
 
-        # V68: bind the manual verify to the order's OWN quote. Without this the
-        # endpoint took `payer` from the request body and matched any on-chain
-        # transfer of the right amount to the shared receive_address, letting an
-        # unrelated/historical transfer settle a fresh order. The payer is the
-        # buyer regardless of which token/chain they actually paid on, so this
-        # binding is compatible with the admin symbol/chain override below.
-        quote = (payment.info_data or {}).get('quote') or {}
-        if not quote or not quote.get('intended_payer'):
+        # V68: bind the manual verify to the buyer's OWN quote (its intended_payer).
+        # Without a binding the endpoint would take `payer` from the request body
+        # and match any on-chain transfer of the right amount to the shared
+        # receive_address, letting an unrelated/historical transfer settle a fresh
+        # order.
+        #
+        # Which quote? Buyers retry a lot — each retry spawns a fresh `created`
+        # payment (usually quote-less) and they may switch wallet / token / chain
+        # between attempts, so one order can carry SEVERAL quotes with different
+        # payers and amounts. The admin picks the one matching the real on-chain
+        # payment and passes its `quote_id`; we bind to THAT quote. With no
+        # `quote_id` we fall back to the newest quote across all WC payments
+        # (created + canceled) for direct API callers.
+        force = _truthy(body.get('force') or body.get('override_no_quote'))
+        quote_id = str(body.get('quote_id') or '').strip()
+        if quote_id:
+            quote = _find_wc_quote(order, quote_id)
+            if not quote or not quote.get('intended_payer'):
+                return JsonResponse({
+                    'success': False, 'error': 'selected quote not found on this order',
+                }, status=404)
+        else:
+            quote = _recover_wc_quote(order)
+
+        if quote and quote.get('intended_payer'):
+            if (body['payer'] or '').lower() != (quote['intended_payer'] or '').lower():
+                return JsonResponse({
+                    'success': False, 'error': 'payer does not match the selected quote',
+                }, status=400)
+            payer = quote['intended_payer']  # source of truth, not the request body
+        elif force:
+            # No quote on ANY of the order's payments (buyer never completed a
+            # server-side quote). Fall back to the admin-supplied payer — the
+            # pre-V68 rescue path, now GATED behind an explicit `force` flag and
+            # loudly logged. The exact tx_hash, the full on-chain verification
+            # (from == payer, to == receive_address, amount, confirmations) and
+            # the one-time tx_hash dedup below all still apply, so `force` can only
+            # settle a real, unused transfer from the stated payer to us.
+            payer = body['payer']
+            log.warning(
+                '[wc admin verify] FORCE (no quote on order) order=%s tx=%s payer=%s (auth: admin token)',
+                order.code, tx_hash, payer,
+            )
+        else:
             return JsonResponse({
-                'success': False, 'error': 'no quote/intended_payer on this order',
+                'success': False,
+                'error': ('no quote/intended_payer on this order; pass force=true to verify '
+                          'against the supplied payer (tx hash, on-chain payer/amount/recipient/'
+                          'confirmations and one-time dedup are still enforced)'),
             }, status=409)
-        if (body['payer'] or '').lower() != (quote['intended_payer'] or '').lower():
-            return JsonResponse({
-                'success': False, 'error': 'payer does not match the order quote',
-            }, status=400)
-        payer = quote['intended_payer']  # source of truth, not the request body
 
         # V46 parity: re-check WC enabled + per-chain + per-token toggles
         _, err = _wc_config_or_403(event, chain_id=chain_id, symbol=symbol)
@@ -862,11 +946,24 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                 'success': False, 'error': 'tx already used for a completed order',
             }, status=409)
 
-        # Compute the expected amount in raw base units from order.total + chosen symbol.
-        # Stables are 1:1 USD; ETH needs the oracle. We use the LIVE price (not the
-        # quote-time price) because the admin may be overriding the quote's symbol.
+        # Expected on-chain amount. When the admin verifies against a real quote
+        # on the SAME symbol + chain the buyer was quoted on, use that quote's
+        # exact `amount_raw` — it's what the buyer was quoted and actually sent, so
+        # this avoids ETH-price drift between payment time and rescue time (a live
+        # recompute of order.total would no longer equal the sent amount and the
+        # on-chain check would spuriously fail). Only recompute from order.total at
+        # the LIVE price when there's no matching quote (force) or the admin is
+        # deliberately overriding the quote's symbol/chain.
+        quote_matches_request = bool(
+            quote
+            and str(quote.get('symbol')) == symbol
+            and str(quote.get('chain_id')) == str(chain_id)
+            and quote.get('amount_raw')
+        )
         try:
-            if symbol == 'ETH':
+            if quote_matches_request:
+                amount_raw = int(quote['amount_raw'])
+            elif symbol == 'ETH':
                 price_result = asyncio.run(fetch_eth_price_usd())
                 if price_result is None:
                     return JsonResponse({
@@ -937,21 +1034,23 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
         # still apply, so it cannot settle an already-used or wrong-payer
         # transfer. The override is loudly logged + flagged on the payment for
         # audit, and is admin-token gated like the rest of this endpoint.
-        _ov = body.get('override_quote_window')
-        override_window = _ov is True or str(_ov).strip().lower() in ('1', 'true', 'yes')
+        # Skip the window when the admin explicitly overrides it, when we're on the
+        # no-quote `force` path (no window to compare), or when the recovered quote
+        # carries no timestamps.
+        override_window = _truthy(body.get('override_quote_window')) or force or not quote
         try:
             block_ts = int(w3.eth.get_block(vr.block_number).timestamp)
         except Exception as e:
             return JsonResponse({
                 'success': False, 'error': f'failed to fetch block timestamp: {e}',
             }, status=400)
-        quote_created = int(quote.get('created_at', 0))
-        quote_expires = int(quote.get('expires_at', 0))
+        quote_created = int((quote or {}).get('created_at', 0))
+        quote_expires = int((quote or {}).get('expires_at', 0))
         if override_window:
             log.warning(
                 '[wc admin verify] OUT-OF-WINDOW OVERRIDE order=%s tx=%s block_ts=%s '
-                'quote_window=[%s,%s] payer=%s (auth: admin token)',
-                order.code, tx_hash, block_ts, quote_created, quote_expires, payer,
+                'quote_window=[%s,%s] payer=%s force=%s (auth: admin token)',
+                order.code, tx_hash, block_ts, quote_created, quote_expires, payer, force,
             )
         else:
             if quote_created and block_ts < quote_created:
@@ -980,7 +1079,9 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
 
                 WCPaymentAttempt.objects.create(
                     tx_hash=tx_hash,
-                    quote_id=(payment.info_data or {}).get('quote', {}).get('quote_id', f'admin_{tx_hash[:16]}'),
+                    # Prefer the recovered quote's id (the current `created` payment
+                    # is often a quote-less retry); fall back to an admin marker.
+                    quote_id=(quote or {}).get('quote_id') or f'admin_{tx_hash[:16]}',
                     order_code=order.code, payer=payer,
                     chain_id=chain_id, state='completed',
                 )
