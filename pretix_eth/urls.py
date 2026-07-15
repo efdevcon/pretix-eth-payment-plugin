@@ -36,6 +36,7 @@ the legacy `/plugin/x402/admin/*` misnomer — these are shared crypto-admin
 tools, not x402-only; the devcon-next proxies were updated to match).
 """
 from django.urls import path
+from pretix.multidomain import event_path
 from pretix_eth import views, views_x402, views_admin  # noqa: F401 (views_x402 kept for the commented-out x402 routes below)
 
 
@@ -76,14 +77,24 @@ def _admin_routes():
     Paths live under `/plugin/admin/*` (renamed from the legacy
     `/plugin/x402/admin/*` misnomer — these are shared crypto-admin tools, not
     x402-only). The devcon-next admin proxies were updated to match.
+
+    `require_live=False`: registered via Pretix's `event_path` so these routes
+    stay reachable when the event is NOT live ("shop offline"). Pretix wraps
+    event-scoped plugin URLs with `_event_view(require_live=...)`, and the
+    default (True) makes an offline event return the `offline.html` 403 page
+    BEFORE the view runs — which blanked the /tickets/admin dashboard exactly
+    when operators need it (recovery, refunds, manual verify). These endpoints
+    do their own auth (`@require_pretix_admin_token` + `_check_event_access_or_403`),
+    so opting out of the presale live-gate changes nothing about who may call
+    them — it just lets the token-gated view run regardless of shop status.
     """
     return [
-        path('plugin/admin/orders/',    views_admin.admin_orders,    name='admin_orders'),
-        path('plugin/admin/stats/',     views_admin.admin_stats,     name='admin_stats'),
-        path('plugin/admin/refund/',    views_admin.admin_refund,    name='admin_refund'),
-        path('plugin/admin/verify/',    views_admin.admin_verify,    name='admin_verify'),
-        path('plugin/admin/wc-refund/', views_admin.admin_wc_refund, name='admin_wc_refund'),
-        path('plugin/admin/wc-verify/', views_admin.admin_wc_verify, name='admin_wc_verify'),
+        event_path('plugin/admin/orders/',    views_admin.admin_orders,    name='admin_orders',    require_live=False),
+        event_path('plugin/admin/stats/',     views_admin.admin_stats,     name='admin_stats',     require_live=False),
+        event_path('plugin/admin/refund/',    views_admin.admin_refund,    name='admin_refund',    require_live=False),
+        event_path('plugin/admin/verify/',    views_admin.admin_verify,    name='admin_verify',    require_live=False),
+        event_path('plugin/admin/wc-refund/', views_admin.admin_wc_refund, name='admin_wc_refund', require_live=False),
+        event_path('plugin/admin/wc-verify/', views_admin.admin_wc_verify, name='admin_wc_verify', require_live=False),
     ]
 
 
