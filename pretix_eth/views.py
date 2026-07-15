@@ -1225,8 +1225,6 @@ def item_pricing(request, **kwargs):
         # discounted value is computed with the same `_effective_fiat` used for
         # the actual charge, so the display always matches what's billed.
         fiat_after_by_id: dict = {}
-        personalized = False  # True once the response depends on this buyer's
-        # session (cart), so it must not be shared-cached.
         from decimal import Decimal, InvalidOperation
         from .apps import _effective_fiat
 
@@ -1275,8 +1273,6 @@ def item_pricing(request, **kwargs):
             cps = list(CartPosition.objects.filter(
                 cart_id=cart_id, event=event,
             ).select_related('item', 'variation', 'voucher'))
-            if cps:
-                personalized = True  # response now depends on this session's cart
             for cp in cps:
                 iid = cp.item_id
                 if iid in fiat_after_by_id:
@@ -1304,15 +1300,18 @@ def item_pricing(request, **kwargs):
             'fiat_disabled': _truthy(meta.get('fiat_disabled')),
         })
     response = JsonResponse({'items': out})
-    if personalized:
-        # Response reflects THIS buyer's cart — never share-cache it, or one
-        # buyer's voucher pricing could be served to another.
-        response['Cache-Control'] = 'private, no-store'
-    else:
-        # Generic item config (incl. deterministic ?voucher= responses, which
-        # vary by URL): short cache. Admins editing prices see updates within
-        # a minute; CDN can override.
-        response['Cache-Control'] = 'public, max-age=60'
+    # NEVER cache this response — not even the "generic" (empty-cart) variant.
+    # `fiat_after_voucher` is cart-dependent (Source 2 reads the buyer's
+    # CartPositions), but the endpoint URL is STABLE as the buyer moves
+    # catalog -> redeem -> checkout. A `public, max-age=N` copy captured while
+    # the cart was empty (fiat_after_voucher=null) gets replayed by the browser
+    # / CDN on the following cart pages, so the card chip shows the full
+    # undiscounted price (e.g. $999 instead of the voucher price) until a manual
+    # reload forces revalidation. `no-store` guarantees every page re-fetches
+    # and gets a cart-accurate price. The response is a small JSON fetched once
+    # per page, so dropping the cache is cheap; correct pricing during a paid
+    # sale is not negotiable.
+    response['Cache-Control'] = 'private, no-store'
     return response
 
 
