@@ -1107,7 +1107,10 @@ def order_redirect_js(request, **kwargs):
     Hooked into the page by the `wc_order_redirect_inject` html_head
     signal receiver in signals.py. Only injected when:
       - the buyer is on `event.order` (not /pay/, /cancel/, /change/, ...),
-      - the order's payment status is PAID,
+      - the request carries a just-completed flag (`?thanks=yes`,
+        `?thanks=1` or `?paid=yes` — see `_JUST_COMPLETED_FLAGS`), which
+        includes free (100%-voucher) orders,
+      - the order's status is PAID,
       - `payment_walletconnect_frontend_order_url_template` is configured
         on the event.
 
@@ -1132,12 +1135,12 @@ def order_redirect_js(request, **kwargs):
     if not (dest.startswith('https://') or dest.startswith('http://') or dest.startswith('/')):
         return HttpResponse('// invalid redirect destination', content_type='application/javascript; charset=utf-8')
     # No in-browser dedup needed: the signal receiver in signals.py only
-    # injects this script on the URL that has `?thanks=yes`, which Pretix
-    # appends exactly once (the post-payment landing redirect). Any
+    # injects this script on a just-completed landing (`?thanks=yes`,
+    # `?thanks=1` or `?paid=yes`), which Pretix appends exactly once. Any
     # subsequent navigation back to `/order/<code>/<secret>/` (from the
-    # email link, a bookmark, etc.) lacks that flag and never loads this
-    # script, so we don't redirect — buyers can actually view their
-    # Pretix order page when they want to.
+    # email link, a bookmark, etc.) carries none of those flags and never
+    # loads this script, so we don't redirect — buyers can actually view
+    # their Pretix order page when they want to.
     js = (
         '(function () {{ '
         'var dest = {dest}; '

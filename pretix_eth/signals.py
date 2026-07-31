@@ -156,6 +156,33 @@ except ImportError:
     pass
 
 
+# Query params Pretix appends when it lands a buyer on the order page right
+# after the order completes. Which one you get depends on the finishing path:
+#
+#   thanks=yes  views/order.OrderPayComplete after execute_payment(), when the
+#               order object it holds is not PAID. THE PRE-EXISTING CASE: card
+#               and crypto buyers land here, sometimes genuinely unpaid (async
+#               capture) — so this path must NOT require PAID, or it would stop
+#               redirecting flows that work today.
+#   paid=yes    same view, when the order is already PAID. PAID by definition.
+#   thanks=1    checkoutflow.ConfirmStep.get_order_url() — order placed with no
+#               payment left to execute. This is the FREE-ORDER case (a 100%-off
+#               voucher confirms a `free` payment inline, so the order is PAID
+#               immediately) and the case this receiver used to miss. It is also
+#               where an order placed with money still owed lands (bank
+#               transfer / pay later), hence PAID is required for this flag
+#               only — see `_requires_paid` below.
+_JUST_COMPLETED_FLAGS = {
+    'thanks': ('yes', '1'),
+    'paid': ('yes',),
+}
+
+# Flags that alone don't prove the buyer is done: only redirect when the order
+# is really PAID. Everything else keeps the pre-existing, payment-attempt-based
+# behaviour.
+_REQUIRES_PAID = {('thanks', '1')}
+
+
 @receiver(html_head, dispatch_uid='wc_order_redirect_inject')
 def inject_order_redirect(sender, request, **kwargs):
     """Inject a `<script>` on Pretix's order-detail page that redirects
@@ -169,6 +196,8 @@ def inject_order_redirect(sender, request, **kwargs):
       - URL must be the order detail page (`event.order`), not a
         sub-page like `event.order.pay`, `event.order.cancel`, etc.,
         where the buyer still has work to do on Pretix.
+      - The request must carry one of Pretix's just-placed/just-paid
+        flags (see `_JUST_COMPLETED_FLAGS` below).
       - The order must be PAID — pending/expired orders shouldn't be
         redirected away from Pretix where the buyer needs to act.
       - `frontend_order_url_template` must be configured on the event.
@@ -202,17 +231,35 @@ def inject_order_redirect(sender, request, **kwargs):
     if not template:
         return ''
 
-    # Redirect ONLY on the just-paid landing where Pretix appends
-    # `?thanks=yes` (set by the post-payment redirect from
-    # `/pay/<id>/complete` → `/order/<code>/<secret>/?thanks=yes`).
-    # Buyers who revisit their order via the email link or a bookmark
-    # later shouldn't be bounced to the storefront — they expect the
-    # Pretix order page to actually load (e.g. to view ticket details
-    # or download an invoice). The `?thanks=yes` flag is the only
-    # signal that distinguishes "just paid, take me to the next page"
-    # from "I navigated here on purpose."
-    if request.GET.get('thanks') != 'yes':
+    # Redirect ONLY on a just-completed landing. Pretix flags those with a
+    # query param, and which one depends on how the order finished — see
+    # `_JUST_COMPLETED_FLAGS`. Buyers who revisit their order later via the
+    # email link or a bookmark carry no flag and are left on Pretix, where
+    # they expect to view ticket details or download an invoice.
+    seen = {(k, request.GET.get(k)) for k in _JUST_COMPLETED_FLAGS}
+    matched = {(k, v) for (k, v) in seen if v in _JUST_COMPLETED_FLAGS[k]}
+    if not matched:
         return ''
+
+    # `?thanks=1` alone doesn't mean "done": it is equally what an order placed
+    # with money still owed lands on (bank transfer, pay later), and that buyer
+    # needs Pretix's payment instructions — bouncing them to the storefront
+    # would hide the one page they have to act on. So check PAID for that flag.
+    # The other flags follow a payment attempt and keep their old behaviour.
+    if matched <= _REQUIRES_PAID:
+        # `scopes_disabled` because the lookup is already pinned to this event
+        # plus the order's own secret (which Pretix validated before rendering
+        # this page), so it can't reach another organizer's data — and an
+        # html_head receiver must never raise ScopeError and 500 the order page
+        # if the organizer scope isn't active on the request.
+        from django_scopes import scopes_disabled
+        from pretix.base.models import Order
+        with scopes_disabled():
+            is_paid = Order.objects.filter(
+                event=sender, code=code, secret=secret, status=Order.STATUS_PAID
+            ).exists()
+        if not is_paid:
+            return ''
 
     try:
         from pretix.multidomain.urlreverse import eventreverse
