@@ -554,6 +554,18 @@ def create_quote(request, **kwargs):
         #    it via ERC-1271's isValidSignature eth_call (same code path as the
         #    x402 flow's eth_payer_signature).
         claimed_payer = body.get('payer_address')
+        # OFAC screen the CLAIMED payer as early as possible. On the smart-
+        # wallet (ERC-1271) path `payer_address` is attacker-supplied, so we
+        # reject a sanctioned wallet here — before spending an on-chain
+        # isValidSignature RPC call proving ownership of a wallet we'd refuse
+        # anyway, and so the response is a clear OFAC block rather than a
+        # generic signature error. The EOA path (no claimed payer) is screened
+        # post-recovery below, where `payer` first becomes known.
+        from pretix_eth.sanctions import is_sanctioned
+        if claimed_payer and is_sanctioned(claimed_payer):
+            log.warning('wc_create_quote rejected (early): OFAC-sanctioned payer_address %s order=%s',
+                        claimed_payer, order.code)
+            return JsonResponse({'error': 'payment is not available for this wallet'}, status=403)
         signature_hex = body['signature']
         sig_len_bytes = len(signature_hex[2:]) // 2 if signature_hex.startswith('0x') else len(signature_hex) // 2
 
