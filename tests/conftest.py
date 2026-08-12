@@ -188,3 +188,19 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "require-web3: mark test as one that requires web3 provider")
+
+
+@pytest.fixture(autouse=True)
+def _sanctions_offline(monkeypatch):
+    """Keep the OFAC/scam screening offline in tests: the buyer-flow and
+    admin gates now call into pretix_eth.sanctions, and without this stub
+    every test that reaches a gate would do live GitHub fetches (or stall
+    on the timeout when CI has no network). The bundled snapshot is used
+    instead; tests/core/test_sanctions.py overrides these as needed."""
+    from pretix_eth import sanctions
+
+    def _no_network():
+        raise OSError('sanctions network access disabled in tests')
+
+    monkeypatch.setattr(sanctions, '_fetch_ofac_union', _no_network)
+    monkeypatch.setattr(sanctions, '_memo', {'ofac': None, 'ofac_at': 0.0, 'scam': frozenset(), 'scam_at': float('inf')})

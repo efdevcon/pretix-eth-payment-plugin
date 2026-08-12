@@ -28,6 +28,13 @@ settings) is DISABLED: those routes are commented out in `_x402_routes()`, so
 the paths 404 and no x402 buyer-payment view runs. The code stays in the tree
 — re-enable by uncommenting.
 
+COMPLIANCE NOTE (2026-08-12): before re-enabling, add OFAC sanctions
+screening of the payer address to `prepare_authorization` / `execute_transfer`
+(we broadcast the buyer's transferWithAuthorization — never for a sanctioned
+`from`) and to `purchase` / `verify` (reject pre-settlement). Use the same
+list source as devcon's `src/scripts/ofac-scan.ts` (union of the OFAC EVM
+ticker lists) / the sanctions helper if it exists by then.
+
 The admin tools in `_admin_routes()` are NOT part of that gate. They are
 token- + permission-gated operator endpoints, and the order/stats views
 aggregate WalletConnect payments too, so the /tickets/admin dashboard depends

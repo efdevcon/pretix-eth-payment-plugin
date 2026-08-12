@@ -677,6 +677,15 @@ def create_quote(request, **kwargs):
                 }, status=400)
             payer = to_checksum_address(claimed_payer)
 
+        # OFAC screening: never mint payment instructions for a sanctioned
+        # payer — knowingly processing their payment is a sanctions violation.
+        # Neutral message by design. Both signature branches (EOA recovery and
+        # ERC-1271 payer_address) converge here with a checksummed `payer`.
+        from pretix_eth.sanctions import is_sanctioned
+        if is_sanctioned(payer):
+            log.warning('wc_create_quote rejected: OFAC-sanctioned payer %s order=%s', payer, order.code)
+            return JsonResponse({'error': 'payment is not available for this wallet'}, status=403)
+
         # ETH price (only if symbol == 'ETH')
         eth_price = None
         if symbol == 'ETH':
@@ -954,6 +963,25 @@ def verify(request, **kwargs):
         if quote_expires and block_ts > quote_expires:
             return _verify_bad('tx mined after quote expired',
                                block_ts=block_ts, quote_expires=quote_expires, tx_hash=tx_hash)
+
+        # OFAC re-check at settlement: the SDN list may have gained the payer
+        # between quote time and now. The funds are already on-chain at this
+        # point — do NOT confirm, do NOT auto-refund (refunding a sanctioned
+        # address is itself a violation). Leave the payment pending, tag the
+        # order for a human, and escalate.
+        from pretix_eth.sanctions import is_sanctioned
+        if is_sanctioned(quote['intended_payer']):
+            log.error(
+                'wc_verify BLOCKED: OFAC-sanctioned payer %s order=%s tx=%s — order left pending, escalate',
+                quote['intended_payer'], order.code, tx_hash,
+            )
+            try:
+                order.log_action('pretix_eth.ofac_hold', data={
+                    'payer': quote['intended_payer'], 'tx_hash': tx_hash,
+                })
+            except Exception:
+                log.exception('wc_verify: failed to write ofac_hold log action for order %s', order.code)
+            return _verify_bad('payment could not be accepted', status=403, tx_hash=tx_hash)
 
         # Atomic claim: unique constraint on tx_hash prevents race; the
         # SELECT FOR UPDATE on Order + re-check of order.status closes the

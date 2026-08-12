@@ -263,7 +263,10 @@ def admin_orders(request: HttpRequest, **kwargs):
     with scopes_disabled():
         completed_qs = X402CompletedOrder.objects.filter(event=event)
         pending_qs = X402PendingOrder.objects.filter(event=event)
-        x402_completed_list = list(completed_qs.order_by('-completed_at')[:500])
+        # Cap must exceed total completed x402 sales — dropped rows lose
+        # their tx hashes from the feed and resurface as phantom "orphans"
+        # in the devcon admin panel (same failure mode as the WC cap below).
+        x402_completed_list = list(completed_qs.order_by('-completed_at')[:5000])
 
         # Single round-trip to fetch all relevant Pretix Orders + their
         # payment/refund children. The admin UI needs buyer email, order
@@ -352,9 +355,20 @@ def admin_orders(request: HttpRequest, **kwargs):
         try:
             wc_attempts = list(
                 WCPaymentAttempt.objects
-                .filter(state=WCPaymentAttempt.STATE_COMPLETED)
+                # Scope to this event's orders: the cap below is per-query, so
+                # an unscoped fetch lets a busy sibling event evict this
+                # event's older rows from the slice (phantom-orphan regression
+                # all over again). WCPaymentAttempt has no event FK — join via
+                # order codes.
+                .filter(state=WCPaymentAttempt.STATE_COMPLETED,
+                        order_code__in=Order.objects.filter(event=event).values('code'))
                 .only('id', 'tx_hash', 'quote_id', 'order_code', 'payer', 'chain_id', 'state', 'created_at')
-                .order_by('-created_at')[:500]
+                # Cap must comfortably exceed total completed WC sales for the
+                # event: the devcon admin panel's orphan detection keys on this
+                # feed's tx hashes, so rows silently dropped here reappear as
+                # phantom "orphan" payments (sale crossed 490 rows in Aug 2026
+                # against the old 500 cap).
+                .order_by('-created_at')[:5000]
             )
             wc_codes = {w.order_code for w in wc_attempts}
             # `.only(...)` + `.prefetch_related(...)`: read the wide-payload
@@ -444,6 +458,87 @@ def admin_orders(request: HttpRequest, **kwargs):
                 )
                 for w in wc_attempts if w.order_code in orders_by_code
             ]
+            # Ledger-less WC payments: confirmed/refunded `walletconnect`
+            # OrderPayments with NO WCPaymentAttempt row. The normal verify
+            # endpoint writes the ledger row, but payments confirmed outside
+            # it (launch-day recovery, manual confirms in the Pretix admin)
+            # bypass that — 28 legitimate launch-window payments (2026-05-20
+            # 16:01–16:27 UTC) were missing here, and since the devcon admin
+            # panel keys its orphan detection on this feed's tx hashes, they
+            # all showed up as "open orphans". Sweep them in with the same
+            # row shape so both the table and the orphan matcher see them.
+            #
+            # The sweep walks every confirmed WC OrderPayment and the admin
+            # panel polls this endpoint every 30s per open session, while
+            # ledger-less rows only change when a payment is confirmed or
+            # refunded — so the serialized sweep is cached for 60s. A
+            # just-confirmed manual payment appears at most 60s late, which
+            # is invisible next to the poll cadence itself.
+            covered_tx = {(w.tx_hash or '').lower() for w in wc_attempts}
+            covered_tx |= {(r.get('txHash') or '').lower() for r in x402_rows}
+            from django.core.cache import cache as dj_cache
+            sweep_cache_key = f'pretix_eth_admin_ledgerless_{event.pk}'
+            ledgerless_wc = None
+            try:
+                ledgerless_wc = dj_cache.get(sweep_cache_key)
+            except Exception:
+                ledgerless_wc = None
+            if ledgerless_wc is None:
+                ledgerless_wc = []
+                for pay in (
+                    OrderPayment.objects.filter(
+                        order__event=event, provider='walletconnect',
+                        state__in=('confirmed', 'refunded'),
+                    )
+                    .select_related('order')
+                    .only('id', 'info', 'state', 'amount', 'payment_date',
+                          'order__code', 'order__email', 'order__total',
+                          'order__status', 'order__testmode')
+                    .order_by('-payment_date')[:10000]
+                ):
+                    pinfo = pay.info_data or {}
+                    tx = (pinfo.get('tx_hash') or '').lower()
+                    if not tx:
+                        continue
+                    porder = pay.order
+                    amount = pinfo.get('amount')
+                    if isinstance(amount, str) and amount.strip().endswith('(raw)'):
+                        amount = amount.strip()[:-len('(raw)')].strip()
+                    ledgerless_wc.append({
+                        'source': 'wc_payment',
+                        'paymentReference': pinfo.get('payment_reference'),
+                        'txHash': pinfo.get('tx_hash'),
+                        'pretixOrderCode': porder.code,
+                        'payer': pinfo.get('payer'),
+                        'completedAt': int(pay.payment_date.timestamp()) if pay.payment_date else None,
+                        'chainId': pinfo.get('chain_id'),
+                        'totalUsd': str(porder.total) if porder.total is not None else None,
+                        'tokenSymbol': pinfo.get('token_symbol'),
+                        'cryptoAmount': amount or None,
+                        'email': porder.email,
+                        'pretixStatus': porder.status,
+                        'pretixTestmode': bool(porder.testmode),
+                        'pretixTotal': str(porder.total) if porder.total is not None else None,
+                        # Not part of the ledgered refund-owed computation
+                        # above — but a payment in state='refunded' MUST carry
+                        # refundedAmount: the panel's refund-button suppression
+                        # keys on that field, and None would render an already-
+                        # refunded payment as refundable (double-refund risk).
+                        'overpaidUsd': None,
+                        'refundedAmount': str(pay.amount) if pay.state == 'refunded' and pay.amount is not None else None,
+                        'refundTxHash': None,
+                    })
+                try:
+                    dj_cache.set(sweep_cache_key, ledgerless_wc, 60)
+                except Exception:
+                    pass
+            # Dedup against the (fresher) ledgered rows at serve time, so a
+            # cached sweep row whose payment has since gained a ledger row
+            # doesn't double-count.
+            legacy_wc.extend([
+                r for r in ledgerless_wc
+                if (r.get('txHash') or '').lower() not in covered_tx
+            ])
         except ProgrammingError as e:
             log.warning('WCPaymentAttempt schema drift, skipping legacy rows: %s', e)
 
@@ -583,6 +678,45 @@ def admin_refund(request: HttpRequest, **kwargs):
         if not admin_address:
             return JsonResponse({'success': False, 'error': 'admin_address required'}, status=400)
         with scopes_disabled():
+            # Compliance gate BEFORE the refund is initiated (and before the
+            # admin's wallet ever builds the tx): sending funds to an
+            # OFAC-sanctioned address is itself a violation, so hard-block and
+            # tell the operator to freeze + escalate. A ScamSniffer hit means
+            # the buyer's wallet may be compromised (the refund would land
+            # with the attacker) — block unless the caller passes force=true.
+            completed = X402CompletedOrder.objects.filter(
+                event=event, payment_reference=payment_reference,
+            ).first()
+            recipient = getattr(completed, 'payer', None)
+            if not recipient:
+                # No completed row → initiate_refund below can only 409, but
+                # be explicit that screening did NOT run rather than failing
+                # open in silence.
+                log.warning('[refund] no completed order row for %s — recipient unknown, screening skipped',
+                            payment_reference)
+            from pretix_eth.sanctions import is_sanctioned, is_scam_flagged
+            if recipient and is_sanctioned(recipient):
+                log.error(
+                    '[refund] BLOCKED: OFAC-sanctioned recipient %s payment_reference=%s',
+                    recipient, payment_reference,
+                )
+                return JsonResponse({
+                    'success': False,
+                    'error': ('refund recipient is on the OFAC sanctions list — do not refund; '
+                              'freeze the order and escalate'),
+                    'ofac': True,
+                }, status=403)
+            if recipient and not body.get('force') and is_scam_flagged(recipient):
+                log.warning(
+                    '[refund] scam-flagged recipient %s payment_reference=%s (force not set)',
+                    recipient, payment_reference,
+                )
+                return JsonResponse({
+                    'success': False,
+                    'error': ('refund recipient is on the ScamSniffer scam list — confirm the '
+                              'buyer still controls the wallet, then retry with force=true'),
+                    'scam_flagged': True,
+                }, status=409)
             ok = ticketstore.initiate_refund(
                 event=event, payment_reference=payment_reference, admin_address=admin_address,
             )
@@ -775,6 +909,18 @@ def admin_verify(request: HttpRequest, **kwargs):
             'error': 'payment_reference not found (cannot verify against a missing pending order)',
         }, status=404)
 
+    # OFAC gate — mirror of the wc-verify gate; see the comment there.
+    from pretix_eth.sanctions import is_sanctioned
+    if is_sanctioned(body.get('payer')):
+        log.error('[x402 admin verify] BLOCKED: OFAC-sanctioned payer %s ref=%s tx=%s',
+                  body.get('payer'), body.get('payment_reference'), tx_hash)
+        return JsonResponse({
+            'success': False,
+            'error': ('payer is on the OFAC sanctions list — this payment must not be '
+                      'confirmed or refunded; freeze the order and escalate'),
+            'ofac': True,
+        }, status=403)
+
     from pretix_eth.views_x402 import _x402_verify_and_finalize
     return _x402_verify_and_finalize(
         event=event, pending=pending,
@@ -935,6 +1081,22 @@ def admin_wc_verify(request: HttpRequest, **kwargs):
                           'against the supplied payer (tx hash, on-chain payer/amount/recipient/'
                           'confirmations and one-time dedup are still enforced)'),
             }, status=409)
+
+        # OFAC gate: manual verify is the documented remediation for orphan /
+        # blocked payments — including ones the buyer-flow OFAC hold refused
+        # to confirm. Without this check the hold is one admin click from
+        # being reversed. Same rule as the buyer flow: never confirm, never
+        # auto-refund; freeze and escalate.
+        from pretix_eth.sanctions import is_sanctioned
+        if is_sanctioned(payer):
+            log.error('[wc admin verify] BLOCKED: OFAC-sanctioned payer %s order=%s tx=%s',
+                      payer, order.code, tx_hash)
+            return JsonResponse({
+                'success': False,
+                'error': ('payer is on the OFAC sanctions list — this payment must not be '
+                          'confirmed or refunded; freeze the order and escalate'),
+                'ofac': True,
+            }, status=403)
 
         # V46 parity: re-check WC enabled + per-chain + per-token toggles
         _, err = _wc_config_or_403(event, chain_id=chain_id, symbol=symbol)
