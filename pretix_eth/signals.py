@@ -350,9 +350,9 @@ def inject_voucher_discount(sender, request, **kwargs):
 
     Pretix's voucher page communicates the discount only as a struck
     list price next to the new one — easy to miss, and it never says HOW
-    MUCH the voucher takes off. This injects (a) a success banner naming
-    the voucher and its discount ("10% off") above the product list and
-    (b) a small "(10% off)" note next to each discounted price.
+    MUCH the voucher takes off. This injects a success banner naming the
+    voucher and its discount ("10% off") above the product list; the
+    struck-vs-new price on each item already shows the per-item effect.
 
     Only fires on `event.redeem` with a resolvable voucher. Percent and
     subtract price modes get an explicit amount; `set` mode just names
@@ -395,12 +395,6 @@ def inject_voucher_discount(sender, request, **kwargs):
         'var s=document.createElement("strong");'
         's.textContent="Voucher "+V.code+" applied"+(V.label?": "+V.label:"");'
         'b.appendChild(s);form.parentNode.insertBefore(b,form);'
-        'if(V.label){var ps=form.querySelectorAll(".price p");'
-        'for(var i=0;i<ps.length;i++){var p=ps[i];'
-        'if(!p.querySelector("del")||!p.querySelector("ins"))continue;'
-        'var t=document.createElement("span");t.className="text-success";'
-        't.style.fontSize="0.78em";t.style.fontWeight="normal";t.style.whiteSpace="nowrap";'
-        't.textContent=" ("+V.label+")";p.appendChild(t);}}'
         '}catch(e){}}'
         'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",run);}else{run();}'
         '})();</script>'
