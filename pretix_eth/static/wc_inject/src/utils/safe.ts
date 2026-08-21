@@ -109,8 +109,12 @@ export async function pollSafeTxService(
     const elapsed = Date.now() - startedAt
     await new Promise(r => setTimeout(r, elapsed < 5 * 60_000 ? 5_000 : 15_000))
   }
+  // By the time this budget runs out the quote has expired too, so
+  // self-service re-verification would be rejected (quote window) — the
+  // honest guidance is the support path, which the admin panel resolves
+  // via manual verify with override_quote_window.
   throw new Error(
-    'Safe transaction timed out — please complete the signing in your Safe and click Retry verification with the onchain tx hash.',
+    'Safe transaction timed out. If your co-signers have completed (or will complete) the transaction, do NOT pay again — contact support below with the transaction hash from your Safe and we will confirm your order manually.',
   )
 }
 
