@@ -1554,7 +1554,14 @@ _ITEM_PRICING_JS_BODY = r"""
     // own struck original price.
     '.ped-eth-row del.ped-eth-list,.ped-fiat-row del.ped-fiat-list{' +
       'color:#777;font-size:0.78em;font-weight:normal;' +
-      'text-decoration:line-through;margin-right:3px}'
+      'text-decoration:line-through;margin-right:3px}' +
+    // One line per price row: Pretix\'s own stylesheet stacks the struck
+    // list price above the discounted one inside `.price p` (block-level
+    // del/ins), which made the ETH chip two-line while the Fiat row
+    // rendered "struck new" inline. Force both back inline — as inline
+    // content the pair still wraps when the chip runs out of room.
+    '.price .ped-row > p del{display:inline;margin-right:3px}' +
+    '.price .ped-row > p ins{display:inline;text-decoration:none}'
   );
 
   // Self-contained dollar-sign-in-tile icon for the Fiat pill. The dark

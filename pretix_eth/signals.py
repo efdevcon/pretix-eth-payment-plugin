@@ -344,6 +344,71 @@ def inject_matomo_bridge(sender, request, **kwargs):
     return format_html('<script src="{}"></script>', url)
 
 
+@receiver(html_head, dispatch_uid='wc_voucher_discount_inject')
+def inject_voucher_discount(sender, request, **kwargs):
+    """Spell out the voucher's discount on the redeem page.
+
+    Pretix's voucher page communicates the discount only as a struck
+    list price next to the new one — easy to miss, and it never says HOW
+    MUCH the voucher takes off. This injects (a) a success banner naming
+    the voucher and its discount ("10% off") above the product list and
+    (b) a small "(10% off)" note next to each discounted price.
+
+    Only fires on `event.redeem` with a resolvable voucher. Percent and
+    subtract price modes get an explicit amount; `set` mode just names
+    the voucher (the struck price already shows the delta); `none`
+    (unlock-only vouchers, no price change) stays silent. All dynamic
+    values reach the DOM via textContent, never markup.
+    """
+    match = getattr(request, 'resolver_match', None)
+    url_name = (match.url_name or '') if match else ''
+    if url_name != 'event.redeem':
+        return ''
+    code = (request.GET.get('voucher') or '').strip()
+    if not code:
+        return ''
+    try:
+        voucher = sender.vouchers.filter(code__iexact=code).first()
+    except Exception:
+        return ''
+    if voucher is None:
+        return ''
+
+    label = None
+    value = voucher.value
+    if voucher.price_mode == 'percent' and value:
+        label = '%s%% off' % ('%f' % value).rstrip('0').rstrip('.')
+    elif voucher.price_mode == 'subtract' and value:
+        label = '%s %s off' % (('%f' % value).rstrip('0').rstrip('.'), sender.currency)
+    elif voucher.price_mode != 'set':
+        return ''
+
+    import json
+    payload = json.dumps({'code': voucher.code, 'label': label}).replace('<', '\\u003c')
+    script = (
+        '<script>(function(){var V=' + payload + ';'
+        'function run(){try{'
+        'var form=document.querySelector(\'form[action*="/cart/add"]\');'
+        'if(!form||document.getElementById("wc-voucher-banner"))return;'
+        'var b=document.createElement("div");b.id="wc-voucher-banner";'
+        'b.className="alert alert-success";'
+        'var s=document.createElement("strong");'
+        's.textContent="Voucher "+V.code+" applied"+(V.label?": "+V.label:"");'
+        'b.appendChild(s);form.parentNode.insertBefore(b,form);'
+        'if(V.label){var ps=form.querySelectorAll(".price p");'
+        'for(var i=0;i<ps.length;i++){var p=ps[i];'
+        'if(!p.querySelector("del")||!p.querySelector("ins"))continue;'
+        'var t=document.createElement("span");t.className="text-success";'
+        't.style.fontSize="0.78em";t.style.fontWeight="normal";t.style.whiteSpace="nowrap";'
+        't.textContent=" ("+V.label+")";p.appendChild(t);}}'
+        '}catch(e){}}'
+        'if(document.readyState==="loading"){document.addEventListener("DOMContentLoaded",run);}else{run();}'
+        '})();</script>'
+    )
+    from django.utils.safestring import mark_safe
+    return mark_safe(script)
+
+
 @receiver(pre_save, sender=OrderFee, dispatch_uid='wc_stripe_fee_label')
 def set_stripe_fee_label(sender, instance, **kwargs):
     """Set OrderFee.description on Stripe payment fees so the line shown
