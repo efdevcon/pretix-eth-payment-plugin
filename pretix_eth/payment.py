@@ -14,6 +14,36 @@ from pretix.base.payment import BasePaymentProvider
 
 from pretix_eth.chains import SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA
 
+
+def _asset_fingerprint():
+    """Short content hash of the wc_inject assets, computed once per process.
+
+    Used as the static-URL cache-buster so browsers re-fetch exactly when the
+    served files change — bumping __version__ alone is not enough (a `pretix
+    rebuild` can refresh the files under an unchanged version, and the reverse:
+    a version bump without a rebuild must NOT bust caches into stale copies).
+    Hashes the package's own copy, which `pretix rebuild` mirrors into the
+    collected static root. Falls back to __version__ if the files are missing.
+    """
+    global _ASSET_FINGERPRINT
+    if _ASSET_FINGERPRINT is None:
+        import hashlib
+        import os
+        h = hashlib.md5()
+        base = os.path.join(os.path.dirname(__file__), 'static', 'wc_inject', 'dist')
+        try:
+            for name in ('bundle.js', 'styles.css'):
+                with open(os.path.join(base, name), 'rb') as f:
+                    h.update(f.read())
+            _ASSET_FINGERPRINT = h.hexdigest()[:12]
+        except OSError:
+            from pretix_eth import __version__
+            _ASSET_FINGERPRINT = __version__
+    return _ASSET_FINGERPRINT
+
+
+_ASSET_FINGERPRINT = None
+
 log = logging.getLogger(__name__)
 
 
@@ -522,14 +552,17 @@ class WalletConnectPayment(BasePaymentProvider):
                 'frontend_order_url_template': (
                     self.settings.get('frontend_order_url_template', default='') or ''
                 ),
-                # Cache-buster for the bundle + stylesheet. Pretix serves /static/
-                # with a long max-age header; without a version query string,
-                # mobile browsers (and service workers) serve stale copies of
-                # bundle.js/styles.css for days after a plugin update. Bumping
-                # __version__ in pretix_eth/__init__.py busts the cache across
-                # every client. For dev iteration between version bumps, admins
-                # can also force a hard refresh / clear cache.
+                # Version string for client-info telemetry (NOT the cache
+                # buster — see asset_version below).
                 'plugin_version': _plugin_version,
+                # Cache-buster for the bundle + stylesheet. Pretix serves
+                # /static/ with a one-year max-age, so the ?v= query string is
+                # the only thing that makes browsers re-fetch after a deploy.
+                # Keyed on the CONTENT of the served assets, not __version__:
+                # the two can desync (2026-08-21: a `pretix rebuild` refreshed
+                # bundle.js under an unchanged version, and every browser that
+                # had seen that version kept its year-long stale copy).
+                'asset_version': '%s-%s' % (_plugin_version, _asset_fingerprint()),
                 # Single-token / single-chain ETH-on-mainnet wave-launch
                 # mode — drives the ConnectStep heading ("Pay with ETH"
                 # instead of "Pay with crypto") so the buyer doesn't
