@@ -69,7 +69,11 @@ export async function probeSafe(
 export async function pollSafeTxService(
   chainId: number | undefined,
   safeTxHash: string,
-  budgetMs = 5 * 60_000,
+  // 30 min, matching pollSafeMessagesService. The old 5 min default lost a
+  // real mainnet payment (2026-08): the co-signer executed 15-37 min after
+  // the pay click, both attempts had already timed out, and the discarded
+  // safeTxHash left only the paste-a-hash recovery cliff.
+  budgetMs = 30 * 60_000,
 ): Promise<string> {
   const host = safeTxServiceHost(chainId)
   if (!host) {
@@ -100,7 +104,10 @@ export async function pollSafeTxService(
       if (err instanceof Error && err.message.includes('not found in Safe')) throw err
       // Network blip — keep polling
     }
-    await new Promise(r => setTimeout(r, 5_000))
+    // Fast cadence while an eager single-sig execution would land; ease off
+    // once we're clearly waiting on human co-signers.
+    const elapsed = Date.now() - startedAt
+    await new Promise(r => setTimeout(r, elapsed < 5 * 60_000 ? 5_000 : 15_000))
   }
   throw new Error(
     'Safe transaction timed out — please complete the signing in your Safe and click Retry verification with the onchain tx hash.',

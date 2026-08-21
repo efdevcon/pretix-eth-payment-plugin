@@ -568,16 +568,25 @@ export function CheckoutStep({
   // that looks stuck. Null when not cooling down. `nowMs` ticks every
   // second while a cooldown is active so the countdown actually counts.
   const [verifyCooldownUntil, setVerifyCooldownUntil] = useState<number | null>(null)
+  // Safe co-signing wait: non-null (quote expiry, ms) while pollSafeTxService
+  // is in flight. Drives the "Waiting for Safe signatures" status copy and its
+  // countdown — after quote expiry a late execution can't settle automatically
+  // (verify enforces the quote window on the tx's block timestamp), so the
+  // buyer needs to see the clock while co-signers can still make it.
+  const [safeCosignWaitUntil, setSafeCosignWaitUntil] = useState<number | null>(null)
   const [nowMs, setNowMs] = useState(() => Date.now())
   useEffect(() => {
-    if (verifyCooldownUntil == null) return
+    if (verifyCooldownUntil == null && safeCosignWaitUntil == null) return
     setNowMs(Date.now())
     const id = setInterval(() => setNowMs(Date.now()), 1000)
     return () => clearInterval(id)
-  }, [verifyCooldownUntil])
+  }, [verifyCooldownUntil, safeCosignWaitUntil])
   const cooldownRemaining = verifyCooldownUntil
     ? Math.max(0, Math.ceil((verifyCooldownUntil - nowMs) / 1000))
     : 0
+  const safeCosignSecondsLeft = safeCosignWaitUntil == null
+    ? null
+    : Math.max(0, Math.ceil((safeCosignWaitUntil - nowMs) / 1000))
 
   // Safe (multisig) detection state — populated by the post-`useAccount`
   // effect below. Declared here so the recovery / picker render paths
@@ -1581,7 +1590,15 @@ export function CheckoutStep({
         dbg('safe:send:returned', { safeTxHash })
         setStatus('verifying')
         dbg('safe:tx:poll-start', { chainId: q.chain_id, safeTxHash })
-        minedHash = await pollSafeTxService(q.chain_id, safeTxHash)
+        // Show the co-signing status + countdown while we wait (see
+        // safeCosignWaitUntil). Cleared on every exit path — success,
+        // poll timeout, or any other throw — so the copy can't stick.
+        setSafeCosignWaitUntil(q.expires_at ? q.expires_at * 1000 : null)
+        try {
+          minedHash = await pollSafeTxService(q.chain_id, safeTxHash)
+        } finally {
+          setSafeCosignWaitUntil(null)
+        }
         dbg('safe:tx:poll-done', { safeTxHash, onChainHash: minedHash })
         // Persist once we have the real on-chain hash (the Safe only
         // executes after the co-signer threshold is met; before that no
@@ -1842,6 +1859,11 @@ export function CheckoutStep({
         if (cooldownRemaining > 0) {
           return `Network busy \u2014 retrying in ${cooldownRemaining}s\u2026`
         }
+        // Safe co-signing wait: nothing is on-chain yet, so "Confirming"
+        // would be a lie \u2014 name the actual wait.
+        if (safeCosignSecondsLeft != null) {
+          return 'Waiting for Safe signatures\u2026'
+        }
         // Friendly copy, no bare "0/1" \u2014 that fraction reads as a stalled
         // counter to non-technical buyers. Show plain "Confirming\u2026" while
         // we're at zero confirmations, and only surface a progress count
@@ -1934,6 +1956,10 @@ export function CheckoutStep({
         if (cooldownRemaining > 0) {
           return `Network busy — retrying in ${cooldownRemaining}s`
         }
+        // Safe co-signing wait: the tx isn't on-chain yet.
+        if (safeCosignSecondsLeft != null) {
+          return 'Waiting for Safe signatures…'
+        }
         // See `buttonLabel` for rationale — skip the fraction when we're
         // at 0 or the chain only needs a single block (avoids the noisy
         // "0/1" reading), and frame the progress in natural language
@@ -1977,6 +2003,25 @@ export function CheckoutStep({
           // Reassure: their payment is already on-chain; we're just waiting
           // out a busy-network throttle before re-checking it. No re-pay.
           return 'Your payment is sent — waiting to re-check it. No need to pay again.'
+        }
+        // Safe co-signing wait: tell the buyer what's pending (how many
+        // signatures), that the page must stay open, and how long the
+        // price quote stays valid — a Safe executed after quote expiry
+        // can't settle automatically and goes to manual review, so the
+        // countdown is the single most actionable number on the screen.
+        if (safeCosignSecondsLeft != null) {
+          const sigs = safeThreshold && safeThreshold > 1
+            ? `Collect ${safeThreshold} signatures and execute in your Safe`
+            : 'Sign and execute in your Safe'
+          if (safeCosignSecondsLeft > 0) {
+            const m = Math.floor(safeCosignSecondsLeft / 60)
+            const s = String(safeCosignSecondsLeft % 60).padStart(2, '0')
+            return `${sigs} within ${m}:${s} — keep this page open.`
+          }
+          // Past quote expiry the payment can't confirm automatically —
+          // route the buyer to the always-visible support pill below the
+          // card (prefilled email) so a human can manually confirm.
+          return `${sigs}. The price quote has expired, so this page can't confirm the payment automatically any more — after executing, use "Contact support" below with your order code and the transaction hash from your Safe, and we'll confirm your order manually.`
         }
         // Ethereum L1's ~12 s block time means a single confirmation is
         // ~12 s; the default 3-conf setup is ~36 s — long enough buyers
