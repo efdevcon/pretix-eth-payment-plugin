@@ -114,6 +114,16 @@ const RETRYABLE_ERROR_SUBSTRINGS = [
   'rpc error',
 ]
 
+// Case-insensitive on purpose. The backend spells it `RPC error: …` (e.g.
+// `RPC error: prestateTracer diffMode unavailable` when Alchemy's debug
+// endpoint times out right after mining) and a case-sensitive match turned
+// that transient into a terminal error: polling stopped and the buyer had to
+// press "Check payment status" by hand (prod order 2026-09-02 15:20 UTC).
+function isRetryableVerifyError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return RETRYABLE_ERROR_SUBSTRINGS.some((s) => lower.includes(s))
+}
+
 const SYMBOL_DISPLAY: Record<string, string> = { USDT0: 'USD₮0' }
 
 function displaySymbol(sym: string): string {
@@ -994,7 +1004,7 @@ export function CheckoutStep({
             continue
           }
           rlBackoff = 0
-          if (!RETRYABLE_ERROR_SUBSTRINGS.some((s) => errMsg.includes(s))) {
+          if (!isRetryableVerifyError(errMsg)) {
             setConfirmProgress(null)
             throw new Error(errMsg)
           }
