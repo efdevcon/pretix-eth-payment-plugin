@@ -1217,15 +1217,12 @@ export function CheckoutStep({
     }
     setRecoveryHashSubmitting(true)
     try {
-      // Best-effort client check that the tx came from this order's payer.
-      // RPC lookup may lag/fail — the backend verify is the real authority.
-      try {
-        const tx = await getTransaction(wagmiConfig, { hash: raw as `0x${string}`, chainId: quote.chain_id })
-        if (tx && (tx.from ?? '').toLowerCase() !== quote.intended_payer.toLowerCase()) {
-          setRecoveryHashError('That transaction was sent from a different wallet than this order’s payment.')
-          return
-        }
-      } catch { /* lookup best-effort */ }
+      // No client-side payer pre-check here: the backend re-binds the hash
+      // against EVERY quote this order minted (payer + amount + recipient +
+      // quote window), so a wrong hash is rejected safely — while a hard
+      // client check against only the CURRENT quote's payer falsely blocked
+      // buyers who paid from a different wallet than the one connected now
+      // (multi-wallet sessions do happen in the wild).
       setRecoveryHashInput('')
       persistTx(quote, raw)
       runVerifyOnly(quote, raw)
@@ -2514,6 +2511,44 @@ export function CheckoutStep({
             </button>
           </div>
           {manualHashError && <div className="wc-recovery-error">{manualHashError}</div>}
+        </div>
+      )}
+
+      {/* Paid, but we never received the tx hash (some mobile wallets
+          drop the WalletConnect callback mid-send, e.g. after a chain
+          switch): after any errored attempt a quote exists, so the
+          buyer can paste the hash from their wallet history and the backend
+          verifies it against every quote this order minted. Hidden while
+          the nonce-discovery recovery drives its own UI above, and when the
+          broadcast-tx card already shows the same input. */}
+      {status === 'error' && !!quote && !pendingTxHash && recoveryStatus === null && (
+        <div className="wc-recovery-prompt">
+          <div className="wc-recovery-message">
+            Already sent the payment? If your wallet shows a successful
+            transaction, paste its hash here and we’ll verify it — no need
+            to pay again.
+          </div>
+          <div className="wc-recovery-row">
+            <input
+              type="text"
+              className="wc-recovery-input"
+              placeholder="0x…"
+              value={recoveryHashInput}
+              onChange={e => setRecoveryHashInput(e.target.value)}
+              disabled={recoveryHashSubmitting}
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              className="btn btn-primary wc-recovery-submit"
+              onClick={submitRecoveryHash}
+              disabled={recoveryHashSubmitting || !recoveryHashInput.trim()}
+            >
+              {recoveryHashSubmitting ? 'Verifying payment…' : 'Verify payment'}
+            </button>
+          </div>
+          {recoveryHashError && <div className="wc-recovery-error">{recoveryHashError}</div>}
         </div>
       )}
 

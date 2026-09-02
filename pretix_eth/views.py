@@ -6,7 +6,7 @@ import os
 import re
 import secrets
 import time
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 
 from django.core.cache import cache
@@ -22,7 +22,7 @@ from eth_account import Account
 from eth_account.messages import encode_defunct
 from eth_utils import to_checksum_address
 
-from pretix.base.models import Event, Order
+from pretix.base.models import Event, Order, OrderPayment
 from pretix_eth.chains import (
     SUPPORTED_CHAINS, ALL_SYMBOLS, CHAIN_METADATA,
     is_supported,
@@ -204,6 +204,11 @@ def _read_body(request) -> dict:
 
 
 _TX_HASH_RE = re.compile(r'^0x[a-fA-F0-9]{64}$')
+
+# How long after a quote's expires_at a still-unmined tx keeps being treated
+# as "in progress" before verify tells the client to stop polling. Absorbs
+# RPC indexer lag on a tx mined right at the end of the window.
+_UNMINED_EXPIRY_GRACE_S = 120
 
 
 def _get_web3(chain_id: int, settings_key):
@@ -849,6 +854,11 @@ def verify(request, **kwargs):
         chain_id = int(body['chain_id'])
     except (TypeError, ValueError):
         return _verify_bad('invalid chain_id', chain_id=body.get('chain_id'))
+    # The web3 client is built once per verify (before the candidate sweep),
+    # and get_rpc_url raises for chains it has no endpoint for. Refuse
+    # unknown chains here so that stays a 400, never an unhandled 500.
+    if chain_id not in SUPPORTED_CHAINS:
+        return _verify_bad('unsupported chain_id', chain_id=chain_id)
 
     # Fail fast on one-time tx_hash check. Now exact-match against the
     # canonicalised lowercase form (see V45 note above).
@@ -882,99 +892,247 @@ def verify(request, **kwargs):
         else:
             candidates = [order]
 
+        # Locate the ADDRESSED quote — the quote_id the client submitted.
+        # First pass (unchanged, the hot path): live wc payments. Fallback:
+        # the quote may live on a superseded payment — "change payment
+        # method" cancels the old payment but keeps its full quote in
+        # info_data, and the client's mount-recovery resubmits that old
+        # quote_id after a reload. quote_id is a 128-bit secret bearer
+        # handle either way, and settlement below is always scoped to the
+        # single order that minted it.
         payment = None
+        addressed_quote = None
         for candidate in candidates:
             for p in candidate.payments.filter(provider='walletconnect', state='created'):
                 if (p.info_data or {}).get('quote', {}).get('quote_id') == body['quote_id']:
                     order = candidate
                     payment = p
+                    addressed_quote = p.info_data['quote']
                     break
             if payment is not None:
                 break
 
         if payment is None:
+            stale = OrderPayment.objects.filter(
+                order__event__slug=body['event'],
+                order__event__organizer__slug=body['organizer'],
+                provider='walletconnect',
+                # DB-side prefilter; the exact-match re-check below is the
+                # authority (token_urlsafe ids are LIKE-safe: no wildcards).
+                info__contains=body['quote_id'],
+            ).order_by('-created').first()
+            if stale is not None and \
+                    (stale.info_data or {}).get('quote', {}).get('quote_id') == body['quote_id']:
+                order = stale.order
+                addressed_quote = stale.info_data['quote']
+                # Settle onto the order's CURRENT live payment (the one
+                # pay/change replaced the addressed one with) — a canceled
+                # payment must never be confirmed.
+                payment = order.payments.filter(
+                    provider='walletconnect', state='created',
+                ).order_by('-created').first()
+                if payment is None:
+                    return _verify_bad(
+                        'no active crypto payment on this order — reopen the payment page and try again',
+                        status=409, quote_id=body.get('quote_id'))
+
+        if payment is None or addressed_quote is None:
             return _verify_bad('quote not found', status=404, quote_id=body.get('quote_id'))
-
-        quote = payment.info_data['quote']
-
-        if chain_id != quote['chain_id']:
-            return _verify_bad('chain_id mismatch',
-                               submitted=chain_id, quote=quote.get('chain_id'))
-
-        if time.time() > quote['expires_at']:
-            return _verify_bad('quote expired',
-                               expires_at=quote['expires_at'], now=int(time.time()))
-
-        # V46: re-check the WC config at settlement time. An operator can flip
-        # the provider/chain/token toggles off between quote creation and
-        # verify; without this re-check, in-flight quotes would still settle
-        # against now-disabled rails.
-        _, err = _wc_config_or_403(order.event, chain_id=chain_id, symbol=quote.get('symbol'))
-        if err is not None:
-            return err
 
         provider = WalletConnectPayment(order.event)
         settings_key = provider.settings.get('alchemy_api_key', default=None)
         min_conf = int(provider.settings.get('min_confirmations', default=1))
-
-        # V75/V79: re-establish the signer against the order's OWN stored quote
-        # before settling. A validator that was only transiently authorized at
-        # quote time (ERC-1271 toggle, EIP-7702 delegation) no longer validates.
-        signer_ok, signer_reason = _revalidate_quote_signer(quote, settings_key)
-        if not signer_ok:
-            return _verify_bad(signer_reason, tx_hash=tx_hash)
-
         w3 = _get_web3(chain_id, settings_key)
 
-        amount_raw = int(quote['amount_raw'])
-        if quote['symbol'] == 'ETH':
-            vr = verify_native_eth(
-                w3=w3, tx_hash=tx_hash,
-                expected_from=quote['intended_payer'],
-                expected_to=quote['receive_address'],
-                expected_amount_wei=amount_raw,
-                min_confirmations=min_conf,
-            )
-        else:
-            vr = verify_erc20_transfer(
-                w3=w3, chain_id=chain_id, tx_hash=tx_hash,
-                expected_from=quote['intended_payer'],
-                expected_to=quote['receive_address'],
-                expected_token=quote['token_address'],
-                expected_amount=amount_raw,
-                min_confirmations=min_conf,
-            )
+        def _lazy_bad(reason, status=400, **extra):
+            # Rejection responses inside the candidate sweep are LAZY: a
+            # candidate's failure only logs + materializes if it ends up
+            # being the response actually returned — a rejection that a
+            # sibling quote supersedes must not leave a misleading
+            # "wc_verify rejected" line for a verify that succeeded.
+            return lambda: _verify_bad(reason, status=status, **extra)
 
-        if not vr.verified:
-            log.warning('wc_verify rejected: on-chain verify failed: %s (tx=%s)', vr.error, tx_hash)
-            # Surface confirmation progress for the wc_inject UI's progress bar.
-            return JsonResponse({
-                'verified': False,
-                'error': vr.error,
-                'confirmations': vr.confirmations,
-                'confirmations_required': vr.min_confirmations,
-            }, status=400)
+        # Candidate quotes for settlement, strongest first: the addressed
+        # quote, the live payment's own current quote, then every other full
+        # quote stored on this ORDER's wc payments (newest first, superseded
+        # payments included). A tx can only settle against the quote it was
+        # actually minted for — every candidate is checked against ALL of its
+        # own bindings below (payer signature, amount, recipient, config,
+        # order total, and the V49 block-timestamp window) — so trying the
+        # order's own other quotes only adds recovery paths (a buyer who
+        # churned payments after a wallet dropped the tx callback can now
+        # self-verify) without widening what any single quote accepts.
+        # Cross-order claiming stays impossible: candidates come exclusively
+        # from this order's payments, and the tx-hash one-time-use constraint
+        # still holds globally.
+        candidate_quotes = []
+        _seen_quote_ids = set()
 
-        # V49: bind the on-chain transfer to the quote's freshness window.
-        # Without this, any prior matching transfer (e.g. a refund, a stale
-        # canceled-quote transfer, or an out-of-band send to the merchant)
-        # could be replayed once into a future quote. The plain ERC-20
-        # `Transfer` log carries no order/quote binding, so the only way to
-        # require "this transfer was made FOR this quote" is to constrain the
-        # block timestamp to the quote window.
-        try:
-            receipt_block = w3.eth.get_block(vr.block_number)
-            block_ts = int(receipt_block.timestamp)
-        except Exception as e:
-            return _verify_bad(f'failed to fetch block timestamp: {e}', tx_hash=tx_hash)
-        quote_created = int(quote.get('created_at', 0))
-        quote_expires = int(quote.get('expires_at', 0))
-        if quote_created and block_ts < quote_created:
-            return _verify_bad('tx mined before quote was issued',
-                               block_ts=block_ts, quote_created=quote_created, tx_hash=tx_hash)
-        if quote_expires and block_ts > quote_expires:
-            return _verify_bad('tx mined after quote expired',
-                               block_ts=block_ts, quote_expires=quote_expires, tx_hash=tx_hash)
+        def _add_candidate(q):
+            qid = (q or {}).get('quote_id')
+            if not qid or qid in _seen_quote_ids:
+                return
+            _seen_quote_ids.add(qid)
+            candidate_quotes.append(q)
+
+        _add_candidate(addressed_quote)
+        _add_candidate((payment.info_data or {}).get('quote'))
+        for p in order.payments.filter(provider='walletconnect').order_by('-created'):
+            if len(candidate_quotes) >= 12:
+                break
+            _add_candidate((p.info_data or {}).get('quote'))
+
+        # All candidates point at the same tx — fetch its block timestamp once.
+        _block_ts_cache = {}
+
+        def _try_candidate(q):
+            """Run EVERY settlement binding for one quote candidate against
+            the submitted tx. Returns (kind, payload):
+              ('ok', vr)         — all bindings hold, safe to claim
+              ('progress', fn)   — transient (tx unmined / confirmations
+                                   pending / RPC hiccup): the client should
+                                   keep polling; other candidates can't do
+                                   better for the same tx, so no sweep
+              ('reject', fn)     — terminal mismatch for THIS candidate
+            Failure payloads are zero-arg callables producing the response
+            (see _lazy_bad). Pure check — nothing here mutates state."""
+            if chain_id != q.get('chain_id'):
+                return 'reject', _lazy_bad('chain_id mismatch',
+                                           submitted=chain_id, quote=q.get('chain_id'))
+
+            # V46: re-check the WC config at settlement time. An operator can
+            # flip the provider/chain/token toggles off between quote creation
+            # and verify; without this re-check, in-flight quotes would still
+            # settle against now-disabled rails. Applies to historical
+            # candidates all the same.
+            _, err = _wc_config_or_403(order.event, chain_id=chain_id, symbol=q.get('symbol'))
+            if err is not None:
+                return 'reject', (lambda: err)
+
+            # The quote priced THIS order's total at mint time. If the order
+            # total changed since (order edit between payment attempts), the
+            # quote no longer pays for this order — never settle across
+            # totals, at the old price OR the new one.
+            try:
+                if Decimal(str(q.get('order_total_usd'))) != Decimal(str(order.total)):
+                    return 'reject', _lazy_bad(
+                        'quote total does not match the current order total (re-quote required)',
+                        quote_total=q.get('order_total_usd'), order_total=str(order.total))
+            except (InvalidOperation, TypeError, ValueError):
+                return 'reject', _lazy_bad('quote has no valid total (re-quote required)')
+
+            # V75/V79: re-establish the signer against the candidate's OWN
+            # bound signature before settling. A validator that was only
+            # transiently authorized at quote time (ERC-1271 toggle, EIP-7702
+            # delegation) no longer validates. Candidates without signer
+            # bindings are refused (fail closed).
+            signer_ok, signer_reason = _revalidate_quote_signer(q, settings_key)
+            if not signer_ok:
+                return 'reject', _lazy_bad(signer_reason, tx_hash=tx_hash)
+
+            amount_raw = int(q['amount_raw'])
+            if q['symbol'] == 'ETH':
+                vr = verify_native_eth(
+                    w3=w3, tx_hash=tx_hash,
+                    expected_from=q['intended_payer'],
+                    expected_to=q['receive_address'],
+                    expected_amount_wei=amount_raw,
+                    min_confirmations=min_conf,
+                )
+            else:
+                vr = verify_erc20_transfer(
+                    w3=w3, chain_id=chain_id, tx_hash=tx_hash,
+                    expected_from=q['intended_payer'],
+                    expected_to=q['receive_address'],
+                    expected_token=q['token_address'],
+                    expected_amount=amount_raw,
+                    min_confirmations=min_conf,
+                )
+
+            if not vr.verified:
+                err_s = vr.error or ''
+                transient = (
+                    err_s.startswith('RPC error')
+                    or err_s == 'tx not mined yet'
+                    or err_s.startswith('insufficient confirmations')
+                )
+                # A tx that is still unmined once the quote's wall-clock window
+                # has passed can never satisfy the V49 block-timestamp binding
+                # below — tell the client to stop polling (same terminal
+                # 'quote expired' contract as before this sweep existed).
+                # The grace period covers RPC indexer lag: a tx mined in the
+                # last seconds of the window may not be visible to our node
+                # yet, and rejecting it terminally would strand a real payer.
+                if err_s == 'tx not mined yet' and \
+                        time.time() > int(q.get('expires_at', 0)) + _UNMINED_EXPIRY_GRACE_S:
+                    return 'reject', _lazy_bad('quote expired',
+                                               expires_at=q.get('expires_at'), now=int(time.time()))
+                def _onchain_resp(vr=vr, qid=q.get('quote_id'), was_transient=transient):
+                    if not was_transient:
+                        log.warning('wc_verify rejected: on-chain verify failed: %s (tx=%s quote=%s)',
+                                    vr.error, tx_hash, qid)
+                    return JsonResponse({
+                        'verified': False,
+                        'error': vr.error,
+                        'confirmations': vr.confirmations,
+                        'confirmations_required': vr.min_confirmations,
+                    }, status=400)
+                if transient:
+                    return 'progress', _onchain_resp
+                return 'reject', _onchain_resp
+
+            # V49: bind the on-chain transfer to the candidate's OWN freshness
+            # window. Without this, any prior matching transfer (e.g. a
+            # refund, a stale canceled-quote transfer, or an out-of-band send
+            # to the merchant) could be replayed once into a future quote. The
+            # plain ERC-20 `Transfer` log carries no order/quote binding, so
+            # the only way to require "this transfer was made FOR this quote"
+            # is to constrain the block timestamp to the quote window. (The
+            # old standalone wall-clock expiry check is intentionally gone:
+            # a mined tx is immutable, so verifying it after the window closes
+            # adds nothing an attacker could use — the mined-inside-the-window
+            # requirement is the security property, and it lets a buyer whose
+            # confirmations landed late still self-verify.)
+            if vr.block_number not in _block_ts_cache:
+                try:
+                    _block_ts_cache[vr.block_number] = int(w3.eth.get_block(vr.block_number).timestamp)
+                except Exception as e:
+                    return 'progress', _lazy_bad(f'failed to fetch block timestamp: {e}', tx_hash=tx_hash)
+            block_ts = _block_ts_cache[vr.block_number]
+            quote_created = int(q.get('created_at', 0))
+            quote_expires = int(q.get('expires_at', 0))
+            if quote_created and block_ts < quote_created:
+                return 'reject', _lazy_bad('tx mined before quote was issued',
+                                           block_ts=block_ts, quote_created=quote_created, tx_hash=tx_hash)
+            if quote_expires and block_ts > quote_expires:
+                return 'reject', _lazy_bad('tx mined after quote expired',
+                                           block_ts=block_ts, quote_expires=quote_expires, tx_hash=tx_hash)
+            return 'ok', vr
+
+        selected_quote = None
+        vr = None
+        primary_failure = None  # the ADDRESSED candidate's failure response
+        for q in candidate_quotes:
+            kind, payload = _try_candidate(q)
+            if kind == 'ok':
+                selected_quote = q
+                vr = payload
+                break
+            if primary_failure is None:
+                primary_failure = payload
+            if kind == 'progress':
+                # Transient state is a property of the tx, not the quote —
+                # sweeping further candidates can't help and would multiply
+                # RPC load on every client poll tick.
+                break
+
+        if selected_quote is None:
+            return primary_failure()
+
+        quote = selected_quote
+        if quote.get('quote_id') != addressed_quote.get('quote_id'):
+            log.info('[wc verify] order=%s tx=%s settling via sibling quote %s (addressed %s)',
+                     order.code, tx_hash, quote.get('quote_id'), addressed_quote.get('quote_id'))
 
         # OFAC re-check at settlement: the SDN list may have gained the payer
         # between quote time and now. The funds are already on-chain at this
@@ -1031,6 +1189,12 @@ def verify(request, **kwargs):
                 # admin UI as literal text.
                 info['amount'] = str(quote['amount_raw'])
                 info['block_number'] = vr.block_number
+                if quote.get('quote_id') != ((info.get('quote') or {}).get('quote_id')):
+                    # Settled via one of the order's earlier quotes (payment
+                    # churn recovery) — keep the full audit trail on the
+                    # payment that got confirmed.
+                    info['settled_quote_id'] = quote.get('quote_id')
+                    info['quote_claimed_from_history'] = True
                 payment.info_data = info
                 payment.save()
 

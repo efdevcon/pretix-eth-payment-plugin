@@ -3,6 +3,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from web3.exceptions import TransactionNotFound
+
 log = logging.getLogger(__name__)
 
 # keccak256("Transfer(address,address,uint256)")
@@ -50,8 +52,13 @@ def verify_erc20_transfer(*, w3, chain_id: int, tx_hash: str,
     if expected_amount <= 0:
         return VerificationResult(False, error=f'invalid expected_amount: {expected_amount}')
 
+    # web3 >= 5 raises for an unknown hash rather than returning None, so
+    # catch it explicitly: callers key "still unmined" off this exact string
+    # (the generic 'RPC error' branch is for node/network failures).
     try:
         receipt = w3.eth.get_transaction_receipt(tx_hash)
+    except TransactionNotFound:
+        return VerificationResult(False, error='tx not mined yet')
     except Exception as e:
         return VerificationResult(False, error=f'RPC error: {e}')
 
@@ -204,6 +211,8 @@ def verify_native_eth(*, w3, tx_hash: str, expected_from: str,
     try:
         receipt = w3.eth.get_transaction_receipt(tx_hash)
         tx = w3.eth.get_transaction(tx_hash)
+    except TransactionNotFound:
+        return VerificationResult(False, error='tx not mined yet')
     except Exception as e:
         return VerificationResult(False, error=f'RPC error: {e}')
 
