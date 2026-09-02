@@ -30,6 +30,17 @@ export interface WCConfig {
    *  as the post-payment redirect fallback when `frontendOrderUrlTemplate`
    *  is not configured. */
   pretixOrderUrl: string
+  /** Pretix's "change payment method" page for this order (absolute, custom
+   *  domain aware). Target of the empty-wallet exit in CheckoutStep. Empty
+   *  or missing on older templates — the bundle then derives it from
+   *  `pretixOrderUrl`. */
+  changePaymentUrl?: string
+  /** True when a card provider (Stripe) is enabled and allowed for this
+   *  order, so the empty-wallet exit can say "pay by card" outright. */
+  cardPaymentAvailable?: boolean
+  /** True when ANY other payment provider is available for this order.
+   *  When false the empty-wallet exit shows no switch shortcut at all. */
+  otherPaymentMethodsAvailable?: boolean
   csrfToken: string
   /** Optional support email set in the plugin admin. Shown in a fallback
    *  contact block if the buyer's payment gets stuck; empty string hides it. */

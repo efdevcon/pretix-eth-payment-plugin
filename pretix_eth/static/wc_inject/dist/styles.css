@@ -477,6 +477,39 @@ body.wc-full-checkout input.btn-primary[type="submit"] {
   width: fit-content;
 }
 
+/* Empty-wallet exit. Replaces the Pay button when the connected wallet
+   holds none of the accepted assets on any enabled network — a disabled
+   "Insufficient balance" button is a dead end there. Same soft palette
+   as the recovery prompt: informational, not an error. */
+.wc-empty-wallet {
+  margin-top: 16px;
+  padding: 14px;
+  background: #fefce8;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: center;
+}
+.wc-empty-wallet-message {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #1f2937;
+}
+/* The switch CTA reuses Pretix's .btn-primary + .wc-pay-btn so it reads
+   as THE primary action; the panel's gap replaces the button's own top
+   margin. Anchor, not button — it navigates to Pretix's change page. */
+.wc-empty-wallet-switch {
+  margin-top: 0;
+}
+.wc-empty-wallet-help {
+  display: block;
+  margin: 0 auto;
+  width: fit-content;
+}
+
 .wc-error {
   color: var(--pretix-brand-danger, #c62828);
   padding: 8px 12px;

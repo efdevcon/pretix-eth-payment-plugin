@@ -1922,6 +1922,54 @@ export function CheckoutStep({
   })()
   const pickedInsufficient = pickedSufficient === false
 
+  // Empty-wallet exit. When the connected wallet holds NONE of the assets
+  // this event accepts, on any enabled network, switching rows can't help
+  // and a disabled "Insufficient balance" button is a dead end. Asserted
+  // only from an explicit zero for EVERY option: both balance backends emit
+  // zero entries for supported combos, so a missing entry means that chain
+  // lookup failed and we can't tell — then keep the regular button rather
+  // than turn away a buyer who may well be funded.
+  const walletEmpty: boolean = (() => {
+    if (!balancesQuery.data || options.length === 0) return false
+    for (const opt of options) {
+      const entry = findBalance(balancesQuery.data, opt.chain_id, opt.symbol)
+      if (!entry) return false
+      try {
+        if (BigInt(entry.balance) !== BigInt(0)) return false
+      } catch {
+        return false
+      }
+    }
+    return true
+  })()
+
+  // "No ETH on Ethereum mainnet" in the single-rail (wave-launch) case,
+  // "No ETH or USDC on any supported network" when several rails are on.
+  const emptyWalletHeadline = (() => {
+    const symbols = [...new Set(options.map(o => o.symbol))]
+    const chainLabel = (o: PaymentOption) => (o.chain_id === 1 ? 'Ethereum mainnet' : o.chain_name)
+    const chains = [...new Set(options.map(chainLabel))]
+    const what = englishList(symbols)
+    return chains.length === 1 ? `No ${what} on ${chains[0]}` : `No ${what} on any supported network`
+  })()
+
+  // Where "pay by card" goes: Pretix's change-payment page. Older templates
+  // don't inject it — derive from the order URL, which the change page
+  // hangs off (`/order/{code}/{secret}/pay/change`).
+  const changePaymentUrl = config.changePaymentUrl
+    || (config.pretixOrderUrl ? `${config.pretixOrderUrl.replace(/\/?$/, '/')}pay/change` : '')
+  const switchLabel = config.cardPaymentAvailable
+    ? 'Pay by card instead'
+    : config.otherPaymentMethodsAvailable
+      ? 'Choose another payment method'
+      : null
+  const showPaymentSwitch = !!changePaymentUrl && switchLabel !== null
+  const emptyWalletTail = config.cardPaymentAvailable
+    ? 'bridge or pay by card.'
+    : config.otherPaymentMethodsAvailable
+      ? 'bridge or use another payment method.'
+      : 'bridge or top up to continue.'
+
   // Mobile-Safari CB SW warning + deep-link to the CB Wallet in-app
   // browser (Pretix URL carries order_code/order_secret so it resumes).
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : ''
@@ -2441,6 +2489,34 @@ export function CheckoutStep({
               My payment didn’t go through — start a new one
             </button>
           </>
+        ) : walletEmpty ? (
+          // Nothing to pay with on any rail: swap the dead disabled button
+          // for a way out. Balances keep polling (and the picker's refresh
+          // button still works), so topping up brings the Pay button back
+          // on its own.
+          <div className="wc-empty-wallet" role="status">
+            <p className="wc-empty-wallet-message">
+              <strong>{emptyWalletHeadline}</strong> — {emptyWalletTail}
+            </p>
+            {showPaymentSwitch && (
+              <a
+                className="btn btn-primary btn-lg btn-block wc-pay-btn wc-empty-wallet-switch"
+                href={changePaymentUrl}
+              >
+                {switchLabel} →
+              </a>
+            )}
+            {options.some(o => o.symbol === 'ETH') && (
+              <a
+                className="wc-find-wallet wc-empty-wallet-help"
+                href="https://ethereum.org/get-eth/"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Where to get ETH? →
+              </a>
+            )}
+          </div>
         ) : (
           <button
             type="button"
@@ -2458,8 +2534,9 @@ export function CheckoutStep({
           Same subtle styling as the ConnectStep "where to get a wallet" link
           so the visual vocabulary stays consistent. Only shown for ETH
           since the destination URL is ETH-specific — for stables the buyer
-          typically already knows where to top up. */}
-      {showPicker && pickedInsufficient && picked?.symbol === 'ETH' && (
+          typically already knows where to top up. The empty-wallet panel
+          carries its own copy of this link, so skip it there. */}
+      {showPicker && pickedInsufficient && picked?.symbol === 'ETH' && !walletEmpty && (
         <a
           className="wc-find-wallet wc-insufficient-helper"
           href="https://ethereum.org/get-eth/"

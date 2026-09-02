@@ -512,6 +512,50 @@ class WalletConnectPayment(BasePaymentProvider):
                 pretix_order_url = ''
                 eventreverse = None  # type: ignore
 
+            # Pretix's own "change payment method" page for this order. The
+            # wc UI's empty-wallet exit links here so a buyer holding no
+            # crypto can switch provider in one tap instead of staring at
+            # a disabled Pay button.
+            try:
+                from pretix.multidomain.urlreverse import build_absolute_uri as _abs
+                change_payment_url = _abs(
+                    order.event, 'presale:event.order.pay.change',
+                    kwargs={'order': order.code, 'secret': order.secret},
+                )
+            except Exception:
+                change_payment_url = ''
+
+            # What that page would actually offer. Drives the exit copy
+            # ("pay by card" vs a generic "another payment method") and
+            # hides the shortcut entirely when crypto is the only option.
+            # Best effort: any provider misbehaving must not break checkout.
+            card_payment_available = False
+            other_payment_methods_available = False
+            try:
+                for pp in order.event.get_payment_providers(cached=True).values():
+                    if pp.identifier == self.identifier or pp.is_meta or not pp.is_enabled:
+                        continue
+                    # Pretix-internal rails a buyer can't simply "switch to":
+                    # implicit ones (free / offsetting / box office) and gift
+                    # cards, which presuppose the buyer already holds one.
+                    implicit = pp.is_implicit
+                    if implicit(request) if callable(implicit) else bool(implicit):
+                        continue
+                    if pp.identifier == 'giftcard':
+                        continue
+                    try:
+                        if not pp.is_allowed(request, total=order.total):
+                            continue
+                    except Exception:
+                        pass  # treat as offered; the change page decides
+                    other_payment_methods_available = True
+                    # Stripe's card method is plain `stripe`; other gateways
+                    # suffix theirs (`mollie_creditcard`, `*_cc`, `*_card`).
+                    if pp.identifier == 'stripe' or pp.identifier.endswith(('_cc', '_card', '_creditcard')):
+                        card_payment_available = True
+            except Exception as e:
+                log.warning('[wc confirm] could not enumerate other payment providers: %s', e)
+
             # Resolve the plugin's event-scoped URL prefix. `eventreverse`
             # returns the right path on every domain mode:
             #   main domain → /devcon/8/plugin/wc/payment-options/
@@ -533,6 +577,9 @@ class WalletConnectPayment(BasePaymentProvider):
                 'organizer_slug': order.event.organizer.slug,
                 'event_slug': order.event.slug,
                 'pretix_order_url': pretix_order_url,
+                'change_payment_url': change_payment_url,
+                'card_payment_available': card_payment_available,
+                'other_payment_methods_available': other_payment_methods_available,
                 'order_code': order.code,
                 'order_secret': order.secret,
                 # Used by the wc_inject UI to gate insufficient-balance rows
