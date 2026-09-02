@@ -502,3 +502,159 @@ def test_verify_unmined_tx_after_expiry_grace_is_terminal(client, event_configur
     assert resp.status_code == 400
     assert resp.json()['error'] == 'quote expired'
     assert not WCPaymentAttempt.objects.filter(tx_hash='0x' + 'd' * 64).exists()
+
+
+# ---------------------------------------------------------------------------
+# Same-PAYMENT quote history (re-quote after reload / Pay again):
+# create-quote overwrites `info['quote']` but appends the old one to
+# `info['quotes']`; the sweep must settle against those too — with their own
+# bindings — and must ignore legacy entries that carry no signer binding.
+# ---------------------------------------------------------------------------
+
+def _add_history_quote(order, *, quote_id, amount_raw, created_at, expires_at,
+                       signed=True, order_total_usd='50.00'):
+    """Append an earlier quote to the LIVE payment's `quotes` history, the way
+    create_quote leaves it after a re-quote on the same payment. `signed=False`
+    mimics history rows written before the history carried signer bindings."""
+    with scopes_disabled():
+        p = order.payments.get(provider='walletconnect', state='created')
+        info = p.info_data
+        entry = {
+            'quote_id': quote_id,
+            'order_code': order.code,
+            'chain_id': 8453,
+            'symbol': 'USDC',
+            'token_address': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+            'amount_raw': str(amount_raw),
+            'receive_address': '0x' + '2' * 40,
+            'intended_payer': '0x' + '1' * 40,
+            'eth_price_usd': None,
+            'created_at': created_at,
+            'expires_at': expires_at,
+            'order_total_usd': order_total_usd,
+        }
+        if signed:
+            entry.update({
+                'signature': '0x' + '33' * 65,
+                'signed_message': 'Devcon ticket payment',
+                'sig_chain_id': 8453,
+                'payer_code_prefix': None,
+            })
+        info['quotes'] = list(info.get('quotes') or []) + [entry]
+        p.info_data = info
+        p.save()
+        return p
+
+
+def _tx_for_history(now, amount):
+    return _make_fake_w3(
+        from_addr='0x' + '1' * 40,
+        to_addr='0x' + '2' * 40,
+        token='0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        amount=amount,
+        block_ts=now - 100,   # inside the OLD quote's window, before the live quote
+    )
+
+
+def _post_verify(client, event, *, quote_id, tx_hash):
+    return client.post('/plugin/wc/verify/', data=json.dumps({
+        'quote_id': quote_id,
+        'tx_hash': tx_hash,
+        'chain_id': 8453,
+        'organizer': event.organizer.slug,
+        'event': event.slug,
+    }), content_type='application/json')
+
+
+@pytest.mark.django_db
+def test_verify_settles_via_same_payment_quote_history(client, event_configured, quoted_order):
+    """The dcdev2 NZ9QA shape: tx paid for quote A, wallet dropped the hash,
+    buyer reloaded and clicked Pay → quote B overwrote A on the SAME payment.
+    Submitting B (all the page has) with A's tx must settle via A's history
+    entry, on A's own bindings."""
+    now = int(time.time())
+    _add_history_quote(quoted_order, quote_id='q_hist_aaa', amount_raw=49_000_000,
+                       created_at=now - 300, expires_at=now - 30)
+    tx = '0x' + 'c3' * 32
+    with mock.patch('pretix_eth.views._get_web3', return_value=_tx_for_history(now, 49_000_000)), \
+         mock.patch('pretix_eth.views._revalidate_quote_signer', return_value=(True, '')):
+        resp = _post_verify(client, event_configured, quote_id='q_test_12345', tx_hash=tx)
+
+    assert resp.status_code == 200, resp.content
+    with scopes_disabled():
+        live = quoted_order.payments.get(provider='walletconnect', state='confirmed')
+        assert live.info_data.get('quote_claimed_from_history') is True
+        assert live.info_data.get('settled_quote_id') == 'q_hist_aaa'
+        assert live.info_data.get('amount') == '49000000'
+    assert WCPaymentAttempt.objects.get(tx_hash=tx).quote_id == 'q_hist_aaa'
+
+
+@pytest.mark.django_db
+def test_verify_resolves_history_quote_id_directly(client, event_configured, quoted_order):
+    """The first window (still holding quote A) pastes the hash after the
+    second window re-quoted: A's id must resolve through the history and
+    settle the live payment, not 404 as 'quote not found'."""
+    now = int(time.time())
+    _add_history_quote(quoted_order, quote_id='q_hist_bbb', amount_raw=49_500_000,
+                       created_at=now - 300, expires_at=now - 30)
+    tx = '0x' + 'c4' * 32
+    with mock.patch('pretix_eth.views._get_web3', return_value=_tx_for_history(now, 49_500_000)), \
+         mock.patch('pretix_eth.views._revalidate_quote_signer', return_value=(True, '')):
+        resp = _post_verify(client, event_configured, quote_id='q_hist_bbb', tx_hash=tx)
+
+    assert resp.status_code == 200, resp.content
+    with scopes_disabled():
+        assert quoted_order.payments.filter(provider='walletconnect', state='confirmed').count() == 1
+
+
+@pytest.mark.django_db
+def test_verify_ignores_history_entries_without_signer_binding(client, event_configured, quoted_order):
+    """Legacy slim history rows (no signature) can never pass the signer
+    re-validation, so they must not become candidates at all — even when the
+    tx matches them perfectly. Fail closed."""
+    now = int(time.time())
+    _add_history_quote(quoted_order, quote_id='q_hist_ccc', amount_raw=48_000_000,
+                       created_at=now - 300, expires_at=now - 30, signed=False)
+    tx = '0x' + 'c5' * 32
+    with mock.patch('pretix_eth.views._get_web3', return_value=_tx_for_history(now, 48_000_000)), \
+         mock.patch('pretix_eth.views._revalidate_quote_signer', return_value=(True, '')):
+        resp = _post_verify(client, event_configured, quote_id='q_test_12345', tx_hash=tx)
+        resp_direct = _post_verify(client, event_configured, quote_id='q_hist_ccc', tx_hash=tx)
+
+    assert resp.status_code == 400
+    assert resp_direct.status_code == 404
+    assert not WCPaymentAttempt.objects.filter(tx_hash=tx).exists()
+    with scopes_disabled():
+        assert not quoted_order.payments.filter(state='confirmed').exists()
+
+
+@pytest.mark.django_db
+def test_verify_history_never_crosses_orders(client, event_configured, quoted_order, event):
+    """A history quote on ANOTHER order that matches the tx must not settle
+    this order (and must not settle that one either)."""
+    from datetime import timedelta
+    from pretix.base.models import Order
+    from decimal import Decimal
+    from django.utils import timezone
+
+    now = int(time.time())
+    with scopes_disabled():
+        sc = event.organizer.sales_channels.get(identifier='web')
+        other = Order.objects.create(
+            event=event, email='other@example.com', status=Order.STATUS_PENDING,
+            total=Decimal('50.00'), code='VERIFY3', datetime=timezone.now(),
+            expires=timezone.now() + timedelta(hours=1), sales_channel=sc, locale='en',
+        )
+        other.payments.create(provider='walletconnect', amount=other.total, state='created')
+    _add_history_quote(other, quote_id='q_hist_ddd', amount_raw=47_500_000,
+                       created_at=now - 300, expires_at=now - 30)
+    tx = '0x' + 'c6' * 32
+    with mock.patch('pretix_eth.views._get_web3', return_value=_tx_for_history(now, 47_500_000)), \
+         mock.patch('pretix_eth.views._revalidate_quote_signer', return_value=(True, '')):
+        resp = _post_verify(client, event_configured, quote_id='q_test_12345', tx_hash=tx)
+
+    assert resp.status_code == 400
+    assert not WCPaymentAttempt.objects.filter(tx_hash=tx).exists()
+    with scopes_disabled():
+        assert not quoted_order.payments.filter(state='confirmed').exists()
+        assert not other.payments.filter(state='confirmed').exists()

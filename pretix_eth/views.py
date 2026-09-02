@@ -729,24 +729,19 @@ def create_quote(request, **kwargs):
 
         info['quote'] = quote
         # Append-only quote history. A buyer who re-quotes on the SAME payment
-        # (e.g. switching wallet/token in the widget) would otherwise overwrite
-        # `info['quote']` and lose the earlier attempts — leaving admin recovery
-        # blind to which wallets/amounts were tried. Keep slim entries (no
-        # signature blob, to bound info_data size), deduped by quote_id and
-        # capped. Admin recovery + the manual-verify picker read this history.
+        # (reload + Pay again after a wallet dropped the tx callback, or
+        # switching wallet/token in the widget) overwrites `info['quote']`;
+        # without this, the tx they already sent for the earlier quote could
+        # never be verified again (dcdev2 order 2026-09-02: tx mined 10s
+        # before the re-quote was issued, V49 window refused it). Entries are
+        # FULL quotes — verify's candidate sweep needs the signer bindings
+        # (signature / signed_message / sig_chain_id / payer_code_prefix) and
+        # the receive address to re-run every settlement check against them;
+        # entries without a signature are ignored there (fail closed).
+        # Deduped by quote_id and capped, so info_data stays bounded.
         hist = list(info.get('quotes') or [])
         if not any(h.get('quote_id') == quote['quote_id'] for h in hist):
-            hist.append({
-                'quote_id': quote['quote_id'],
-                'chain_id': quote['chain_id'],
-                'symbol': quote['symbol'],
-                'token_address': quote.get('token_address'),
-                'intended_payer': quote['intended_payer'],
-                'amount_raw': quote['amount_raw'],
-                'order_total_usd': quote.get('order_total_usd'),
-                'created_at': quote['created_at'],
-                'expires_at': quote['expires_at'],
-            })
+            hist.append(dict(quote))
         info['quotes'] = hist[-25:]
         # V53: clear the failed-sig counter on success so a buyer who hit
         # one bad sig and corrected it doesn't carry the budget tax into
@@ -892,10 +887,33 @@ def verify(request, **kwargs):
         else:
             candidates = [order]
 
+        def _full_quotes_on(p):
+            """Every settle-able quote stored on one wc payment, newest first:
+            the live `quote`, then the `quotes` history (re-quotes on the same
+            payment). History entries written before the history carried
+            signer bindings have no `signature` and are skipped — they could
+            never pass the signer re-validation, so they must not occupy
+            candidate slots or resolve an addressed quote_id."""
+            pinfo = p.info_data or {}
+            out = []
+            live = pinfo.get('quote')
+            if live and live.get('quote_id'):
+                out.append(live)
+            for hq in reversed(pinfo.get('quotes') or []):
+                if hq.get('quote_id') and hq.get('signature'):
+                    out.append(hq)
+            return out
+
+        def _quote_on(p, quote_id):
+            for q in _full_quotes_on(p):
+                if q.get('quote_id') == quote_id:
+                    return q
+            return None
+
         # Locate the ADDRESSED quote — the quote_id the client submitted.
-        # First pass (unchanged, the hot path): live wc payments. Fallback:
-        # the quote may live on a superseded payment — "change payment
-        # method" cancels the old payment but keeps its full quote in
+        # First pass (the hot path): live wc payments, live quote or history.
+        # Fallback: the quote may live on a superseded payment — "change
+        # payment method" cancels the old payment but keeps its quotes in
         # info_data, and the client's mount-recovery resubmits that old
         # quote_id after a reload. quote_id is a 128-bit secret bearer
         # handle either way, and settlement below is always scoped to the
@@ -904,27 +922,33 @@ def verify(request, **kwargs):
         addressed_quote = None
         for candidate in candidates:
             for p in candidate.payments.filter(provider='walletconnect', state='created'):
-                if (p.info_data or {}).get('quote', {}).get('quote_id') == body['quote_id']:
+                q = _quote_on(p, body['quote_id'])
+                if q is not None:
                     order = candidate
                     payment = p
-                    addressed_quote = p.info_data['quote']
+                    addressed_quote = q
                     break
             if payment is not None:
                 break
 
         if payment is None:
-            stale = OrderPayment.objects.filter(
+            stale_matches = OrderPayment.objects.filter(
                 order__event__slug=body['event'],
                 order__event__organizer__slug=body['organizer'],
                 provider='walletconnect',
                 # DB-side prefilter; the exact-match re-check below is the
                 # authority (token_urlsafe ids are LIKE-safe: no wildcards).
+                # Several rows can contain the id as text (a confirmed
+                # payment records `settled_quote_id`), hence the small scan
+                # rather than `.first()`.
                 info__contains=body['quote_id'],
-            ).order_by('-created').first()
-            if stale is not None and \
-                    (stale.info_data or {}).get('quote', {}).get('quote_id') == body['quote_id']:
+            ).order_by('-created')[:10]
+            for stale in stale_matches:
+                q = _quote_on(stale, body['quote_id'])
+                if q is None:
+                    continue
                 order = stale.order
-                addressed_quote = stale.info_data['quote']
+                addressed_quote = q
                 # Settle onto the order's CURRENT live payment (the one
                 # pay/change replaced the addressed one with) — a canceled
                 # payment must never be confirmed.
@@ -935,6 +959,7 @@ def verify(request, **kwargs):
                     return _verify_bad(
                         'no active crypto payment on this order — reopen the payment page and try again',
                         status=409, quote_id=body.get('quote_id'))
+                break
 
         if payment is None or addressed_quote is None:
             return _verify_bad('quote not found', status=404, quote_id=body.get('quote_id'))
@@ -954,17 +979,19 @@ def verify(request, **kwargs):
 
         # Candidate quotes for settlement, strongest first: the addressed
         # quote, the live payment's own current quote, then every other full
-        # quote stored on this ORDER's wc payments (newest first, superseded
-        # payments included). A tx can only settle against the quote it was
-        # actually minted for — every candidate is checked against ALL of its
-        # own bindings below (payer signature, amount, recipient, config,
-        # order total, and the V49 block-timestamp window) — so trying the
-        # order's own other quotes only adds recovery paths (a buyer who
-        # churned payments after a wallet dropped the tx callback can now
-        # self-verify) without widening what any single quote accepts.
-        # Cross-order claiming stays impossible: candidates come exclusively
-        # from this order's payments, and the tx-hash one-time-use constraint
-        # still holds globally.
+        # quote stored on this ORDER's wc payments — live quotes first, then
+        # the per-payment `quotes` history (re-quotes on the same payment),
+        # newest first, superseded payments included. A tx can only settle
+        # against the quote it was actually minted for — every candidate is
+        # checked against ALL of its own bindings below (payer signature,
+        # amount, recipient, config, order total, and the V49 block-timestamp
+        # window) — so trying the order's own other quotes only adds recovery
+        # paths (a buyer who churned payments, or reloaded and clicked Pay
+        # again, after a wallet dropped the tx callback can now self-verify)
+        # without widening what any single quote accepts. Cross-order
+        # claiming stays impossible: candidates come exclusively from this
+        # order's payments, and the tx-hash one-time-use constraint still
+        # holds globally.
         candidate_quotes = []
         _seen_quote_ids = set()
 
@@ -977,10 +1004,17 @@ def verify(request, **kwargs):
 
         _add_candidate(addressed_quote)
         _add_candidate((payment.info_data or {}).get('quote'))
-        for p in order.payments.filter(provider='walletconnect').order_by('-created'):
+        order_payments = list(order.payments.filter(provider='walletconnect').order_by('-created'))
+        for p in order_payments:
             if len(candidate_quotes) >= 12:
                 break
             _add_candidate((p.info_data or {}).get('quote'))
+        for p in order_payments:
+            # Live quotes are already in; `_add_candidate` dedupes them.
+            for hq in _full_quotes_on(p):
+                if len(candidate_quotes) >= 12:
+                    break
+                _add_candidate(hq)
 
         # All candidates point at the same tx — fetch its block timestamp once.
         _block_ts_cache = {}

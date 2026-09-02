@@ -84,6 +84,71 @@ def test_create_quote_recovers_payer_from_signature(
     assert body['amount_raw'] == '50000000'
 
 
+def _issue_challenge(order, nonce):
+    """Mimic /challenge: a fresh nonce on the live payment, keeping the rest
+    of info_data (the previous quote + history) intact."""
+    with scopes_disabled():
+        payment = order.payments.get(provider='walletconnect', state='created')
+        info = payment.info_data
+        expires_at = int(time.time()) + 600
+        message = f'Pretix ticket payment\nOrder: {order.code}\nNonce: {nonce}\nExpires: {expires_at}'
+        info.update({
+            'challenge_nonce': nonce,
+            'challenge_message': message,
+            'challenge_expires_at': expires_at,
+        })
+        payment.info_data = info
+        payment.save()
+    return message
+
+
+def _quote(client, event, order, nonce, message, acct):
+    signed = acct.sign_message(encode_defunct(text=message))
+    return client.post('/plugin/wc/create-quote/', data=json.dumps({
+        'order_code': order.code,
+        'order_secret': order.secret,
+        'organizer': event.organizer.slug,
+        'event': event.slug,
+        'chain_id': 8453, 'symbol': 'USDC',
+        'nonce': nonce, 'signature': signed.signature.hex(),
+    }), content_type='application/json')
+
+
+@pytest.mark.django_db
+def test_requote_keeps_previous_quote_as_full_history_entry(
+    client, event_configured, pending_order_with_challenge,
+):
+    """Re-quoting on the SAME payment (reload + Pay again) overwrites
+    `info['quote']`; the previous quote must survive in `info['quotes']` WITH
+    its signer bindings, so verify's sweep can still settle a tx that was
+    sent for it (see test_views_verify same-payment history tests)."""
+    order = pending_order_with_challenge
+    acct = Account.create()
+    with scopes_disabled():
+        info = order.payments.first().info_data
+    first = _quote(client, event_configured, order, info['challenge_nonce'], info['challenge_message'], acct)
+    assert first.status_code == 200, first.content
+    first_id = first.json()['quote_id']
+
+    message = _issue_challenge(order, 'testnonce456')
+    second = _quote(client, event_configured, order, 'testnonce456', message, acct)
+    assert second.status_code == 200, second.content
+    second_id = second.json()['quote_id']
+    assert second_id != first_id
+
+    with scopes_disabled():
+        info = order.payments.get(provider='walletconnect', state='created').info_data
+    assert info['quote']['quote_id'] == second_id
+    hist_ids = [h['quote_id'] for h in info['quotes']]
+    assert hist_ids == [first_id, second_id]
+    old = info['quotes'][0]
+    # Everything verify needs to re-run the settlement bindings against it.
+    for key in ('signature', 'signed_message', 'sig_chain_id', 'intended_payer',
+                'receive_address', 'amount_raw', 'created_at', 'expires_at', 'order_total_usd'):
+        assert old.get(key) not in (None, ''), key
+    assert old['intended_payer'].lower() == acct.address.lower()
+
+
 @pytest.mark.django_db
 def test_create_quote_rejects_wrong_nonce(
     client, event_configured, pending_order_with_challenge,
