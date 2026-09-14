@@ -1,5 +1,10 @@
 {% load i18n %}
 <dl class="dl-horizontal">
+  {% if token_amount %}
+    <dt>{% trans "Amount" %}</dt>
+    <dd>{{ token_amount }} {{ token_symbol|default:"" }}</dd>
+  {% endif %}
+
   {% if chain_name or chain_id %}
     <dt>{% trans "Chain" %}</dt>
     <dd>{{ chain_name|default:"" }}{% if chain_id %} ({{ chain_id }}){% endif %}</dd>

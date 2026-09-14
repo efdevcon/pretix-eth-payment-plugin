@@ -750,6 +750,8 @@ def admin_refund(request: HttpRequest, **kwargs):
                         amount=completed.total_usd,
                         refund_tx_hash=tx_hash,
                         chain_id=completed.chain_id,
+                        token_amount=completed.crypto_amount,
+                        token_symbol=completed.token_symbol,
                     )
                 except Exception as e:
                     log.warning(
@@ -805,6 +807,15 @@ def admin_wc_refund(request: HttpRequest, **kwargs):
         chain_id_int = int(chain_id)
     except (TypeError, ValueError):
         return JsonResponse({'success': False, 'error': 'invalid chain_id'}, status=400)
+    # Optional: what actually went back on-chain (token base units + symbol),
+    # so the buyer email and the Pretix refund detail show the crypto figure.
+    # Derived from the payment when absent (see record_pretix_refund).
+    token_amount = body.get('token_amount')
+    token_symbol = body.get('token_symbol')
+    if token_amount is not None and not re.fullmatch(r'\d{1,80}', str(token_amount)):
+        return JsonResponse({'success': False, 'error': 'invalid token_amount'}, status=400)
+    if token_symbol is not None and not re.fullmatch(r'[A-Za-z0-9]{1,12}', str(token_symbol)):
+        return JsonResponse({'success': False, 'error': 'invalid token_symbol'}, status=400)
 
     import json as _json
     from django.db import transaction
@@ -842,6 +853,8 @@ def admin_wc_refund(request: HttpRequest, **kwargs):
                 amount=amount,
                 refund_tx_hash=refund_tx_hash,
                 chain_id=chain_id_int,
+                token_amount=token_amount,
+                token_symbol=token_symbol,
             )
         except Exception as e:
             log.exception('[wc refund] record_pretix_refund failed for %s', pretix_order_code)

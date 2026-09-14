@@ -789,6 +789,10 @@ class WalletConnectPayment(BasePaymentProvider):
         return {
             'refund_tx_hash': info.get('refund_tx_hash'),
             'chain_id': info.get('chain_id'),
+            # What went back on-chain, base units + symbol (see
+            # record_pretix_refund); absent on refunds recorded before this.
+            'token_amount': info.get('token_amount'),
+            'token_symbol': info.get('token_symbol'),
         }
 
     def order_pending_mail_render(self, order, payment) -> str:
@@ -890,6 +894,7 @@ class WalletConnectPayment(BasePaymentProvider):
             info = {}
         tx_hash = info.get('refund_tx_hash')
         chain_id = info.get('chain_id')
+        token_symbol = info.get('token_symbol')
         explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
         tpl = get_template('pretix_eth/refund.html')
         return tpl.render({
@@ -897,6 +902,8 @@ class WalletConnectPayment(BasePaymentProvider):
             'chain_id': chain_id,
             'chain_name': CHAIN_METADATA.get(chain_id, {}).get('name'),
             'explorer_url': f'{explorer}{tx_hash}' if tx_hash and explorer else None,
+            'token_amount': _format_crypto_amount(info.get('token_amount'), token_symbol) if info.get('token_amount') else None,
+            'token_symbol': token_symbol,
         })
 
     def payment_refund_supported(self, payment):

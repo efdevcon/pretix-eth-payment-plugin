@@ -423,8 +423,40 @@ def create_pretix_order(*, event, order_data: dict, total_usd: str):
     return order
 
 
+def derive_token_amount(payment_info: dict, payment_usd, refund_usd):
+    """Token base units matching `refund_usd` of a payment whose on-chain
+    amount (`payment_info['amount']`, wei / 6-decimal units) and USD value
+    (`payment_usd`) are known: the same share of the raw amount as the refund
+    is of the payment, in integer math rounding down. Tickets are priced in
+    USD but paid in ETH, and no ETH price is stored per position, so the
+    payment's own rate is the only honest one; the devcon admin panel sizes
+    its on-chain send with this exact formula, so a derived figure equals
+    what was sent. Returns (amount_str, token_symbol), or (None, None) when
+    the payment lacks the figures."""
+    from decimal import Decimal, ROUND_HALF_UP
+    raw = (payment_info or {}).get('amount')
+    symbol = (payment_info or {}).get('token_symbol')
+    if raw in (None, '') or not symbol:
+        return None, None
+    s = str(raw).strip()
+    if s.endswith('(raw)'):  # legacy rows from views.py
+        s = s[:-len('(raw)')].strip()
+    try:
+        n = int(s)
+        cents = lambda v: int((Decimal(str(v)) * 100).quantize(Decimal('1'), rounding=ROUND_HALF_UP))  # noqa: E731
+        paid_c, refund_c = cents(payment_usd), cents(refund_usd)
+    except (TypeError, ValueError, ArithmeticError):
+        return None, None
+    if n <= 0 or paid_c <= 0 or refund_c <= 0:
+        return None, None
+    if refund_c >= paid_c:
+        return str(n), symbol
+    return str(n * refund_c // paid_c), symbol
+
+
 def record_pretix_refund(
     *, event, pretix_order_code: str, amount, refund_tx_hash: str, chain_id: int,
+    token_amount=None, token_symbol=None,
 ):
     """Create a matching Pretix OrderRefund so the refund is visible in
     Pretix's native order-detail UI (not just our custom admin page).
@@ -433,7 +465,13 @@ def record_pretix_refund(
     attach the on-chain refund tx hash + chain in info_data. Returns the
     refund instance or None if the Pretix order / payment can't be located
     (e.g. an orphan X402CompletedOrder from before the Pretix order was
-    created, which shouldn't normally happen)."""
+    created, which shouldn't normally happen).
+
+    `token_amount` (base units) + `token_symbol` are what actually went
+    back on-chain; the caller passes them when it knows (the admin panel
+    does). Otherwise they are derived from the payment with
+    `derive_token_amount`, so the buyer email and the Pretix refund detail
+    always carry the crypto figure, not only the USD Pretix books."""
     import json as _json
     from decimal import Decimal
     from pretix.base.models import Order, OrderRefund
@@ -472,6 +510,21 @@ def record_pretix_refund(
             f'{explorer_tx_base}{refund_tx_hash}'
             if explorer_tx_base else refund_tx_hash
         )
+        try:
+            has_token_amount = token_amount is not None and int(str(token_amount)) > 0
+        except (TypeError, ValueError):
+            has_token_amount = False
+        if not has_token_amount:
+            token_amount, token_symbol = derive_token_amount(
+                payment.info_data or {}, payment.amount, amount,
+            )
+        info = {
+            'refund_tx_hash': refund_tx_hash,
+            'chain_id': chain_id,
+        }
+        if token_amount:
+            info['token_amount'] = str(token_amount)
+            info['token_symbol'] = token_symbol
         refund = OrderRefund.objects.create(
             order=order,
             payment=payment,
@@ -479,10 +532,7 @@ def record_pretix_refund(
             state=OrderRefund.REFUND_STATE_CREATED,
             amount=Decimal(amount),
             provider='walletconnect',
-            info=_json.dumps({
-                'refund_tx_hash': refund_tx_hash,
-                'chain_id': chain_id,
-            }),
+            info=_json.dumps(info),
             comment=f'Crypto refund issued on-chain: {explorer_link}',
         )
         refund.done()
@@ -513,7 +563,10 @@ def record_pretix_refund(
         # swallowed — the refund itself is already on-chain + recorded,
         # an email blip shouldn't surface as a 5xx to the admin tool.
         try:
-            _send_refund_email(order, amount, refund_tx_hash, chain_id)
+            _send_refund_email(
+                order, amount, refund_tx_hash, chain_id,
+                token_amount=token_amount, token_symbol=token_symbol,
+            )
         except Exception as e:
             log.warning(
                 '[x402 refund] notification email failed for %s (refund still recorded): %s',
@@ -522,17 +575,42 @@ def record_pretix_refund(
         return refund
 
 
-def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
+def _send_refund_email(
+    order, amount, refund_tx_hash: str, chain_id: int,
+    token_amount=None, token_symbol=None,
+):
     """Send a notification email to the buyer when a manual refund is
     issued. Uses Pretix's `pretix.base.services.mail.mail()` so the
     email goes through the event's configured SMTP + sender, gets
     logged on the order, and respects locale conventions. Skipped
-    silently if the order has no email recorded."""
+    silently if the order has no email recorded.
+
+    The amount leads with what the buyer actually got back on-chain when
+    the token figure is known, and the USD is labeled as the figure at the
+    rate of their original payment, with one sentence saying it may not
+    match today's price (the order, invoice and Pretix's order page are all
+    in USD, so hiding it would only move the mismatch elsewhere). USD alone
+    is the fallback for rows without a token figure."""
     from pretix.base.services.mail import mail
     from i18nfield.strings import LazyI18nString
     from pretix_eth.chains import CHAIN_METADATA
+    from pretix_eth.payment import _format_crypto_amount
     if not getattr(order, 'email', None):
         return
+    crypto = _format_crypto_amount(token_amount, token_symbol) if token_amount and token_symbol else None
+    currency = order.event.currency
+    if crypto:
+        headline = f'A refund of {crypto} {token_symbol} has been issued for your order {order.code}.'
+        rate_note = (
+            f'This is {amount} {currency} at the exchange rate of your original payment, '
+            f'returned as the same share of the {token_symbol} you paid. '
+            f"It may not match today's {token_symbol} price.\n\n"
+        )
+        amount_line = f'{crypto} {token_symbol} ({amount} {currency} at your payment rate)'
+    else:
+        headline = f'A refund of {amount} {currency} has been issued for your order {order.code}.'
+        rate_note = ''
+        amount_line = f'{amount} {currency}'
     chain_meta = CHAIN_METADATA.get(chain_id) or {}
     explorer_tx_base = chain_meta.get('explorer_url')
     chain_name = chain_meta.get('name') or f'chain {chain_id}'
@@ -579,11 +657,12 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
     # `{payment_info}` block.
     body_template = LazyI18nString(
         'Hello,\n\n'
-        'A refund of {amount} {currency} has been issued for your order {order}.\n\n'
+        '{headline}\n\n'
+        '{rate_note}'
         'You can view the details of your refund below.\n\n'
         '---\n\n'
         '**Refund details**\n\n'
-        'Amount: {amount} {currency}\n\n'
+        'Amount: {amount_line}\n\n'
         'Network: {chain_name}\n\n'
         'Transaction: [View transaction]({tx_url})\n\n'
         '[View order details]({url})\n\n'
@@ -601,6 +680,9 @@ def _send_refund_email(order, amount, refund_tx_hash: str, chain_id: int):
         context={
             'order': order.code,
             'amount': str(amount),
+            'headline': headline,
+            'rate_note': rate_note,
+            'amount_line': amount_line,
             'currency': order.event.currency,
             'chain_name': chain_name,
             'tx_url': tx_url,
