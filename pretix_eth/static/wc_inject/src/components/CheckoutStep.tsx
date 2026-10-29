@@ -31,6 +31,7 @@ import type { PaymentOption } from '../hooks/usePaymentOptions'
 import type { Quote } from '../WCPaymentApp'
 import { useWalletBalances, findBalance, formatBalance } from '../hooks/useWalletBalances'
 import { WalletHeader } from './WalletHeader'
+import { walletErrorDetails } from '../utils/walletError'
 import {
   isSafeWallet,
   probeSafe,
@@ -102,6 +103,14 @@ function dbgErr(event: string, fields?: Record<string, any>) {
   // eslint-disable-next-line no-console
   console.error(`[wc_inject] ${event}`, fields ?? {})
 }
+
+// Explicit empty calldata on plain ETH sends. Some wallets over
+// WalletConnect (Trust Wallet most often) reject an eth_sendTransaction
+// without a `data` field and answer with a non-standard error, which viem
+// surfaces as "An unknown RPC error occurred." `0x` is what a plain
+// transfer carries anyway, so every other wallet is unaffected.
+const EMPTY_CALLDATA = '0x' as const
+
 
 // Backend verify errors that are transient (RPC indexer lag after tx is mined,
 // trace endpoint briefly unavailable, etc.) and should auto-retry instead of
@@ -530,6 +539,10 @@ export function CheckoutStep({
     }
   }, [picked, pickStorageKey])
   const [status, setStatus] = useState<Status>('idle')
+  // Latest rendered status, read by handlePay's catch to report which step
+  // failed (the closure's `status` is the one from when Pay was pressed).
+  const statusRef = useRef<Status>(status)
+  statusRef.current = status
   const [error, setError] = useState<string | null>(null)
   const [quote, setQuote] = useState<Quote | null>(null)
   // Subject + body of the support email displayed in a copy-paste popup
@@ -853,18 +866,20 @@ export function CheckoutStep({
   }, [address])
 
   // ── Client-info telemetry beacon ──
-  // Reports which wallet brand + connection type buyers use, in two
-  // phases (greppable separately as `[wc-client] phase=connect` and
-  // `phase=pay`): once when a wallet connects, and once when the buyer
-  // initiates payment. sendBeacon is fire-and-forget and survives the
-  // user navigating away; params ride in the URL query so they land in
-  // both the access log and the app log (server reads request.GET on the
-  // POST beacon). Telemetry must never break checkout, so everything is
-  // wrapped and failures are swallowed.
-  const sendClientInfo = useCallback((phase: 'connect' | 'pay') => {
+  // Reports which wallet brand + connection type buyers use, in three
+  // phases (greppable separately as `[wc-client] phase=connect`,
+  // `phase=pay` and `phase=error`): once when a wallet connects, once when
+  // the buyer initiates payment, and once when that attempt fails (with
+  // the wallet's own error, `extra`). sendBeacon is fire-and-forget and
+  // survives the user navigating away; params ride in the URL query so
+  // they land in both the access log and the app log (server reads
+  // request.GET on the POST beacon). Telemetry must never break checkout,
+  // so everything is wrapped and failures are swallowed.
+  const sendClientInfo = useCallback((phase: 'connect' | 'pay' | 'error', extra?: Record<string, string>) => {
     if (!address) return
     try {
       const params = new URLSearchParams({
+        ...extra,
         phase,
         organizer,
         event,
@@ -1582,6 +1597,7 @@ export function CheckoutStep({
           ? await sendTransactionAsync({
               to: q.receive_address as `0x${string}`,
               value: BigInt(q.amount_raw),
+              data: EMPTY_CALLDATA,
               chainId: q.chain_id,
             })
           : await (async () => {
@@ -1662,6 +1678,7 @@ export function CheckoutStep({
           ? () => sendTransactionAsync({
               to: q.receive_address as `0x${string}`,
               value: BigInt(q.amount_raw),
+              data: EMPTY_CALLDATA,
               chainId: q.chain_id,
             })
           : (() => {
@@ -1749,10 +1766,25 @@ export function CheckoutStep({
       onConfirmed(minedHash, q)
     } catch (e: unknown) {
       const err = e as { shortMessage?: string; message?: string; name?: string }
+      let wallet: ReturnType<typeof walletErrorDetails> | null = null
+      try {
+        wallet = walletErrorDetails(e)
+        // phase=error: the step that failed (status before this catch) and
+        // what the wallet answered, so failures can be read from the server log.
+        sendClientInfo('error', {
+          err_step: statusRef.current,
+          err_name: wallet.name,
+          err_code: wallet.code,
+          err_msg: wallet.message,
+        })
+      } catch {
+        // telemetry must never keep the buyer from seeing the error below
+      }
       dbgErr('handlePay:caught', {
         name: err.name,
         message: err.message,
         shortMessage: err.shortMessage,
+        walletError: wallet,
       })
       setError(err.shortMessage || err.message || String(e))
       setStatus('error')

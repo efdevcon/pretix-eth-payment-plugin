@@ -1264,12 +1264,18 @@ def client_info(request, **kwargs):
     server-side state change: we emit a single structured log line and
     return 204.
 
-    Two phases are emitted, each greppable on its own:
+    Three phases are emitted, each greppable on its own:
       - phase=connect : fired once when a wallet connects
       - phase=pay     : fired when the buyer initiates the payment
+      - phase=error   : fired when a payment attempt fails, with what the
+                        wallet answered (err_step / err_name / err_code /
+                        err_msg), which otherwise only reaches the buyer's
+                        browser console
     so you can compare "who connected" vs "who actually tried to pay":
       grep '\\[wc-client\\] phase=connect' app.log | grep -o 'wallet=[^ ]*' | sort | uniq -c
       grep '\\[wc-client\\] phase=pay'     app.log | grep -o 'wallet=[^ ]*' | sort | uniq -c
+    and why payments fail, per wallet:
+      grep '\\[wc-client\\] phase=error' app.log | grep -o 'err_code=[^ ]*' | sort | uniq -c
 
     Values are buyer-supplied (client-side wallet name / connection
     kind), so they're truncated and treated as untrusted display strings
@@ -1302,10 +1308,23 @@ def client_info(request, **kwargs):
     #     spike of failures with a deploy
     #   ua                            → browser/OS for platform-specific
     #     wallet quirks (iOS Safari popup blocking, in-wallet browsers)
+    #   err_*                         → phase=error only: the checkout step
+    #     that failed and the wallet's error, unwrapped from viem (a bare
+    #     "An unknown RPC error occurred." hides the wallet's own code and
+    #     message). Placed before `ua`, which holds spaces and stays last;
+    #     err_msg is quoted with inner quotes neutralised for the same reason.
     phase = _clip('phase', 16) or 'unknown'
+    error_fields = ''
+    if phase == 'error':
+        error_fields = ' err_step=%s err_name=%s err_code=%s err_msg="%s"' % (
+            _clip('err_step', 24).replace(' ', '_'),
+            _clip('err_name', 48).replace(' ', '_'),
+            _clip('err_code', 16).replace(' ', '_'),
+            _clip('err_msg', 400).replace('"', "'"),
+        )
     log.info(
         '[wc-client] phase=%s order=%s wallet=%s conn=%s wallet_chain=%s '
-        'picked_chain=%s picked_token=%s is_safe=%s ver=%s addr=%s ua=%s',
+        'picked_chain=%s picked_token=%s is_safe=%s ver=%s addr=%s%s ua=%s',
         phase,
         _clip('order_code', 16),
         _clip('wallet_name'),
@@ -1316,6 +1335,7 @@ def client_info(request, **kwargs):
         _clip('is_safe', 5),
         _clip('plugin_version', 24),
         _clip('address', 42),
+        error_fields,
         _clip('ua', 180),
     )
     return HttpResponse(status=204)
