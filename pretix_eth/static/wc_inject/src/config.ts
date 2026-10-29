@@ -110,11 +110,16 @@ export function initAppKit(projectId: string, opts?: { safePaymentsEnabled?: boo
     adapters: [wagmiAdapter],
     networks: NETWORKS,
     projectId,
+    // What the wallet shows as the requesting dApp on connect and on every
+    // signing screen. With no name or icon, wallets render a blank tile next
+    // to the domain, which reads as an anonymous site in front of a payment.
+    // The icon is an absolute PNG (wallets don't reliably follow redirects
+    // or render .ico).
     metadata: {
-      name: 'Pretix crypto payment',
-      description: 'Pay for your ticket with crypto',
+      name: 'Devcon Pretix crypto payment',
+      description: 'Pay for your Devcon ticket with crypto',
       url: typeof window !== 'undefined' ? window.location.origin : '',
-      icons: [],
+      icons: ['https://devcon.org/android-chrome-192x192.png'],
     },
     features: {
       analytics: false,
