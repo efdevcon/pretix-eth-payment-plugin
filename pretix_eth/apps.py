@@ -1,7 +1,129 @@
+import logging
+
 from django.apps import AppConfig
 from django.utils.translation import gettext_lazy as _
 
 from . import __version__
+
+_log = logging.getLogger(__name__)
+
+# Item metadata flags (Pretix ItemMetaProperty names, set per item in
+# Items > Edit > Metadata). Truthy values: "true", "yes", "1".
+#   fiat_disabled    crypto-only item: every non-crypto rail is hidden
+#   crypto_disabled  card-only item: the crypto rail is hidden
+FIAT_DISABLED_FLAG = 'fiat_disabled'
+CRYPTO_DISABLED_FLAG = 'crypto_disabled'
+
+
+def _is_truthy_meta(v):
+    if v is None:
+        return False
+    if isinstance(v, bool):
+        return v
+    return str(v).strip().lower() in ('true', 'yes', '1')
+
+
+def _items_with_flag(event, item_ids, flag):
+    """Primary keys of the given items whose `meta_data[flag]` is truthy."""
+    if not item_ids:
+        return []
+    from pretix.base.models import Item
+    # Item.meta_data aggregates ItemMetaValue rows on access. One query for
+    # the items, then in-memory iteration; carts are tiny.
+    hits = [
+        it.pk for it in Item.objects.filter(pk__in=set(item_ids))
+        if _is_truthy_meta((it.meta_data or {}).get(flag))
+    ]
+    for pk in hits:
+        _log.info('pretix_eth: %s item event=%s item=%s', flag, event.slug, pk)
+    return hits
+
+
+def _order_has_item_flag(order, flag):
+    """True when a main position of `order` is an item flagged `flag`."""
+    from pretix.base.models import OrderPosition
+    item_ids = list(OrderPosition.objects.filter(
+        order=order, addon_to__isnull=True,
+    ).values_list('item_id', flat=True))
+    return bool(_items_with_flag(order.event, item_ids, flag))
+
+
+def _cart_or_order_has_item_flag(event, request, flag):
+    """True when a main position of the buyer's current cart, or of the order
+    named in the request URL (re-pay flow), is an item flagged `flag`.
+
+    Only main positions count: add-ons follow their parent's payment
+    treatment, so a flagged add-on under an unflagged ticket changes nothing.
+    """
+    from pretix.base.models import CartPosition, OrderPosition
+
+    # Cart flow: buyer is in checkout, no order yet.
+    cart_id = None
+    try:
+        from pretix.presale.views.cart import get_or_create_cart_id
+        cart_id = get_or_create_cart_id(request, create=False)
+    except Exception as e:
+        _log.debug('pretix_eth: get_or_create_cart_id failed (%s); falling back to session key', e)
+    if not cart_id:
+        try:
+            cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
+        except Exception:
+            cart_id = None
+    if cart_id:
+        cart_item_ids = list(CartPosition.objects.filter(
+            cart_id=cart_id, event=event, addon_to__isnull=True,
+        ).values_list('item_id', flat=True))
+        if _items_with_flag(event, cart_item_ids, flag):
+            return True
+
+    # Order re-pay flow: the order code lives in the URL kwargs.
+    try:
+        match = getattr(request, 'resolver_match', None)
+        order_code = match.kwargs.get('order') if match else None
+    except Exception:
+        order_code = None
+    if order_code:
+        order_item_ids = list(OrderPosition.objects.filter(
+            order__code=order_code, order__event=event, addon_to__isnull=True,
+        ).values_list('item_id', flat=True))
+        if _items_with_flag(event, order_item_ids, flag):
+            return True
+
+    return False
+
+
+def _crypto_offered_for_current_cart(event):
+    """False when the crypto rail is not on offer for the cart or order in
+    flight: provider disabled, outside its "Available from / until" window,
+    or a main position flagged `crypto_disabled`. Reads the same thread-local
+    context as `_current_cart_markup_sum`. Fails toward True (today's
+    behaviour) so a lookup error never changes the chooser.
+    """
+    try:
+        from pretix_eth.payment import WalletConnectPayment
+        provider = WalletConnectPayment(event)
+        if not provider.settings.get('_enabled', as_type=bool, default=False):
+            return False
+        if not provider._is_available_by_time():
+            return False
+    except Exception as e:
+        _log.debug('pretix_eth: crypto availability lookup failed (%s)', e)
+        return True
+    ctx = globals().get('_fee_exempt_ctx')
+    if ctx is None:
+        return True
+    try:
+        positions = getattr(ctx, 'positions', None)
+        if positions is not None:
+            item_ids = [p.item_id for p in positions if getattr(p, 'addon_to_id', None) is None]
+            return not _items_with_flag(event, item_ids, CRYPTO_DISABLED_FLAG)
+        request = getattr(ctx, 'request', None)
+        if request is None:
+            return True
+        return not _cart_or_order_has_item_flag(event, request, CRYPTO_DISABLED_FLAG)
+    except Exception as e:
+        _log.debug('pretix_eth: crypto_disabled lookup failed (%s)', e)
+        return True
 
 
 class EthApp(AppConfig):
@@ -155,76 +277,12 @@ def _install_fiat_provider_restrictor():
     if getattr(orig_is_allowed, '_ped_fiat_wrapped', False):
         return  # idempotent: already patched (worker reload)
 
-    def _is_truthy(v):
-        if v is None:
-            return False
-        if isinstance(v, bool):
-            return v
-        return str(v).strip().lower() in ('true', 'yes', '1')
-
-    def _is_blocked_for_fiat(provider, request):
-        event = provider.event
-        from pretix.base.models import CartPosition, Item, OrderPosition
-
-        def _any_item_fiat_disabled(item_ids):
-            if not item_ids:
-                return None  # no items checked
-            # Item.meta_data aggregates ItemMetaValue rows on access. One
-            # query for the items, then in-memory iteration; small N
-            # (cart size is tiny) so this is fine.
-            items = Item.objects.filter(pk__in=set(item_ids))
-            for it in items:
-                if _is_truthy((it.meta_data or {}).get('fiat_disabled')):
-                    log.info(
-                        'pretix_eth: fiat blocked event=%s item=%s (meta_data.fiat_disabled truthy)',
-                        event.slug, it.pk,
-                    )
-                    return it.pk
-            return None
-
-        # Cart flow — buyer is in checkout, no order yet.
-        cart_id = None
-        try:
-            from pretix.presale.views.cart import get_or_create_cart_id
-            cart_id = get_or_create_cart_id(request, create=False)
-        except Exception as e:
-            log.debug('pretix_eth: get_or_create_cart_id failed (%s); falling back to session key', e)
-        if not cart_id:
-            try:
-                cart_id = request.session.get('current_cart_event_{}'.format(event.pk))
-            except Exception:
-                cart_id = None
-
-        # Only main positions dictate payment-method visibility. Add-ons
-        # follow their parent's payment treatment, so a fiat_disabled add-on
-        # under a fiat-allowed main item should not hide Stripe.
-        if cart_id:
-            cart_item_ids = list(CartPosition.objects.filter(
-                cart_id=cart_id, event=event, addon_to__isnull=True,
-            ).values_list('item_id', flat=True))
-            if _any_item_fiat_disabled(cart_item_ids):
-                return True
-
-        # Order re-pay flow — order code lives in the URL kwargs.
-        try:
-            match = getattr(request, 'resolver_match', None)
-            order_code = match.kwargs.get('order') if match else None
-        except Exception:
-            order_code = None
-        if order_code:
-            order_item_ids = list(OrderPosition.objects.filter(
-                order__code=order_code, order__event=event, addon_to__isnull=True,
-            ).values_list('item_id', flat=True))
-            if _any_item_fiat_disabled(order_item_ids):
-                return True
-
-        return False
-
     def _wrapped_is_allowed(self, request, total=None):
-        # Crypto rail (walletconnect) is never restricted by fiat_disabled.
+        # Crypto rail (walletconnect) is never restricted by fiat_disabled;
+        # its own is_allowed handles the mirror flag, crypto_disabled.
         if _is_crypto_provider_ident(getattr(self, 'identifier', '')):
             return orig_is_allowed(self, request, total)
-        if _is_blocked_for_fiat(self, request):
+        if _cart_or_order_has_item_flag(self.event, request, FIAT_DISABLED_FLAG):
             return False
         return orig_is_allowed(self, request, total)
 
@@ -712,6 +770,12 @@ def _install_fiat_fee_name_decoration():
             except Exception:
                 return base
             if markup is None or markup <= Decimal('0'):
+                return base
+            # The prefix explains the card premium against the crypto price.
+            # Without a crypto rail on offer (day-1 cutoff, card-only item in
+            # the cart) the rows already show the card price, and "+$500"
+            # would read as a second surcharge.
+            if not _crypto_offered_for_current_cart(self.event):
                 return base
             currency = (getattr(self.event, 'currency', '') or 'USD').strip() or 'USD'
             label = _format_money(markup, currency)

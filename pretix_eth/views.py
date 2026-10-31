@@ -196,6 +196,37 @@ def _wc_config_or_403(event, *, chain_id=None, symbol=None):
     return provider, None
 
 
+def _wc_available_or_404(provider, order=None):
+    """Buyer-side availability gate, applied after `_wc_config_or_403` on the
+    endpoints that START a payment (payment-options, wallet-balances,
+    challenge, create-quote). Returns a JsonResponse to short-circuit with, or
+    None when the rail may be used.
+
+    - 404 when Pretix's "Available from" / "Available until" window on the
+      provider is closed (the operator's day-1 crypto cutoff).
+    - 404 when a main position of `order` is an item flagged
+      `crypto_disabled` (card-only product).
+
+    Deliberately NOT folded into `_wc_config_or_403`: `views_admin.
+    admin_wc_verify` reuses that helper, and manual verification of a
+    pre-cutoff payment must keep working. Deliberately NOT applied to
+    `verify`: a transaction broadcast before the cutoff must still settle;
+    quotes expire on their own TTL, so refusing new quotes is enough.
+    """
+    # Root-level plugin views run without an organizer scope (the callers
+    # look the order up under scopes_disabled too).
+    with scopes_disabled():
+        if not provider._is_available_by_time(order=order):
+            return JsonResponse({'error': 'walletconnect unavailable'}, status=404)
+        if order is not None:
+            from pretix_eth.apps import CRYPTO_DISABLED_FLAG, _order_has_item_flag
+            if _order_has_item_flag(order, CRYPTO_DISABLED_FLAG):
+                return JsonResponse(
+                    {'error': 'walletconnect unavailable for an item in this order'}, status=404,
+                )
+    return None
+
+
 def _read_body(request) -> dict:
     try:
         return json.loads(request.body or b'{}')
@@ -255,11 +286,14 @@ def payment_options(request, **kwargs):
         except Event.DoesNotExist:
             return JsonResponse({'error': 'event not found'}, status=404)
 
-    _, err = _check_buyer_order_access(request, event)
+    order, err = _check_buyer_order_access(request, event)
     if err is not None:
         return err
 
     provider, err = _wc_config_or_403(event)
+    if err is not None:
+        return err
+    err = _wc_available_or_404(provider, order)
     if err is not None:
         return err
 
@@ -354,11 +388,14 @@ def wallet_balances(request, **kwargs):
         except Event.DoesNotExist:
             return JsonResponse({'error': 'event not found'}, status=404)
 
-    _, err = _check_buyer_order_access(request, event)
+    order, err = _check_buyer_order_access(request, event)
     if err is not None:
         return err
 
     provider, err = _wc_config_or_403(event)
+    if err is not None:
+        return err
+    err = _wc_available_or_404(provider, order)
     if err is not None:
         return err
 
@@ -413,7 +450,7 @@ def challenge(request, **kwargs):
             return JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
 
         # V46: bail if WC is disabled for this event before doing anything else.
-        _, err = _wc_config_or_403(event)
+        provider, err = _wc_config_or_403(event)
         if err is not None:
             return err
 
@@ -423,6 +460,10 @@ def challenge(request, **kwargs):
         order = Order.objects.filter(code=body['order_code'], event=event).first()
         if order is None or not compare_digest(order.secret, body['order_secret']):
             return JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
+
+        err = _wc_available_or_404(provider, order)
+        if err is not None:
+            return err
 
         if order.status != Order.STATUS_PENDING:
             return JsonResponse({'error': 'order not pending'}, status=409)
@@ -507,7 +548,7 @@ def create_quote(request, **kwargs):
         # V46: enforce WC enabled + per-chain + per-token toggles before
         # minting a quote. Pre-fix code only checked the global `is_supported`
         # registry, not the operator's per-event opt-out flags.
-        _, err = _wc_config_or_403(event, chain_id=chain_id, symbol=symbol)
+        provider, err = _wc_config_or_403(event, chain_id=chain_id, symbol=symbol)
         if err is not None:
             return err
 
@@ -515,6 +556,10 @@ def create_quote(request, **kwargs):
         order = Order.objects.filter(code=body['order_code'], event=event).first()
         if order is None or not compare_digest(order.secret, body['order_secret']):
             return JsonResponse({'error': 'order not found or secret mismatch'}, status=404)
+
+        err = _wc_available_or_404(provider, order)
+        if err is not None:
+            return err
 
         payment = order.payments.filter(provider='walletconnect', state='created').first()
         if payment is None:
@@ -1430,12 +1475,17 @@ class _VoucherPriceShim:
 @require_http_methods(['GET'])
 def item_pricing(request, **kwargs):
     """Per-event item pricing map: `{items: [{id, default_price,
-    fiat_price_usd, fiat_disabled}, ...]}`.
+    fiat_price_usd, fiat_after_voucher, fiat_disabled, crypto_disabled}, ...],
+    cart_lines: [...], crypto_available: bool, cart_crypto_blocked: bool}`.
 
-    Used by the wc_inject bundle to render dual prices ("$499 crypto /
+    Used by the buyer-side price script to render dual prices ("$499 crypto /
     $999 fiat") on catalog and cart pages, since Pretix's stock templates
-    only show `default_price`. Read-only, public; rate-limited per IP at
-    the same rate as other buyer endpoints.
+    only show `default_price`. `crypto_available` is False once the
+    provider's "Available from / until" window is closed (or the provider is
+    disabled); `cart_crypto_blocked` is True when the buyer's cart holds a
+    `crypto_disabled` item. Either one switches the script to card-only
+    rendering. Read-only, public; rate-limited per IP at the same rate as
+    other buyer endpoints.
 
     Resolves the event from `request.event` (when called on the
     event-scoped URL) or from `?organizer=…&event=…` (root-level URL,
@@ -1539,11 +1589,19 @@ def item_pricing(request, **kwargs):
         # each cart row by (item_id, voucher code) — the voucher code is
         # rendered on every discounted cart row (`fragment_cart.html`).
         cart_lines: list = []
+        # A cart holding one card-only item is paid by card in full, so the
+        # client renders EVERY row of that cart fiat-only.
+        cart_crypto_blocked = False
         if cart_id:
             from pretix.base.models import CartPosition
             cps = list(CartPosition.objects.filter(
                 cart_id=cart_id, event=event,
             ).select_related('item', 'variation', 'voucher'))
+            cart_crypto_blocked = any(
+                cp.addon_to_id is None
+                and _truthy(per_item_meta.get(cp.item_id, {}).get('crypto_disabled'))
+                for cp in cps
+            )
             for cp in cps:
                 iid = cp.item_id
                 fiat_raw = (per_item_meta.get(iid, {}).get('fiat_price_usd') or '').strip()
@@ -1578,8 +1636,22 @@ def item_pricing(request, **kwargs):
             'fiat_price_usd': fiat_raw,  # null when not overridden (fiat = default_price)
             'fiat_after_voucher': fiat_after_by_id.get(it['id']),  # null unless a voucher discounts the card price
             'fiat_disabled': _truthy(meta.get('fiat_disabled')),
+            'crypto_disabled': _truthy(meta.get('crypto_disabled')),
         })
-    response = JsonResponse({'items': out, 'cart_lines': cart_lines})
+    # Whether the crypto rail is on offer at all right now: provider enabled
+    # AND inside Pretix's "Available from / until" window (the day-1 cutoff).
+    # When False the client shows card prices only, no ETH chips.
+    provider = WalletConnectPayment(event)
+    crypto_available = bool(
+        provider.settings.get('_enabled', as_type=bool, default=False)
+        and provider._is_available_by_time(cart_id=cart_id)
+    )
+    response = JsonResponse({
+        'items': out,
+        'cart_lines': cart_lines,
+        'crypto_available': crypto_available,
+        'cart_crypto_blocked': cart_crypto_blocked,
+    })
     # NEVER cache this response — not even the "generic" (empty-cart) variant.
     # `fiat_after_voucher` is cart-dependent (Source 2 reads the buyer's
     # CartPositions), but the endpoint URL is STABLE as the buyer moves
@@ -1824,7 +1896,29 @@ _ITEM_PRICING_JS_BODY = r"""
     var n = parseFloat(v);
     if (!isFinite(n)) return v;
     var s = n.toFixed(2);
-    return '$' + s.replace(/\.00$/, '').replace(/(\.[0-9])0$/, '$1');
+    // Thousands grouping as Pretix\'s own `money` filter renders it
+    // ("$1,998.00"). Whole amounts drop the ".00"; amounts with cents keep
+    // both digits ("$899.10", never "$899.1"), matching Pretix and the
+    // Python-side label formatter.
+    var parts = s.split('.');
+    parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    s = parts.join('.');
+    return '$' + s.replace(/\.00$/, '');
+  }
+
+  function parseMoney(text) {
+    var m = String(text || '').replace(/,/g, '').match(/-?\d+(\.\d+)?/);
+    return m ? parseFloat(m[0]) : NaN;
+  }
+
+  // The amount Pretix rendered as the effective price: the <ins> when a
+  // voucher struck the list price, otherwise the text without <del>/<small>.
+  function nativeAmount(priceEl) {
+    var ins = priceEl.querySelector('ins');
+    if (ins) return parseMoney(ins.textContent);
+    var clone = priceEl.cloneNode(true);
+    clone.querySelectorAll('del, small').forEach(function (n) { n.remove(); });
+    return parseMoney(clone.textContent);
   }
 
   // Icon builder — glyph only, no label. `kind` selects the asset:
@@ -1883,6 +1977,122 @@ _ITEM_PRICING_JS_BODY = r"""
   function dropOrphanBrs(elem) {
     var brs = elem.querySelectorAll(':scope > br');
     for (var i = 0; i < brs.length; i++) brs[i].remove();
+  }
+
+  // Card price override for an item: the voucher-discounted card price when
+  // the server computed one, else the card list price. null when the item
+  // has no `fiat_price_usd`: then Pretix\'s native price IS the card price
+  // (and already reflects any voucher).
+  function cardOverride(info) {
+    if (info.fiat_price_usd == null) return null;
+    var v = info.fiat_after_voucher != null ? info.fiat_after_voucher : info.fiat_price_usd;
+    var n = parseFloat(v);
+    return isFinite(n) ? n : null;
+  }
+
+  // Replace the amount inside Pretix\'s price element, keeping its tax
+  // <small> (moveTaxNoticeToBottom relocates it afterwards).
+  function setPriceAmount(priceEl, amount, struckList) {
+    var keep = [];
+    for (var i = 0; i < priceEl.childNodes.length; i++) {
+      var n = priceEl.childNodes[i];
+      if (n.nodeType === 1 && n.tagName === 'SMALL') keep.push(n);
+    }
+    while (priceEl.firstChild) priceEl.removeChild(priceEl.firstChild);
+    if (struckList != null) {
+      var d = document.createElement('del');
+      d.className = 'ped-fiat-list';
+      d.textContent = fmtMoney(struckList);
+      priceEl.appendChild(d);
+    }
+    priceEl.appendChild(document.createTextNode(fmtMoney(amount)));
+    keep.forEach(function (k) { priceEl.appendChild(k); });
+  }
+
+  // Card-only presentation: used for every item once the crypto rail is
+  // closed (the provider\'s "Available until" has passed), for an item
+  // flagged `crypto_disabled`, and for every row of a cart that holds such
+  // an item. One row, card icon, card price, never an ETH chip. Items with
+  // a card override get Pretix\'s native (crypto) amount replaced; items
+  // priced the same for both methods keep the native amount. The resolved
+  // unit price is left on the element for rewriteCartTotals.
+  function annotateCardOnly(elem, info, isAddon) {
+    if (elem.dataset.pedAnnotated === '1') return;
+    var def = parseFloat(info.default_price);
+    if (!isFinite(def) || def <= 0) return;  // free items: nothing to say
+    var priceEl = findPriceElement(elem);
+    if (!priceEl) return;
+    elem.dataset.pedAnnotated = '1';
+
+    var override = cardOverride(info);
+    if (override != null) {
+      var list = parseFloat(info.fiat_price_usd);
+      var struck = (info.fiat_after_voucher != null && isFinite(list) && list !== override) ? list : null;
+      setPriceAmount(priceEl, override, struck);
+      elem.dataset.pedCardUnit = String(override);
+    } else {
+      var native = nativeAmount(priceEl);
+      if (isFinite(native)) elem.dataset.pedCardUnit = String(native);
+    }
+
+    var row = document.createElement('div');
+    row.className = 'ped-row ped-card-row';
+    priceEl.parentNode.insertBefore(row, priceEl);
+    // Same-price add-ons stay icon-free, as in dual mode.
+    if (!isAddon || override != null) row.appendChild(buildIcon('fiat'));
+    row.appendChild(priceEl);
+    dropOrphanBrs(elem);
+    moveTaxNoticeToBottom(elem);
+  }
+
+  // Card-only cart: Pretix rendered the line totals and the grand total
+  // from the crypto prices. Recompute each line as count x card unit price
+  // (left on the row by annotateCardOnly). The grand total is rewritten only
+  // when every row resolved and no payment-fee row is present: with a fee
+  // row (confirm step, order pages) Pretix\'s total already includes the
+  // card markup, and the fee row itself is hidden because the rewritten
+  // line prices now carry that amount.
+  function rewriteCartTotals() {
+    var rows = document.querySelectorAll('[data-article-id^="item-"]');
+    if (!rows.length) return;
+    var sum = 0;
+    var complete = true;
+    rows.forEach(function (row) {
+      var priceDiv = row.querySelector('.singleprice.price');
+      if (!priceDiv) { complete = false; return; }
+      var unit = priceDiv.dataset.pedCardUnit != null ? parseFloat(priceDiv.dataset.pedCardUnit) : NaN;
+      if (!isFinite(unit)) {
+        if (nativeAmount(priceDiv) === 0) return;  // free row, adds nothing
+        complete = false;
+        return;
+      }
+      // The count is the cell\'s own text; buttons and sr-only labels in an
+      // editable cart are child elements and must not leak digits in.
+      var countCell = row.querySelector(':scope > .count');
+      var countText = '';
+      if (countCell) {
+        for (var i = 0; i < countCell.childNodes.length; i++) {
+          if (countCell.childNodes[i].nodeType === 3) countText += countCell.childNodes[i].nodeValue;
+        }
+      }
+      var count = parseInt(countText.replace(/\D/g, ''), 10);
+      if (!isFinite(count) || count < 1) count = 1;
+      var lineTotal = unit * count;
+      var strong = row.querySelector('.totalprice strong');
+      if (strong) strong.textContent = fmtMoney(lineTotal);
+      sum += lineTotal;
+    });
+
+    var feeRows = document.querySelectorAll('[data-ped-fee-row="1"]');
+    feeRows.forEach(function (r) { r.style.display = 'none'; });
+    if (!complete || feeRows.length) return;
+
+    var totalStrong = document.querySelector('.cart-row.total .totalprice strong');
+    if (!totalStrong) return;
+    totalStrong.textContent = fmtMoney(sum);
+    // The "incl. $X taxes" note was computed on the crypto sum; drop it.
+    var note = document.querySelector('.cart-row.total .totalprice small');
+    if (note) note.remove();
   }
 
   function annotate(elem, info, isAddon) {
@@ -2032,7 +2242,11 @@ _ITEM_PRICING_JS_BODY = r"""
     return dd ? (dd.textContent || '').trim() : '';
   }
 
-  function applyToDocument(byId, byLine) {
+  // `fiatOnlyCart`: the crypto rail is closed for this buyer right now
+  // (provider window passed, or the cart holds a `crypto_disabled` item),
+  // so every cart row and every catalog item renders card-only. In dual
+  // mode only items flagged `crypto_disabled` do.
+  function applyToDocument(byId, byLine, fiatOnlyCart) {
     // Catalog: <article id="…item-{pk}">. We only annotate the main row;
     // variations under the same item inherit the parent's metadata.
     document.querySelectorAll('article[id]').forEach(function (article) {
@@ -2042,7 +2256,9 @@ _ITEM_PRICING_JS_BODY = r"""
       if (!info) return;
       var priceDiv = article.querySelector(':scope > .row .price') ||
                      article.querySelector('.price');
-      if (priceDiv) annotate(priceDiv, info, isAddonRow(article));
+      if (!priceDiv) return;
+      if (fiatOnlyCart || info.crypto_disabled) annotateCardOnly(priceDiv, info, isAddonRow(article));
+      else annotate(priceDiv, info, isAddonRow(article));
     });
     // Cart: rowgroup with data-article-id="item-{pk}" or "item-{pk}-{var}".
     // Annotate the per-unit `.singleprice` cell — `fiat_price_usd` is a
@@ -2080,8 +2296,11 @@ _ITEM_PRICING_JS_BODY = r"""
         rowInfo.fiat_after_voucher = null;
       }
       var priceDiv = row.querySelector('.singleprice.price') || row.querySelector('.price');
-      if (priceDiv) annotate(priceDiv, rowInfo, isAddonRow(row));
+      if (!priceDiv) return;
+      if (fiatOnlyCart) annotateCardOnly(priceDiv, rowInfo, isAddonRow(row));
+      else annotate(priceDiv, rowInfo, isAddonRow(row));
     });
+    if (fiatOnlyCart) rewriteCartTotals();
   }
 
   // Strip trailing ".00" from any money-shaped text node inside a
@@ -2127,6 +2346,9 @@ _ITEM_PRICING_JS_BODY = r"""
       // Skip the price cell — it also renders its amount in a <strong>.
       if (el.closest('.price')) return;
       el.dataset.pedFeeRelabeled = '1';
+      // Marked so a card-only cart can hide the row (see rewriteCartTotals).
+      var feeRow = el.closest('.cart-row');
+      if (feeRow) feeRow.dataset.pedFeeRow = '1';
       el.textContent = 'Card payment fee';
       var note = document.createElement('small');
       note.className = 'ped-fee-note';
@@ -2160,7 +2382,10 @@ _ITEM_PRICING_JS_BODY = r"""
         (data.cart_lines || []).forEach(function (ln) {
           if (ln && ln.voucher) byLine[ln.item_id + '\n' + ln.voucher] = ln.fiat_after_voucher;
         });
-        applyToDocument(byId, byLine);
+        // Strict comparisons: a server that predates these keys leaves them
+        // undefined, which must mean "dual mode, as before".
+        var fiatOnlyCart = data.crypto_available === false || data.cart_crypto_blocked === true;
+        applyToDocument(byId, byLine, fiatOnlyCart);
       })
       .catch(function () {});
   }

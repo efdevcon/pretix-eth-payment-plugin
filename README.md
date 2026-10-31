@@ -77,10 +77,13 @@ Console logs (`[wc_inject] tx-hash recovery: WALLET / DISCOVERY / MANUAL path wo
 
 Card payments themselves are handled by Pretix's own Stripe plugin. This plugin adds a layer on top so the same ticket can be priced differently for crypto vs card, and so buyers see both prices before they choose.
 
-Per-item behavior is driven by two `ItemMetaProperty` values (set per `Item` in the standard Pretix item editor, or bulk-applied):
+Per-item behavior is driven by three `ItemMetaProperty` values (set per `Item` in the standard Pretix item editor, or bulk-applied):
 
 - **`fiat_price_usd`** — the card price for this item. When set and higher than the item's `default_price` (the crypto price), card buyers pay the difference as a markup. Unset → card buyers pay `default_price`, no markup.
-- **`fiat_disabled`** — set to `true` to hide Stripe entirely for any cart/order containing this item (crypto-only tickets). Add-ons follow their own metadata, not the parent's.
+- **`fiat_disabled`** — set to `true` to hide every non-crypto rail for any cart/order containing this item (crypto-only tickets). Only main positions count; add-ons follow their parent.
+- **`crypto_disabled`** — set to `true` to hide the crypto rail for any cart/order containing this item (card-only tickets). The item, and every row of a cart that contains it, is shown card-only: card price, no Ethereum chip. Both prices may stay configured. Same main-position rule as `fiat_disabled`.
+
+**Closing the crypto rail for everyone.** The provider honours Pretix's standard "Available from" / "Available until" fields (Settings → Payment → WalletConnect). Pretix compares dates in the event timezone, so "Available until 2 Nov" keeps crypto on for all of 2 Nov and removes it from 3 Nov: no crypto option in checkout, no new quotes from the wallet endpoints, and the whole shop renders card-only (card unit prices, cart line totals and total recomputed, the card-fee line hidden where Pretix already folded the markup into the total). A transaction broadcast before the cutoff still verifies, and the admin tools (orders, refunds, manual verification) are unaffected.
 
 **How the card markup is applied.** The plugin monkey-patches Pretix's Stripe `calculate_fee` and order-placement path so the per-item delta `(fiat_price_usd − price)` is added:
 
@@ -90,7 +93,7 @@ Per-item behavior is driven by two `ItemMetaProperty` values (set per `Item` in 
 
 **Buyer-facing display.** A small vanilla-JS bundle (`/plugin/wc/item-pricing.js`, injected on the catalog, cart, checkout, and voucher-redeem pages) annotates each item with both prices — a green "Ethereum" chip for the crypto price and a "Card" price beside it — reading per-event pricing from `/plugin/wc/item-pricing/`. On the cart it also relabels Pretix's generic "Payment fee" line to "Card payment fee" with a "difference between the ETH price and the card price" note. Display-only: invoices, emails, and the organizer backend keep Pretix's standard naming. Items where crypto and card prices match get no annotation.
 
-**Chooser integration.** For crypto-only items (`fiat_disabled`), Stripe is hidden from the payment chooser and blocked on the order re-pay flow (`is_allowed`). For dual-priced items, the Stripe method label is prefixed with the live markup (e.g. "+$500 · Credit Card") so the buyer sees the card premium before committing.
+**Chooser integration.** For crypto-only items (`fiat_disabled`), Stripe is hidden from the payment chooser and blocked on the order re-pay flow (`is_allowed`); for card-only items (`crypto_disabled`) the same happens to the crypto rail. For dual-priced items, the Stripe method label is prefixed with the live markup (e.g. "+$500 · Credit Card") so the buyer sees the card premium before committing; the prefix is dropped whenever the crypto rail is not on offer for that cart (window closed, provider disabled, or a `crypto_disabled` item), since the rows then already show the card price.
 
 ## Pricing
 

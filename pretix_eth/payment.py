@@ -481,7 +481,31 @@ class WalletConnectPayment(BasePaymentProvider):
         )
 
     def is_allowed(self, request=None, total=None):
-        return bool(self.settings.get('receive_address')) and bool(self.settings.get('wc_project_id'))
+        """Offer the crypto rail only when the event is configured for it AND
+        Pretix's own "Available from" / "Available until" window on this
+        provider is open.
+
+        The window check is the base class's `_is_available_by_time`. The
+        rest of `BasePaymentProvider.is_allowed` (sales-channel, hidden,
+        min/max total and country restrictions) is deliberately not
+        inherited: none of it is in use, and switching it on implicitly
+        would change which buyers see the rail.
+        """
+        if not (self.settings.get('receive_address') and self.settings.get('wc_project_id')):
+            return False
+        cart_id = None
+        if request is not None:
+            # Card-only items (`crypto_disabled` metadata) hide this rail for
+            # the whole cart or order, the mirror image of `fiat_disabled`.
+            from pretix_eth.apps import CRYPTO_DISABLED_FLAG, _cart_or_order_has_item_flag
+            if _cart_or_order_has_item_flag(self.event, request, CRYPTO_DISABLED_FLAG):
+                return False
+            try:
+                from pretix.presale.views.cart import get_or_create_cart_id
+                cart_id = get_or_create_cart_id(request, create=False)
+            except Exception:
+                cart_id = None
+        return bool(self._is_available_by_time(cart_id=cart_id))
 
     def checkout_prepare(self, request: HttpRequest, cart):
         return True
