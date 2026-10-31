@@ -33,6 +33,7 @@ class EthApp(AppConfig):
         _install_fiat_per_item_markup()
         _install_stripe_mail_render()
         _install_payment_info_autofill()
+        _install_webkit_cookie_fix()
 
 
 def _install_order_placed_email_suppressor():
@@ -1342,3 +1343,59 @@ def _install_payment_info_autofill():
 
     OrderPayment.confirm = _wrapped_confirm
     log.info('pretix_eth[install]: wrapped OrderPayment.confirm for {payment_info} auto-fill')
+
+
+def _install_webkit_cookie_fix():
+    """Stop sending `SameSite=None; Partitioned` cookies to WebKit browsers.
+
+    Pretix's `set_cookie_without_samesite` (`pretix/helpers/cookies.py`) sets
+    every presale cookie, the `__Host-` CSRF and session cookies included, as
+    `SameSite=None; Secure; Partitioned` (CHIPS) for the widget-in-an-iframe
+    case. Its skip list only covers iOS 12 and macOS 10.14 Safari. Current
+    WebKit (every iOS browser, Safari on macOS) drops Partitioned cookies in
+    some flows (WebKit bug 306194: after a cross-site redirect, e.g. a mail
+    app's click tracking), so the CSRF cookie is missing on submit and
+    `/cart/add` answers "CSRF verification failed": ~30-50% of iPhone buyers
+    opening a voucher link in production (2026-10-31), Chromium and Firefox
+    unaffected.
+
+    WebKit now gets plain first-party cookies (no SameSite attribute, no
+    Partitioned); the `secure` flag the callers pass is kept, so `__Host-`
+    stays valid. Other browsers keep Pretix's behaviour. Only an embedded
+    shop needs SameSite=None, and Safari blocks third-party cookies in
+    iframes regardless. Patching `should_send_same_site_none` covers every
+    caller: they import `set_cookie_without_samesite` by name, but it looks
+    this helper up in its module at call time. Drop this once Pretix stops
+    sending Partitioned to WebKit.
+    """
+    import logging
+    log = logging.getLogger(__name__)
+    try:
+        from pretix.helpers import cookies
+    except ImportError as e:
+        log.warning('pretix_eth: pretix.helpers.cookies not importable (%s); WebKit cookie fix disabled.', e)
+        return
+
+    orig = getattr(cookies, 'should_send_same_site_none', None)
+    if orig is None:
+        log.warning('pretix_eth: should_send_same_site_none missing; WebKit cookie fix disabled.')
+        return
+    if getattr(orig, '_pretix_eth_webkit', False):
+        return
+
+    def _is_webkit(useragent):
+        # Every iOS browser is WebKit (CriOS, FxiOS included); on macOS only Safari and embedded views.
+        return bool(
+            cookies.RE_IOS_VERSION.search(useragent)
+            or cookies.is_safari(useragent)
+            or cookies.is_mac_embedded_browser(useragent)
+        )
+
+    def should_send_same_site_none(useragent):
+        if _is_webkit(useragent or ''):
+            return False
+        return orig(useragent)
+
+    should_send_same_site_none._pretix_eth_webkit = True
+    cookies.should_send_same_site_none = should_send_same_site_none
+    log.info('pretix_eth[install]: no SameSite=None/Partitioned cookies for WebKit browsers')
