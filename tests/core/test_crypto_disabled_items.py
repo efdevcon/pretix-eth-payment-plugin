@@ -118,3 +118,48 @@ def test_fiat_rail_untouched_by_crypto_disabled(configured):
     request = _request(configured)
     _add_to_cart(request, configured, _item(configured, 'Card only', 'crypto_disabled'))
     assert _allowed(_FiatProvider(configured), request) is True
+
+
+def _pending_order_with(event, item, code):
+    with scopes_disabled():
+        sc = event.organizer.sales_channels.get(identifier='web')
+        order = Order.objects.create(
+            event=event, email='b@example.com', status=Order.STATUS_PENDING,
+            total=item.default_price, code=code, datetime=timezone.now(),
+            expires=timezone.now() + timezone.timedelta(days=1), sales_channel=sc, locale='en',
+        )
+        OrderPosition.objects.create(order=order, item=item, price=item.default_price, positionid=1)
+    return order
+
+
+@pytest.mark.django_db
+def test_change_payment_to_crypto_refused_for_crypto_disabled_order(configured):
+    """Pretix's order pages consult order_change_allowed, not is_allowed."""
+    order = _pending_order_with(configured, _item(configured, 'Card only', 'crypto_disabled'), 'CHG001')
+    with scope(organizer=configured.organizer):
+        assert WalletConnectPayment(configured).order_change_allowed(order) is False
+
+
+@pytest.mark.django_db
+def test_change_payment_to_crypto_allowed_for_plain_order(configured):
+    order = _pending_order_with(configured, _item(configured, 'GA'), 'CHG002')
+    with scope(organizer=configured.organizer):
+        assert WalletConnectPayment(configured).order_change_allowed(order) is True
+
+
+@pytest.mark.django_db
+def test_no_rail_left_is_logged(configured, caplog):
+    """Crypto-only item in the cart while the crypto window is closed: both
+    rails are hidden and the operator gets a warning."""
+    import datetime
+    from pretix.base.reldate import RelativeDateWrapper
+    configured.settings.set(
+        'payment_walletconnect__availability_date',
+        RelativeDateWrapper(timezone.now() - datetime.timedelta(days=1)),
+    )
+    request = _request(configured)
+    _add_to_cart(request, configured, _item(configured, 'Crypto only', 'fiat_disabled'))
+    with caplog.at_level('WARNING', logger='pretix_eth.apps'):
+        assert _allowed(_FiatProvider(configured), request) is False
+        assert _allowed(WalletConnectPayment(configured), request) is False
+    assert any('no payment method left' in r.getMessage() for r in caplog.records)

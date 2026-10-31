@@ -2018,6 +2018,10 @@ _ITEM_PRICING_JS_BODY = r"""
   // unit price is left on the element for rewriteCartTotals.
   function annotateCardOnly(elem, info, isAddon) {
     if (elem.dataset.pedAnnotated === '1') return;
+    // A crypto-only item (`fiat_disabled`) cannot be bought by card, so a
+    // card icon would be a lie; leave Pretix\'s native price alone. The
+    // operator is expected to close such items while crypto is off.
+    if (info.fiat_disabled) return;
     var def = parseFloat(info.default_price);
     if (!isFinite(def) || def <= 0) return;  // free items: nothing to say
     var priceEl = findPriceElement(elem);

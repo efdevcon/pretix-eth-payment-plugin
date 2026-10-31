@@ -507,6 +507,17 @@ class WalletConnectPayment(BasePaymentProvider):
                 cart_id = None
         return bool(self._is_available_by_time(cart_id=cart_id))
 
+    def order_change_allowed(self, order, request=None):
+        """Re-pay / "change payment method" flow. Pretix consults this, not
+        `is_allowed`, on the order pages; the base check already honours the
+        "Available from" / "Available until" window, so only the card-only
+        item rule needs adding here.
+        """
+        if not super().order_change_allowed(order, request=request):
+            return False
+        from pretix_eth.apps import CRYPTO_DISABLED_FLAG, _order_has_item_flag
+        return not _order_has_item_flag(order, CRYPTO_DISABLED_FLAG)
+
     def checkout_prepare(self, request: HttpRequest, cart):
         return True
 

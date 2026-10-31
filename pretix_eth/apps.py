@@ -92,6 +92,27 @@ def _cart_or_order_has_item_flag(event, request, flag):
     return False
 
 
+def _warn_if_no_rail_left(event):
+    """Called when a crypto-only (`fiat_disabled`) cart just hid the card
+    rails. If the crypto rail is closed as well (provider disabled or outside
+    its "Available from / until" window) the buyer has no way to pay: the
+    checkout shows "There are no payment providers enabled." Log it so the
+    operator notices and closes the item or lifts a flag."""
+    try:
+        from pretix_eth.payment import WalletConnectPayment
+        provider = WalletConnectPayment(event)
+        if provider.settings.get('_enabled', as_type=bool, default=False) and provider._is_available_by_time():
+            return
+    except Exception as e:
+        _log.debug('pretix_eth: crypto availability lookup failed (%s)', e)
+        return
+    _log.warning(
+        'pretix_eth: fiat_disabled item in cart while the crypto rail is closed; '
+        'no payment method left for this buyer (event=%s). Close the item or lift a flag.',
+        event.slug,
+    )
+
+
 def _crypto_offered_for_current_cart(event):
     """False when the crypto rail is not on offer for the cart or order in
     flight: provider disabled, outside its "Available from / until" window,
@@ -283,6 +304,7 @@ def _install_fiat_provider_restrictor():
         if _is_crypto_provider_ident(getattr(self, 'identifier', '')):
             return orig_is_allowed(self, request, total)
         if _cart_or_order_has_item_flag(self.event, request, FIAT_DISABLED_FLAG):
+            _warn_if_no_rail_left(self.event)
             return False
         return orig_is_allowed(self, request, total)
 
