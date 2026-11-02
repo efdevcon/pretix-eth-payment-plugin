@@ -1,4 +1,5 @@
 """Pretix payment provider for WalletConnect-based crypto checkout."""
+import inspect
 import logging
 from collections import OrderedDict
 from decimal import Decimal, ROUND_HALF_UP
@@ -518,6 +519,77 @@ class WalletConnectPayment(BasePaymentProvider):
         from pretix_eth.apps import CRYPTO_DISABLED_FLAG, _order_has_item_flag
         return not _order_has_item_flag(order, CRYPTO_DISABLED_FLAG)
 
+    def crypto_closed_for_order(self, order) -> bool:
+        """True when this order can no longer START a crypto payment: the
+        provider's "Available from / until" window is closed, or a main
+        position is a card-only (`crypto_disabled`) item. Same rule as the
+        buyer endpoints' `views._wc_available_or_404`, which refuse new
+        challenges and quotes for such an order.
+        """
+        if not self._is_available_by_time(order=order):
+            return True
+        from pretix_eth.apps import CRYPTO_DISABLED_FLAG, _order_has_item_flag
+        return _order_has_item_flag(order, CRYPTO_DISABLED_FLAG)
+
+    def _change_page_offers(self, order, request):
+        """(card, any_other) for what Pretix's "change payment method" page
+        would offer this order besides crypto. Uses that page's own filter,
+        `order_change_allowed`, not checkout's `is_allowed`: a crypto-only
+        order can still switch to card there. Best effort: a provider that
+        errors counts as offered, the change page has the final say.
+        """
+        card = other = False
+        try:
+            for pp in order.event.get_payment_providers(cached=True).values():
+                if pp.identifier in (self.identifier, 'giftcard') or pp.is_meta or not pp.is_enabled:
+                    continue
+                implicit = pp.is_implicit
+                if implicit(request) if callable(implicit) else bool(implicit):
+                    continue
+                try:
+                    if 'request' in inspect.signature(pp.order_change_allowed).parameters:
+                        offered = pp.order_change_allowed(order, request=request)
+                    else:
+                        offered = pp.order_change_allowed(order)
+                except Exception:
+                    offered = True
+                if not offered:
+                    continue
+                other = True
+                if pp.identifier == 'stripe' or pp.identifier.endswith(('_cc', '_card', '_creditcard')):
+                    card = True
+        except Exception as e:
+            log.warning('[wc closed] could not enumerate other payment providers: %s', e)
+        return card, other
+
+    def _crypto_closed_notice_ctx(self, order, request, info):
+        """Template context for the "crypto is closed" notice on the pay page
+        and the order page. `quoted`: the buyer got a quote, so a transaction
+        may be on its way; they are told not to pay a second time."""
+        card, other = self._change_page_offers(order, request)
+        try:
+            from pretix.multidomain.urlreverse import build_absolute_uri
+            change_payment_url = build_absolute_uri(
+                order.event, 'presale:event.order.pay.change',
+                kwargs={'order': order.code, 'secret': order.secret},
+            )
+        except Exception:
+            change_payment_url = ''
+        support_email = self.settings.get('support_email', default='') or ''
+        # Either a switch to another method or, when there is none, the
+        # support address. `support_shown` keeps the "do not pay twice" line
+        # from giving the address a second time.
+        offer_switch = other and bool(change_payment_url)
+        return {
+            'card_available': card,
+            'offer_switch': offer_switch,
+            'support_shown': not offer_switch and bool(support_email),
+            'change_payment_url': change_payment_url,
+            'quoted': bool(info.get('quote') or info.get('quotes')),
+            'support_email': support_email,
+            'order_code': order.code,
+        }
+
     def checkout_prepare(self, request: HttpRequest, cart):
         return True
 
@@ -526,6 +598,21 @@ class WalletConnectPayment(BasePaymentProvider):
 
     def checkout_confirm_render(self, request: HttpRequest, order=None, info_data=None) -> str:
         if order:
+            # Crypto closed for this order (day-1 cutoff, card-only item): the
+            # wallet UI's endpoints now refuse it, so show the way out instead
+            # of a wallet prompt that ends on "Failed to load payment
+            # options." A recorded transaction keeps the wallet UI: it is
+            # being verified. A lookup error keeps today's behaviour.
+            info = info_data or {}
+            try:
+                closed = not info.get('tx_hash') and self.crypto_closed_for_order(order)
+            except Exception as e:
+                log.warning('[wc confirm] crypto availability lookup failed: %s', e)
+                closed = False
+            if closed:
+                tpl = get_template('pretix_eth/checkout_crypto_closed.html')
+                return tpl.render(self._crypto_closed_notice_ctx(order, request, info), request=request)
+
             # Payment retry/continue — order exists, show full crypto checkout UI
             from pretix_eth import __version__ as _plugin_version
             tpl = get_template('pretix_eth/checkout_payment_confirm.html')
@@ -696,10 +783,21 @@ class WalletConnectPayment(BasePaymentProvider):
         tx = info.get('tx_hash')
         chain_id = info.get('chain_id')
         explorer = CHAIN_METADATA.get(chain_id, {}).get('explorer_url', '')
-        return tpl.render({
+        ctx = {
             'tx_hash': tx,
             'explorer_url': f'{explorer}{tx}' if tx else None,
-        })
+            'closed': False,
+        }
+        # "Waiting for payment to be sent." would be wrong once crypto is
+        # closed for this order: point at Pretix's re-try / change button
+        # below this block instead.
+        if not tx:
+            try:
+                if self.crypto_closed_for_order(payment.order):
+                    ctx.update(self._crypto_closed_notice_ctx(payment.order, request, info), closed=True)
+            except Exception as e:
+                log.warning('[wc pending] crypto availability lookup failed: %s', e)
+        return tpl.render(ctx)
 
     def payment_control_render(self, request: HttpRequest, payment) -> str:
         tpl = get_template('pretix_eth/control.html')

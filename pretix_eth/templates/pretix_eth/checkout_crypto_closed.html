@@ -1,0 +1,19 @@
+{% load i18n %}
+<style>
+  /* Nothing to confirm on this page: hide Pretix's own submit button under
+     the notice (its "Cancel" back to the order stays). */
+  form:has(.wc-crypto-closed) .checkout-button-row button[type="submit"] {
+    display: none;
+  }
+</style>
+<div class="wc-crypto-closed">
+  <p><strong>{% trans "Crypto payment is no longer available for this order." %}</strong></p>
+  {% if offer_switch %}
+    <p>
+      <a class="btn btn-primary btn-lg" href="{{ change_payment_url }}">
+        {% if card_available %}{% trans "Pay by card" %}{% else %}{% trans "Choose another payment method" %}{% endif %}
+      </a>
+    </p>
+  {% endif %}
+  {% include "pretix_eth/_crypto_closed_help.html" %}
+</div>

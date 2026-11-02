@@ -1,0 +1,16 @@
+{% load i18n %}{% if support_shown %}
+<p>
+  {% blocktrans trimmed with email=support_email code=order_code %}
+    Write to {{ email }} with your order code {{ code }} and we will help you complete it.
+  {% endblocktrans %}
+</p>
+{% endif %}{% if quoted %}
+<p class="text-muted">
+  {% trans "Already sent a payment from your wallet? Do not pay again." %}
+  {% if support_email and not support_shown %}
+    {% blocktrans trimmed with email=support_email code=order_code %}
+      Write to {{ email }} with your order code {{ code }} and we will confirm it.
+    {% endblocktrans %}
+  {% endif %}
+</p>
+{% endif %}

@@ -6,6 +6,16 @@
       <strong>{% trans "Transaction:" %}</strong>
       <a href="{{ explorer_url }}" target="_blank" rel="noopener">{{ tx_hash }}</a>
     </p>
+  {% elif closed %}
+    <p><strong>{% trans "Crypto payment is no longer available for this order." %}</strong></p>
+    {% if offer_switch %}
+      {% if card_available %}
+        <p>{% trans "Use the button below to pay by card." %}</p>
+      {% else %}
+        <p>{% trans "Use the button below to choose another payment method." %}</p>
+      {% endif %}
+    {% endif %}
+    {% include "pretix_eth/_crypto_closed_help.html" %}
   {% else %}
     <p>{% trans "Waiting for payment to be sent." %}</p>
   {% endif %}

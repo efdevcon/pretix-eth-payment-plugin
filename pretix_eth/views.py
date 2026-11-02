@@ -2028,15 +2028,19 @@ _ITEM_PRICING_JS_BODY = r"""
     if (!priceEl) return;
     elem.dataset.pedAnnotated = '1';
 
+    // The amount Pretix rendered (the crypto price), kept before any rewrite:
+    // card unit minus native unit is the markup Pretix charges as a payment
+    // fee, which adjustFeeBadges takes off the payment step badges.
+    var native = nativeAmount(priceEl);
+    if (isFinite(native)) elem.dataset.pedNativeUnit = String(native);
     var override = cardOverride(info);
     if (override != null) {
       var list = parseFloat(info.fiat_price_usd);
       var struck = (info.fiat_after_voucher != null && isFinite(list) && list !== override) ? list : null;
       setPriceAmount(priceEl, override, struck);
       elem.dataset.pedCardUnit = String(override);
-    } else {
-      var native = nativeAmount(priceEl);
-      if (isFinite(native)) elem.dataset.pedCardUnit = String(native);
+    } else if (isFinite(native)) {
+      elem.dataset.pedCardUnit = String(native);
     }
 
     var row = document.createElement('div');
@@ -2047,6 +2051,28 @@ _ITEM_PRICING_JS_BODY = r"""
     row.appendChild(priceEl);
     dropOrphanBrs(elem);
     moveTaxNoticeToBottom(elem);
+  }
+
+  // Payment step, card-only: Pretix prints each payment method fee next to
+  // its name ("+ $500.00"). For the card rail that fee is the card markup,
+  // which the rewritten cart rows already carry, so the badge would read as
+  // a second charge on top of the card price. Take the markup off: hide the
+  // badge when nothing is left, show the remainder when the method charges
+  // more. Discounts and fees smaller than the markup are left as they are.
+  function adjustFeeBadges(markup) {
+    if (!(markup > 0.004)) return;
+    document.querySelectorAll('#payment_accordion .panel-title > strong.pull-right').forEach(function (b) {
+      if (b.dataset.pedFeeAdjusted === '1') return;
+      var text = (b.textContent || '').trim();
+      if (text.charAt(0) !== '+') return;
+      var fee = parseMoney(text);
+      if (!isFinite(fee)) return;
+      var rest = Math.round((fee - markup) * 100) / 100;
+      if (rest < 0) return;
+      b.dataset.pedFeeAdjusted = '1';
+      if (rest === 0) b.style.display = 'none';
+      else b.textContent = '+ ' + fmtMoney(rest);
+    });
   }
 
   // Card-only cart: Pretix rendered the line totals and the grand total
@@ -2060,7 +2086,9 @@ _ITEM_PRICING_JS_BODY = r"""
     var rows = document.querySelectorAll('[data-article-id^="item-"]');
     if (!rows.length) return;
     var sum = 0;
+    var markup = 0;
     var complete = true;
+    var markupComplete = true;
     rows.forEach(function (row) {
       var priceDiv = row.querySelector('.singleprice.price');
       if (!priceDiv) { complete = false; return; }
@@ -2085,7 +2113,13 @@ _ITEM_PRICING_JS_BODY = r"""
       var strong = row.querySelector('.totalprice strong');
       if (strong) strong.textContent = fmtMoney(lineTotal);
       sum += lineTotal;
+      var nativeUnit = priceDiv.dataset.pedNativeUnit != null ? parseFloat(priceDiv.dataset.pedNativeUnit) : NaN;
+      if (isFinite(nativeUnit)) markup += (unit - nativeUnit) * count;
+      else markupComplete = false;
     });
+    // Only with every row resolved: a partial markup would leave part of
+    // the card fee looking like an extra charge.
+    if (complete && markupComplete) adjustFeeBadges(markup);
 
     var feeRows = document.querySelectorAll('[data-ped-fee-row="1"]');
     feeRows.forEach(function (r) { r.style.display = 'none'; });
