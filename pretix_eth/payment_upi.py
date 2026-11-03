@@ -482,6 +482,16 @@ class StripeCheckoutUPI(BasePaymentProvider):
             'presentment_currency': currency,
         }
 
+    def api_refund_details(self, refund):
+        info = refund.info_data or {}
+        amount, currency = _presentment_parts(info)
+        return {
+            'refund_id': info.get('refund_id'),
+            'status': info.get('status'),
+            'presentment_amount': amount,
+            'presentment_currency': currency,
+        }
+
     def matching_id(self, payment):
         return (payment.info_data or {}).get('payment_intent')
 
@@ -507,17 +517,24 @@ class StripeCheckoutUPI(BasePaymentProvider):
         intent = (refund.payment.info_data or {}).get('payment_intent')
         if not intent:
             raise PaymentException(_('No Stripe payment is attached to this payment.'))
+        currency, _charged = self._charged(refund.payment)
+        minor = self.refund_minor_units(refund)
         try:
             result = stripe.Refund.create(
                 payment_intent=intent,
-                amount=self.refund_minor_units(refund),
+                amount=minor,
                 metadata={'order': refund.order.code, 'refund': str(refund.pk)},
                 **self._stripe_kwargs(),
             )
         except stripe.error.StripeError as e:
             log.exception('[upi] refund failed for order %s: %s', refund.order.code, e)
             raise PaymentException(_('Stripe refused the refund: %s') % (getattr(e, 'user_message', '') or str(e)))
-        refund.info_data = {'refund_id': result.id, 'status': result.status}
+        # What went back to the buyer, in the session's currency, for the
+        # backend and the REST API (`api_refund_details`).
+        refund.info_data = {
+            'refund_id': result.id, 'status': result.status,
+            'presentment': {'amount': minor, 'currency': currency.lower()},
+        }
         refund.save(update_fields=['info'])
         if result.status == 'failed':
             raise PaymentException(_('Stripe reported the refund as failed.'))

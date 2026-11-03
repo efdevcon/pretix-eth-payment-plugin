@@ -488,6 +488,35 @@ def test_refunds_go_out_in_rupees_as_the_same_share(upi_event, upi_payment):
 
 
 @pytest.mark.django_db
+def test_refund_is_sent_to_stripe_in_rupees_and_recorded(upi_event, upi_payment, monkeypatch):
+    from pretix.base.models import OrderRefund
+    order, payment = upi_payment(info_data={'session_id': 'cs_test_1', 'payment_intent': 'pi_test_1',
+                                            'inr_amount': '2250.00', 'currency': 'INR'},
+                                 state=OrderPayment.PAYMENT_STATE_CONFIRMED)
+    sent = {}
+
+    def fake_refund_create(**kwargs):
+        sent.update(kwargs)
+        return stripe.Refund.construct_from({'id': 're_test_1', 'status': 'pending'}, KEY)
+
+    monkeypatch.setattr(stripe.Refund, 'create', fake_refund_create)
+    payment.refresh_from_db()  # the fixture leaves the amount as the string it was created with
+    with scopes_disabled():
+        refund = OrderRefund.objects.create(order=order, payment=payment, amount=Decimal('7.00'),
+                                            provider=StripeCheckoutUPI.identifier, source=OrderRefund.REFUND_SOURCE_ADMIN,
+                                            state=OrderRefund.REFUND_STATE_CREATED)
+    provider = StripeCheckoutUPI(upi_event)
+    with scope(organizer=upi_event.organizer):
+        provider.execute_refund(refund)
+    assert sent['payment_intent'] == 'pi_test_1'
+    assert sent['amount'] == 15750  # 7/100 of 2250.00 rupees, in paise
+    refund.refresh_from_db()
+    assert refund.state == OrderRefund.REFUND_STATE_DONE
+    assert provider.api_refund_details(refund) == {'refund_id': 're_test_1', 'status': 'pending',
+                                                   'presentment_amount': '157.50', 'presentment_currency': 'INR'}
+
+
+@pytest.mark.django_db
 def test_start_on_a_paid_order_goes_back_to_the_order(upi_event, upi_payment, stripe_calls):
     order, _ = upi_payment(info_data=PAID_INFO, state=OrderPayment.PAYMENT_STATE_CONFIRMED)
     order.status = Order.STATUS_PAID
