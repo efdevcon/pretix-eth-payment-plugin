@@ -73,13 +73,20 @@ def _presentment(session):
     }
 
 
-def _format_presentment(info) -> str:
+def _presentment_parts(info):
+    """What Stripe charged the buyer, as ('8850.00', 'INR'); (None, None) when
+    the session was never paid or Adaptive Pricing did not convert."""
     pres = (info or {}).get('presentment') or {}
     amount, currency = pres.get('amount'), pres.get('currency')
     if amount is None or not currency:
-        return ''
+        return None, None
     places = dj_settings.CURRENCY_PLACES.get(currency.upper(), 2)
-    return f'{Decimal(amount) / (10 ** places):.{places}f} {currency.upper()}'
+    return f'{Decimal(amount) / (10 ** places):.{places}f}', currency.upper()
+
+
+def _format_presentment(info) -> str:
+    amount, currency = _presentment_parts(info)
+    return f'{amount} {currency}' if amount else ''
 
 
 class StripeCheckoutUPI(BasePaymentProvider):
@@ -337,8 +344,44 @@ class StripeCheckoutUPI(BasePaymentProvider):
             'dashboard_url': f'https://dashboard.stripe.com/payments/{intent}' if intent else None,
         })
 
+    def _paid_recap_lines(self, payment):
+        from pretix.base.templatetags.money import money_filter
+        info = payment.info_data or {}
+        lines = [
+            str(_('Payment method: UPI via Stripe')),
+            str(_('Amount: {amount}')).format(amount=money_filter(Decimal(str(payment.amount)), self.event.currency)),
+        ]
+        charged = _format_presentment(info)
+        if charged:
+            lines.append(str(_('Charged to you as: {amount}')).format(amount=charged))
+        if info.get('payment_intent'):
+            lines.append(str(_('Stripe reference: {ref}')).format(ref=info['payment_intent']))
+        return lines
+
     def order_pending_mail_render(self, order, payment) -> str:
+        # The plugin also fills {payment_info} of the "payment received" email
+        # from this text (apps._install_payment_info_autofill), so it follows
+        # the payment's state: a recap once paid, instructions before.
+        if payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED:
+            return '\n\n'.join(self._paid_recap_lines(payment))
         return str(_('Open your order page and choose "Continue with UPI" to complete the payment.'))
+
+    def render_invoice_text(self, order, payment) -> str:
+        text = str(super().render_invoice_text(order, payment))
+        charged = _format_presentment(payment.info_data) if payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED else ''
+        if charged:
+            text = '{} {}'.format(text, _('Paid by UPI via Stripe, charged as {amount}.').format(amount=charged)).strip()
+        return text
+
+    def api_payment_details(self, payment):
+        info = payment.info_data or {}
+        amount, currency = _presentment_parts(info)
+        return {
+            'session_id': info.get('session_id'),
+            'payment_intent': info.get('payment_intent'),
+            'presentment_amount': amount,
+            'presentment_currency': currency,
+        }
 
     def matching_id(self, payment):
         return (payment.info_data or {}).get('payment_intent')

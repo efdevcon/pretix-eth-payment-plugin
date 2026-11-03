@@ -128,16 +128,18 @@ def _x402_routes():
 
 
 def _upi_routes():
-    """UPI via Stripe Checkout (prototype, `payment_upi.py`): the buyer's
-    return from Stripe's page and the Stripe webhook. Event-scoped only: the
-    return URL is built with `build_absolute_uri`, which resolves to the
-    event domain, and the webhook URL is configured per event in Stripe.
-    `require_live=False` on both: a buyer coming back from Stripe's page
-    must still get their payment confirmed while the shop is offline, and
-    Stripe keeps posting to the webhook meanwhile (a 403 there would make
-    it retry for days).
+    """UPI via Stripe Checkout (prototype, `payment_upi.py`): the storefront's
+    one-click start, the buyer's return from Stripe's page and the Stripe
+    webhook. Event-scoped only: the return URL is built with
+    `build_absolute_uri`, which resolves to the event domain, and the webhook
+    URL is configured per event in Stripe. `require_live=False` on all three:
+    an order that already exists must stay payable and get confirmed while
+    the shop is offline, and Stripe keeps posting to the webhook meanwhile (a
+    403 there would make it retry for days).
     """
     return [
+        event_path('plugin/upi/start/<str:order>/<str:secret>/',
+                   views_upi.upi_start, name='upi_start', require_live=False),
         event_path('plugin/upi/return/<str:order>/<str:secret_hash>/<int:payment>/',
                    views_upi.upi_return, name='upi_return', require_live=False),
         event_path('plugin/upi/webhook/', views_upi.upi_webhook, name='upi_webhook', require_live=False),

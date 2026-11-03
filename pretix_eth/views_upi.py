@@ -1,22 +1,27 @@
-"""Buyer return and Stripe webhook for the UPI-via-Checkout provider (prototype).
+"""Buyer-facing entry points for the UPI-via-Checkout provider (prototype):
+the one-click start used by the storefront, the buyer's return from Stripe
+and the Stripe webhook.
 
-Neither view trusts what the browser or the webhook body says: both re-read
-the Checkout Session from Stripe's API through the provider and act on that.
-Both routes are event-scoped (`urls._upi_routes`), so `request.event` is set
-by Pretix before they run.
+Return and webhook never trust what the browser or the webhook body says:
+both re-read the Checkout Session from Stripe's API through the provider and
+act on that. All routes are event-scoped (`urls._upi_routes`), so
+`request.event` is set by Pretix before they run.
 """
 import json
 import logging
 
 from django.contrib import messages
+from django.db import transaction
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils.timezone import now
 from django.utils.translation import gettext as _
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_GET, require_POST
 from django_scopes import scopes_disabled
 from pretix.base.models import Order, OrderPayment
 from pretix.base.payment import PaymentException
+from pretix.base.services.orders import change_payment_provider
 from pretix.helpers.http import redirect_to_url
 from pretix.multidomain.urlreverse import eventreverse
 
@@ -35,6 +40,57 @@ def _event(request):
     if event is None:
         raise Http404('event-scoped route')
     return event
+
+
+OPEN_STATES = (OrderPayment.PAYMENT_STATE_CREATED, OrderPayment.PAYMENT_STATE_PENDING)
+
+
+@require_GET
+def upi_start(request, order, secret, **kwargs):
+    """One click from the storefront's order page straight to Stripe's page.
+
+    Does what Pretix's "change payment method" page does when the buyer picks
+    UPI (same checks, same `change_payment_provider` call, so fees, logs and
+    invoices behave the same) and then starts the payment immediately instead
+    of showing Pretix's confirm page. Anything that stops the payment sends
+    the buyer to the Pretix order page with the reason as a message.
+    """
+    event = _event(request)
+    provider = StripeCheckoutUPI(event)
+    with scopes_disabled():
+        try:
+            order_obj = event.orders.get_with_secret_check(code=order, received_secret=secret, tag=None)
+        except Order.DoesNotExist:
+            raise Http404('Unknown order')
+        back = _order_url(event, order_obj)
+
+        if order_obj.status not in (Order.STATUS_PENDING, Order.STATUS_EXPIRED) or order_obj._can_be_paid() is not True:
+            messages.error(request, _('The payment for this order cannot be continued.'))
+            return redirect_to_url(back)
+        term_last = order_obj.payment_term_last
+        if term_last and now() > term_last:
+            messages.error(request, _('The payment is too late to be accepted.'))
+            return redirect_to_url(back)
+        if not provider.is_enabled or not provider.order_change_allowed(order_obj):
+            messages.error(request, _('UPI is not available for this order.'))
+            return redirect_to_url(back)
+
+        open_payment = order_obj.payments.filter(state__in=OPEN_STATES).last()
+        if open_payment and open_payment.provider == provider.identifier \
+                and open_payment.state == OrderPayment.PAYMENT_STATE_CREATED:
+            payment = open_payment
+        elif open_payment and open_payment.state == OrderPayment.PAYMENT_STATE_PENDING \
+                and not open_payment.payment_provider.abort_pending_allowed:
+            messages.error(request, _('A payment is currently pending for this order.'))
+            return redirect_to_url(back)
+        else:
+            with transaction.atomic():
+                payment = change_payment_provider(order_obj, provider, None)[3]
+        try:
+            return redirect_to_url(provider.execute_payment(request, payment))
+        except PaymentException as e:
+            messages.error(request, str(e))
+            return redirect_to_url(back)
 
 
 @require_GET
