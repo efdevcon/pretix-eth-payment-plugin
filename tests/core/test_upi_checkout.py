@@ -331,7 +331,7 @@ def test_control_panel_shows_the_rupee_amount(upi_event, upi_payment):
     })
     with scope(organizer=upi_event.organizer):
         html = StripeCheckoutUPI(upi_event).payment_control_render(_request(upi_event), payment)
-    assert '8850.00 INR' in html
+    assert 'INR 8,850.00' in html
     assert 'https://dashboard.stripe.com/payments/pi_test_1' in html
 
 
@@ -355,7 +355,7 @@ def test_paid_mail_recaps_the_rupee_amount_instead_of_asking_to_pay(upi_event, u
     with scope(organizer=upi_event.organizer):
         text = StripeCheckoutUPI(upi_event).order_pending_mail_render(order, payment)
     assert 'Continue with UPI' not in text
-    assert '8850.00 INR' in text
+    assert 'INR 8,850.00' in text
     assert 'pi_test_1' in text
     assert 'UPI' in text
 
@@ -376,7 +376,7 @@ def test_paid_mail_is_the_recap_when_the_return_confirms(upi_event, upi_payment,
         upi_return(_request(upi_event, f'/plugin/upi/return/{order.code}/x/{payment.pk}/?session_id=cs_test_1'),
                    order=order.code, secret_hash=order.tagged_secret('plugins:pretix_eth:upi'), payment=payment.pk)
     assert 'Continue with UPI' not in seen['mail_text']
-    assert '2250.00 INR' in seen['mail_text']
+    assert 'INR 2,250.00' in seen['mail_text']
     assert 'pi_test_1' in seen['mail_text']
 
 
@@ -391,13 +391,14 @@ def test_pending_mail_tells_the_buyer_how_to_pay(upi_event, upi_payment):
 
 @pytest.mark.django_db
 def test_invoice_text_mentions_the_rupee_amount(upi_event, upi_payment):
-    order, payment = upi_payment(info_data=PAID_INFO, state=OrderPayment.PAYMENT_STATE_CONFIRMED)
+    order, payment = upi_payment(info_data={**PAID_INFO, 'inr_rate': '94.720000'},
+                                 state=OrderPayment.PAYMENT_STATE_CONFIRMED)
     order.status = Order.STATUS_PAID
     order.save(update_fields=['status'])
     with scope(organizer=upi_event.organizer):
         text = str(StripeCheckoutUPI(upi_event).render_invoice_text(order, payment))
     assert 'already been received' in text
-    assert '8850.00 INR' in text
+    assert 'Paid by UPI via Stripe: INR 8,850.00 (INR 94.72 per USD 1).' in text
 
 
 @pytest.mark.django_db

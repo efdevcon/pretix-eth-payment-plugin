@@ -15,7 +15,7 @@ from django_scopes import scope, scopes_disabled
 from pretix.base.models import CartPosition, Item, ItemMetaProperty, ItemMetaValue, OrderPosition
 from pretix.presale.views.cart import get_or_create_cart_id
 
-from pretix_eth.payment_upi import UPI_PRICE_META, StripeCheckoutUPI, inr_amount, inr_rate
+from pretix_eth.payment_upi import UPI_PRICE_META, StripeCheckoutUPI, inr_amount, inr_quote, inr_rate
 
 
 def _request(event, order_code=None):
@@ -133,6 +133,24 @@ def test_unpriced_addons_convert_at_the_parent_rate(upi_event):
     rate = inr_rate(_cart(request))
     assert rate == Decimal('22.5')
     assert inr_amount(Decimal('120.00'), rate) == Decimal('2700.00')
+    assert inr_quote(_cart(request), Decimal('120.00'), Decimal('120.00')) == (rate, Decimal('2700.00'))
+
+
+@pytest.mark.django_db
+def test_priced_addons_pay_their_own_rupee_price(upi_event):
+    request = _request(upi_event)
+    parent = _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', inr='2250'))
+    _add_to_cart(request, upi_event, _item(upi_event, 'Scarf', inr='500', usd='20.00'), addon_to=parent)
+    rate, rupees = inr_quote(_cart(request), Decimal('120.00'), Decimal('120.00'))
+    assert rate == Decimal('22.5')      # the ticket alone sets the rate
+    assert rupees == Decimal('2750.00')  # 2250 + 500, not 120 x 22.5
+
+
+@pytest.mark.django_db
+def test_a_partial_payment_gets_the_same_share_of_the_rupees(upi_event):
+    request = _request(upi_event)
+    _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', inr='2250'))
+    assert inr_quote(_cart(request), Decimal('100.00'), Decimal('40.00')) == (Decimal('22.5'), Decimal('900.00'))
 
 
 @pytest.mark.django_db

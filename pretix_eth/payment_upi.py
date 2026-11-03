@@ -108,6 +108,37 @@ def inr_amount(amount, rate) -> Decimal:
     return (Decimal(amount) * Decimal(rate)).quantize(PLACES, rounding=ROUND_HALF_UP)
 
 
+def inr_quote(positions, order_total, amount):
+    """(rate, rupees) for a payment of `amount` on an order worth `order_total`
+    in the event currency.
+
+    Every position with its own rupee price (tickets, and swag add-ons when
+    priced) pays that figure, scaled by what the position actually costs
+    against its list price (vouchers, card override). Everything else in the
+    order total (unpriced add-ons, payment fees) converts at the rate the
+    main products imply. A payment for part of the order gets the same share
+    of the rupees. None when the order cannot be paid by UPI.
+    """
+    rate = inr_rate(positions)
+    if rate is None:
+        return None
+    order_total = Decimal(order_total or 0)
+    if order_total <= 0:
+        return None
+    rupees = covered = Decimal('0')
+    for pos in positions:
+        price = Decimal(pos.price or 0)
+        if price <= 0:
+            continue
+        inr = _positive_decimal(pos.item.meta_data.get(UPI_PRICE_META))
+        usd = _fiat_list_price(pos) if inr is not None else Decimal('0')
+        if inr is not None and usd > 0:
+            rupees += inr * price / usd
+            covered += price
+    rupees += (order_total - covered) * rate
+    return rate, (rupees * Decimal(amount) / order_total).quantize(PLACES, rounding=ROUND_HALF_UP)
+
+
 def _presentment(session, event_currency):
     """What the buyer was charged, as Stripe minor units plus currency: the
     session's own amount when it was created in another currency than the
@@ -137,8 +168,10 @@ def _presentment_parts(info):
 
 
 def _format_presentment(info) -> str:
+    """'INR 3,031.04': the code before the figure, no currency symbol, so the
+    text survives any font in emails, the invoice PDF and the backend."""
     amount, currency = _presentment_parts(info)
-    return f'{amount} {currency}' if amount else ''
+    return f'{currency} {Decimal(amount):,.2f}' if amount else ''
 
 
 class StripeCheckoutUPI(BasePaymentProvider):
@@ -232,10 +265,11 @@ class StripeCheckoutUPI(BasePaymentProvider):
 
     def quote(self, payment):
         """(rate, rupee amount) for this payment, from the order's products."""
-        rate = self.order_rate(payment.order)
-        if rate is None:
+        order = payment.order
+        quote = inr_quote(order.positions.select_related('item', 'variation'), order.total, payment.amount)
+        if quote is None:
             raise PaymentException(_('This order has no rupee price, so it cannot be paid by UPI.'))
-        return rate, inr_amount(payment.amount, rate)
+        return quote
 
     def create_session(self, payment, rupees):
         import stripe
@@ -426,9 +460,16 @@ class StripeCheckoutUPI(BasePaymentProvider):
 
     def render_invoice_text(self, order, payment) -> str:
         text = str(super().render_invoice_text(order, payment))
-        charged = _format_presentment(payment.info_data) if self._is_paid(payment) else ''
+        info = payment.info_data or {}
+        charged = _format_presentment(info) if self._is_paid(payment) else ''
         if charged:
-            text = '{} {}'.format(text, _('Paid by UPI via Stripe, charged as {amount}.').format(amount=charged)).strip()
+            line = _('Paid by UPI via Stripe: {amount}.').format(amount=charged)
+            rate = _positive_decimal(info.get('inr_rate'))
+            if rate is not None:
+                line = _('Paid by UPI via Stripe: {amount} ({currency} {rate} per {event_currency} 1).').format(
+                    amount=charged, currency=UPI_CURRENCY, rate=f'{rate:,.2f}', event_currency=self.event.currency,
+                )
+            text = '{} {}'.format(text, line).strip()
         return text
 
     def api_payment_details(self, payment):

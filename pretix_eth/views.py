@@ -2572,16 +2572,22 @@ _ITEM_PRICING_JS_BODY = r"""
   function applyToDocument(byId, byLine, fiatOnlyCart) {
     // Catalog: <article id="…item-{pk}">. We only annotate the main row;
     // variations under the same item inherit the parent's metadata.
-    document.querySelectorAll('article[id]').forEach(function (article) {
-      var m = article.id.match(/item-(\d+)$/);
+    // The add-on step (checkout/addons/) renders a simple add-on without an
+    // id; its aria-labelledby ("cp-<pos>-item-<pk>-legend") carries the pk.
+    // Every row on that step is an add-on, whatever its markup says.
+    var onAddonStep = /\/checkout\/addons\//.test(location.pathname);
+    document.querySelectorAll('article[id], article[aria-labelledby]').forEach(function (article) {
+      var m = (article.id || '').match(/item-(\d+)$/) ||
+              (article.getAttribute('aria-labelledby') || '').match(/item-(\d+)-legend$/);
       if (!m) return;
       var info = byId[parseInt(m[1], 10)];
       if (!info) return;
       var priceDiv = article.querySelector(':scope > .row .price') ||
                      article.querySelector('.price');
       if (!priceDiv) return;
-      if (fiatOnlyCart || info.crypto_disabled) annotateCardOnly(priceDiv, info, isAddonRow(article));
-      else annotate(priceDiv, info, isAddonRow(article));
+      var addon = onAddonStep || isAddonRow(article);
+      if (fiatOnlyCart || info.crypto_disabled) annotateCardOnly(priceDiv, info, addon);
+      else annotate(priceDiv, info, addon);
     });
     // Cart: rowgroup with data-article-id="item-{pk}" or "item-{pk}-{var}".
     // Annotate the per-unit `.singleprice` cell — `fiat_price_usd` is a
