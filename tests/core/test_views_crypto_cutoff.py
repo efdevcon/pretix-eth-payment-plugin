@@ -169,6 +169,23 @@ def test_item_pricing_reports_crypto_disabled_per_item(client, configured):
 
 
 @pytest.mark.django_db
+def test_item_pricing_reports_rupee_prices_and_upi_availability(client, configured):
+    with scopes_disabled():
+        priced = Item.objects.create(event=configured, name='India resident', default_price=Decimal('25.00'))
+        prop = ItemMetaProperty.objects.create(event=configured, name='upi_price_inr', default='')
+        ItemMetaValue.objects.create(item=priced, property=prop, value='2250')
+        plain = Item.objects.create(event=configured, name='GA', default_price=Decimal('100.00'))
+    data = _pricing(client, configured).json()
+    rows = {r['id']: r for r in data['items']}
+    assert rows[priced.id]['upi_price_inr'] == '2250'
+    assert rows[plain.id]['upi_price_inr'] is None
+    assert data['upi_available'] is False  # provider off
+    configured.settings.set('payment_stripe_checkout_upi__enabled', True)
+    configured.settings.set('payment_stripe_secret_key', 'sk_test_x')
+    assert _pricing(client, configured).json()['upi_available'] is True
+
+
+@pytest.mark.django_db
 def test_item_pricing_reports_cart_crypto_blocked(client, configured):
     from pretix.base.models import CartPosition
     flagged = _flagged_item(configured, 'crypto_disabled')

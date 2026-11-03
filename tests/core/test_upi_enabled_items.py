@@ -1,6 +1,8 @@
-"""The UPI rail is an allow-list: offered only when every main product in the
-cart (or in the order being re-paid) carries the `upi_enabled` item flag.
-Add-ons follow their parent. The restriction can be switched off per event.
+"""The UPI rail is an allow-list: offered only when every charged main
+product in the cart (or in the order being re-paid) carries a rupee price in
+the `upi_price_inr` item meta property. Add-ons follow their parent. The
+rupee prices set the order's rate, so vouchers, fees and unpriced add-ons
+convert at it.
 """
 from decimal import Decimal
 from types import SimpleNamespace
@@ -13,8 +15,7 @@ from django_scopes import scope, scopes_disabled
 from pretix.base.models import CartPosition, Item, ItemMetaProperty, ItemMetaValue, OrderPosition
 from pretix.presale.views.cart import get_or_create_cart_id
 
-from pretix_eth.apps import UPI_ENABLED_FLAG
-from pretix_eth.payment_upi import StripeCheckoutUPI
+from pretix_eth.payment_upi import UPI_PRICE_META, StripeCheckoutUPI, inr_amount, inr_rate
 
 
 def _request(event, order_code=None):
@@ -28,20 +29,26 @@ def _request(event, order_code=None):
     return request
 
 
-def _item(event, name, flagged):
+def _meta(event, item, name, value):
+    prop, _ = ItemMetaProperty.objects.get_or_create(event=event, name=name, defaults={'default': ''})
+    ItemMetaValue.objects.create(item=item, property=prop, value=value)
+
+
+def _item(event, name, inr=None, usd='100.00', card=None):
     with scopes_disabled():
-        item = Item.objects.create(event=event, name=name, default_price=Decimal('100.00'))
-        if flagged:
-            prop, _ = ItemMetaProperty.objects.get_or_create(event=event, name=UPI_ENABLED_FLAG, defaults={'default': ''})
-            ItemMetaValue.objects.create(item=item, property=prop, value='1')
+        item = Item.objects.create(event=event, name=name, default_price=Decimal(usd))
+        if inr is not None:
+            _meta(event, item, UPI_PRICE_META, inr)
+        if card is not None:
+            _meta(event, item, 'fiat_price_usd', card)
     return item
 
 
-def _add_to_cart(request, event, item, addon_to=None):
+def _add_to_cart(request, event, item, addon_to=None, price=None):
     cart_id = get_or_create_cart_id(request)
     with scopes_disabled():
         return CartPosition.objects.create(
-            event=event, item=item, price=item.default_price, cart_id=cart_id,
+            event=event, item=item, price=item.default_price if price is None else Decimal(price), cart_id=cart_id,
             expires=timezone.now() + timezone.timedelta(hours=1), addon_to=addon_to,
         )
 
@@ -51,6 +58,11 @@ def _allowed(event, request):
         return StripeCheckoutUPI(event).is_allowed(request, total=Decimal('100.00'))
 
 
+def _cart(request):
+    with scopes_disabled():
+        return list(CartPosition.objects.filter(cart_id=get_or_create_cart_id(request)).select_related('item', 'variation'))
+
+
 @pytest.fixture
 def upi_event(event):
     event.settings.set('payment_stripe_secret_key', 'sk_test_x')
@@ -58,37 +70,37 @@ def upi_event(event):
 
 
 @pytest.mark.django_db
-def test_flagged_product_in_cart_offers_upi(upi_event):
+def test_priced_product_in_cart_offers_upi(upi_event):
     request = _request(upi_event)
-    _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', flagged=True))
+    _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', inr='2250'))
     assert _allowed(upi_event, request) is True
 
 
 @pytest.mark.django_db
-def test_unflagged_product_in_cart_hides_upi(upi_event):
+def test_unpriced_product_in_cart_hides_upi(upi_event):
     request = _request(upi_event)
-    _add_to_cart(request, upi_event, _item(upi_event, 'GA', flagged=False))
+    _add_to_cart(request, upi_event, _item(upi_event, 'GA'))
     assert _allowed(upi_event, request) is False
 
 
 @pytest.mark.django_db
 def test_mixed_cart_hides_upi(upi_event):
     request = _request(upi_event)
-    _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', flagged=True))
-    _add_to_cart(request, upi_event, _item(upi_event, 'GA', flagged=False))
+    _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', inr='2250'))
+    _add_to_cart(request, upi_event, _item(upi_event, 'GA'))
     assert _allowed(upi_event, request) is False
 
 
 @pytest.mark.django_db
 def test_addons_follow_their_parent(upi_event):
     request = _request(upi_event)
-    parent = _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', flagged=True))
-    _add_to_cart(request, upi_event, _item(upi_event, 'Shirt', flagged=False), addon_to=parent)
+    parent = _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', inr='2250'))
+    _add_to_cart(request, upi_event, _item(upi_event, 'Shirt', usd='20.00'), addon_to=parent)
     assert _allowed(upi_event, request) is True
 
     request = _request(upi_event)
-    parent = _add_to_cart(request, upi_event, _item(upi_event, 'GA', flagged=False))
-    _add_to_cart(request, upi_event, _item(upi_event, 'Flagged add-on', flagged=True), addon_to=parent)
+    parent = _add_to_cart(request, upi_event, _item(upi_event, 'GA'))
+    _add_to_cart(request, upi_event, _item(upi_event, 'Priced add-on', inr='500', usd='20.00'), addon_to=parent)
     assert _allowed(upi_event, request) is False
 
 
@@ -98,17 +110,56 @@ def test_empty_cart_hides_upi(upi_event):
 
 
 @pytest.mark.django_db
-def test_restriction_can_be_switched_off(upi_event):
-    upi_event.settings.set('payment_stripe_checkout_upi_restrict_to_flagged_items', False)
+def test_rate_comes_from_list_prices_so_vouchers_scale(upi_event):
     request = _request(upi_event)
-    _add_to_cart(request, upi_event, _item(upi_event, 'GA', flagged=False))
-    assert _allowed(upi_event, request) is True
+    _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', inr='2250'), price='50.00')  # 50% voucher
+    rate = inr_rate(_cart(request))
+    assert rate == Decimal('22.5')
+    assert inr_amount(Decimal('50.00'), rate) == Decimal('1125.00')
+
+
+@pytest.mark.django_db
+def test_rate_pairs_the_rupee_price_with_the_card_price(upi_event):
+    request = _request(upi_event)
+    _add_to_cart(request, upi_event, _item(upi_event, 'GA', inr='3000', usd='100.00', card='150.00'))
+    assert inr_rate(_cart(request)) == Decimal('20')
+
+
+@pytest.mark.django_db
+def test_unpriced_addons_convert_at_the_parent_rate(upi_event):
+    request = _request(upi_event)
+    parent = _add_to_cart(request, upi_event, _item(upi_event, 'India Resident', inr='2250'))
+    _add_to_cart(request, upi_event, _item(upi_event, 'Shirt', usd='20.00'), addon_to=parent)
+    rate = inr_rate(_cart(request))
+    assert rate == Decimal('22.5')
+    assert inr_amount(Decimal('120.00'), rate) == Decimal('2700.00')
+
+
+@pytest.mark.django_db
+def test_free_positions_carry_no_rate(upi_event):
+    request = _request(upi_event)
+    _add_to_cart(request, upi_event, _item(upi_event, 'Free pass', usd='0.00'))
+    assert inr_rate(_cart(request)) is None
+    assert _allowed(upi_event, request) is False
+
+
+@pytest.mark.django_db
+def test_quote_follows_the_payment_amount(upi_event, get_order_and_payment):
+    """A crypto-created order re-paid by UPI carries a payment fee: the
+    rupees follow the amount the payment collects, at the products' rate."""
+    order, payment = get_order_and_payment(payment_kwargs={'provider': StripeCheckoutUPI.identifier})
+    with scopes_disabled():
+        OrderPosition.objects.create(order=order, item=_item(upi_event, 'GA', inr='2250'), price=Decimal('100.00'), positionid=1)
+        payment.amount = Decimal('150.00')
+        payment.save(update_fields=['amount'])
+    with scope(organizer=upi_event.organizer):
+        assert StripeCheckoutUPI(upi_event).quote(payment) == (Decimal('22.5'), Decimal('3375.00'))
 
 
 @pytest.mark.django_db
 def test_repay_follows_the_order_products(upi_event, get_order_and_payment):
-    flagged, plain = _item(upi_event, 'India Resident', True), _item(upi_event, 'GA', False)
-    for item, expected in ((flagged, True), (plain, False)):
+    priced, plain = _item(upi_event, 'India Resident', inr='2250'), _item(upi_event, 'GA')
+    for item, expected in ((priced, True), (plain, False)):
         order, _ = get_order_and_payment(payment_kwargs={'provider': StripeCheckoutUPI.identifier})
         with scopes_disabled():
             OrderPosition.objects.create(order=order, item=item, price=item.default_price, positionid=1)

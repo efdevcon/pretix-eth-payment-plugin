@@ -1,6 +1,7 @@
 """UPI via Stripe Checkout (prototype): the order stays in the event currency,
-Stripe's hosted page converts it for the buyer, and only a session read back
-from Stripe's API can confirm, fail or re-open a payment.
+the Checkout Session is created in rupees from the products' rupee prices,
+and only a session read back from Stripe's API can confirm, fail or re-open
+a payment.
 """
 from decimal import Decimal
 
@@ -10,10 +11,10 @@ from django.contrib.messages.storage.fallback import FallbackStorage
 from django.contrib.sessions.middleware import SessionMiddleware
 from django.test import RequestFactory
 from django_scopes import scope, scopes_disabled
-from pretix.base.models import Order, OrderPayment
+from pretix.base.models import Item, ItemMetaProperty, ItemMetaValue, Order, OrderPayment, OrderPosition
 from pretix.base.payment import PaymentException
 
-from pretix_eth.payment_upi import STRIPE_API_VERSION, StripeCheckoutUPI
+from pretix_eth.payment_upi import STRIPE_API_VERSION, UPI_PRICE_META, StripeCheckoutUPI
 from pretix_eth.views_upi import upi_return, upi_webhook
 
 KEY = 'sk_test_prototype'
@@ -23,14 +24,24 @@ def _session(**over):
     data = {
         'id': 'cs_test_1', 'object': 'checkout.session', 'status': 'open', 'payment_status': 'unpaid',
         'url': 'https://checkout.stripe.com/c/pay/cs_test_1', 'expires_at': 1_900_000_000,
-        'amount_total': 10000, 'currency': 'usd', 'payment_intent': None, 'presentment_details': None,
+        'amount_total': 225000, 'currency': 'inr', 'payment_intent': None, 'presentment_details': None,
     }
     data.update(over)
     return stripe.checkout.Session.construct_from(data, KEY)
 
 
-PAID = dict(status='complete', payment_status='paid', payment_intent='pi_test_1',
-            presentment_details={'presentment_amount': 885000, 'presentment_currency': 'inr'})
+PAID = dict(status='complete', payment_status='paid', payment_intent='pi_test_1')
+
+
+def _priced_position(event, order, inr='2250', priced=True):
+    """A main position for the whole order total, whose product carries a
+    rupee price (2250 for the fixture's 100.00: a rate of 22.5)."""
+    with scopes_disabled():
+        item = Item.objects.create(event=event, name='Ticket', default_price=order.total)
+        if priced:
+            prop, _ = ItemMetaProperty.objects.get_or_create(event=event, name=UPI_PRICE_META, defaults={'default': ''})
+            ItemMetaValue.objects.create(item=item, property=prop, value=inr)
+        return OrderPosition.objects.create(order=order, item=item, price=order.total, positionid=1)
 
 
 def _request(event, path='/', method='get', data=None):
@@ -55,10 +66,16 @@ def upi_event(event):
 @pytest.fixture
 def upi_payment(upi_event, get_order_and_payment):
     def _make(info_data=None, state=OrderPayment.PAYMENT_STATE_CREATED):
-        return get_order_and_payment(
+        if info_data and info_data.get('session_id'):
+            # A session attached by a test is a rupee session for the fixture's
+            # 100.00 unless the test says otherwise.
+            info_data = {'currency': 'INR', 'inr_amount': '2250.00', **info_data}
+        order, payment = get_order_and_payment(
             payment_kwargs={'provider': StripeCheckoutUPI.identifier, 'state': state},
             info_data=info_data,
         )
+        _priced_position(upi_event, order)
+        return order, payment
     return _make
 
 
@@ -81,17 +98,17 @@ def stripe_calls(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_offered_only_with_a_stripe_key(event):
-    event.settings.set('payment_stripe_checkout_upi_restrict_to_flagged_items', False)  # product rule tested elsewhere
-    with scope(organizer=event.organizer):
-        request = _request(event)
-        assert StripeCheckoutUPI(event).is_allowed(request, total=Decimal('100')) is False
-        event.settings.set('payment_stripe_secret_key', KEY)
-        assert StripeCheckoutUPI(event).is_allowed(request, total=Decimal('100')) is True
+def test_offered_only_with_a_stripe_key(upi_event, upi_payment):
+    order, _ = upi_payment()  # a priced product; the product rule itself is tested elsewhere
+    with scope(organizer=upi_event.organizer):
+        upi_event.settings.delete('payment_stripe_secret_key')
+        assert StripeCheckoutUPI(upi_event).order_change_allowed(order) is False
+        upi_event.settings.set('payment_stripe_secret_key', KEY)
+        assert StripeCheckoutUPI(upi_event).order_change_allowed(order) is True
 
 
 @pytest.mark.django_db
-def test_session_is_created_in_the_event_currency_with_adaptive_pricing(upi_event, upi_payment, stripe_calls):
+def test_session_is_created_in_rupees_for_upi_only(upi_event, upi_payment, stripe_calls):
     order, payment = upi_payment()
     with scope(organizer=upi_event.organizer):
         url = StripeCheckoutUPI(upi_event).execute_payment(_request(upi_event), payment)
@@ -99,11 +116,11 @@ def test_session_is_created_in_the_event_currency_with_adaptive_pricing(upi_even
     (kwargs,) = stripe_calls['create']
     assert kwargs['api_key'] == KEY
     assert kwargs['stripe_version'] == STRIPE_API_VERSION
-    assert kwargs['adaptive_pricing'] == {'enabled': True}
-    assert kwargs['allowed_payment_method_types'] == ['upi', 'card']  # UPI alone is refused on a USD session
+    assert 'adaptive_pricing' not in kwargs
+    assert kwargs['allowed_payment_method_types'] == ['upi']
     (item,) = kwargs['line_items']
-    assert item['price_data']['currency'] == 'usd'
-    assert item['price_data']['unit_amount'] == 10000
+    assert item['price_data']['currency'] == 'inr'
+    assert item['price_data']['unit_amount'] == 225000
     assert kwargs['metadata'] == {'organizer': 'ef', 'event': 'devcon', 'order': order.code, 'payment': str(payment.pk)}
     assert kwargs['customer_email'] == 'test@example.com'
     assert f'/plugin/upi/return/{order.code}/' in kwargs['success_url']
@@ -111,6 +128,19 @@ def test_session_is_created_in_the_event_currency_with_adaptive_pricing(upi_even
     payment.refresh_from_db()
     assert payment.state == OrderPayment.PAYMENT_STATE_CREATED
     assert payment.info_data['session_id'] == 'cs_test_1'
+    assert payment.info_data['currency'] == 'INR'
+    assert payment.info_data['inr_amount'] == '2250.00'
+    assert payment.info_data['inr_rate'] == '22.500000'
+
+
+@pytest.mark.django_db
+def test_order_without_a_rupee_price_cannot_start_a_session(upi_event, get_order_and_payment, stripe_calls):
+    order, payment = get_order_and_payment(payment_kwargs={'provider': StripeCheckoutUPI.identifier})
+    _priced_position(upi_event, order, priced=False)
+    with scope(organizer=upi_event.organizer), pytest.raises(PaymentException) as exc:
+        StripeCheckoutUPI(upi_event).execute_payment(_request(upi_event), payment)
+    assert 'no rupee price' in str(exc.value)
+    assert stripe_calls['create'] == []
 
 
 @pytest.mark.django_db
@@ -127,21 +157,12 @@ def test_methods_setting_controls_the_stripe_page(upi_event, upi_payment, stripe
         StripeCheckoutUPI(upi_event).execute_payment(_request(upi_event), payment)
     assert 'allowed_payment_method_types' not in stripe_calls['create'][1]
 
-    # A list saved without card (before the form validated it) is repaired, not sent as is.
-    upi_event.settings.set('payment_stripe_checkout_upi_payment_methods', 'upi')
+    # The rupee session accepts UPI alone, which is the default.
+    upi_event.settings.delete('payment_stripe_checkout_upi_payment_methods')
     _, payment = upi_payment()
     with scope(organizer=upi_event.organizer):
         StripeCheckoutUPI(upi_event).execute_payment(_request(upi_event), payment)
-    assert stripe_calls['create'][2]['allowed_payment_method_types'] == ['upi', 'card']
-
-
-def test_methods_field_refuses_a_list_without_card():
-    from django.core.exceptions import ValidationError
-    from pretix_eth.payment_upi import _validate_methods
-    for ok in ('', 'card', 'upi,card', 'upi, card, link'):
-        _validate_methods(ok)
-    with pytest.raises(ValidationError):
-        _validate_methods('upi')
+    assert stripe_calls['create'][2]['allowed_payment_method_types'] == ['upi']
 
 
 @pytest.mark.django_db
@@ -193,7 +214,7 @@ def test_return_confirms_a_paid_session(upi_event, upi_payment, stripe_calls):
     assert payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
     assert order.status == Order.STATUS_PAID
     assert payment.info_data['payment_intent'] == 'pi_test_1'
-    assert payment.info_data['presentment'] == {'amount': 885000, 'currency': 'inr'}
+    assert payment.info_data['presentment'] == {'amount': 225000, 'currency': 'inr'}
 
 
 @pytest.mark.django_db
@@ -340,6 +361,26 @@ def test_paid_mail_recaps_the_rupee_amount_instead_of_asking_to_pay(upi_event, u
 
 
 @pytest.mark.django_db
+def test_paid_mail_is_the_recap_when_the_return_confirms(upi_event, upi_payment, stripe_calls, monkeypatch):
+    """The plugin's confirm() wrapper builds the mail text before the state
+    flips, so the recap must not depend on the state alone."""
+    order, payment = upi_payment(info_data={'session_id': 'cs_test_1'})
+    stripe_calls['next'] = _session(**PAID)
+    seen = {}
+
+    def fake_send_paid_mail(self, invoice, user, mail_text):
+        seen['mail_text'] = mail_text
+
+    monkeypatch.setattr(OrderPayment, '_send_paid_mail', fake_send_paid_mail)
+    with scope(organizer=upi_event.organizer):
+        upi_return(_request(upi_event, f'/plugin/upi/return/{order.code}/x/{payment.pk}/?session_id=cs_test_1'),
+                   order=order.code, secret_hash=order.tagged_secret('plugins:pretix_eth:upi'), payment=payment.pk)
+    assert 'Continue with UPI' not in seen['mail_text']
+    assert '2250.00 INR' in seen['mail_text']
+    assert 'pi_test_1' in seen['mail_text']
+
+
+@pytest.mark.django_db
 def test_pending_mail_tells_the_buyer_how_to_pay(upi_event, upi_payment):
     order, payment = upi_payment(info_data={'session_id': 'cs_test_1'})
     with scope(organizer=upi_event.organizer):
@@ -373,18 +414,6 @@ def test_api_details_expose_the_rupee_amount(upi_event, upi_payment):
 
 # ----- one-click start from the storefront ----------------------------------
 
-def _with_position(upi_event, order, flagged):
-    from pretix.base.models import Item, ItemMetaProperty, ItemMetaValue, OrderPosition
-    from pretix_eth.apps import UPI_ENABLED_FLAG
-    with scopes_disabled():
-        item = Item.objects.create(event=upi_event, name='Ticket', default_price=order.total)
-        if flagged:
-            prop, _ = ItemMetaProperty.objects.get_or_create(event=upi_event, name=UPI_ENABLED_FLAG,
-                                                             defaults={'default': ''})
-            ItemMetaValue.objects.create(item=item, property=prop, value='1')
-        OrderPosition.objects.create(order=order, item=item, price=order.total, positionid=1)
-
-
 def _start(upi_event, order, secret=None):
     from pretix_eth.views_upi import upi_start
     upi_event.settings.set('payment_stripe_checkout_upi__enabled', True)
@@ -396,7 +425,7 @@ def _start(upi_event, order, secret=None):
 @pytest.mark.django_db
 def test_start_switches_the_order_to_upi_and_sends_the_buyer_to_stripe(upi_event, get_order_and_payment, stripe_calls):
     order, card_payment = get_order_and_payment(payment_kwargs={'provider': 'walletconnect', 'state': OrderPayment.PAYMENT_STATE_CREATED})
-    _with_position(upi_event, order, flagged=True)
+    _priced_position(upi_event, order)
     response = _start(upi_event, order)
     assert response.status_code == 302
     assert response['Location'] == 'https://checkout.stripe.com/c/pay/cs_test_1'
@@ -414,7 +443,6 @@ def test_start_switches_the_order_to_upi_and_sends_the_buyer_to_stripe(upi_event
 def test_start_reuses_the_open_upi_payment(upi_event, upi_payment, stripe_calls):
     order, payment = upi_payment(info_data={'session_id': 'cs_test_1', 'session_url': 'https://checkout.stripe.com/c/pay/cs_test_1',
                                             'session_status': 'open', 'expires_at': 1_900_000_000})
-    _with_position(upi_event, order, flagged=True)
     response = _start(upi_event, order)
     assert response.status_code == 302
     assert response['Location'] == 'https://checkout.stripe.com/c/pay/cs_test_1'
@@ -424,9 +452,9 @@ def test_start_reuses_the_open_upi_payment(upi_event, upi_payment, stripe_calls)
 
 
 @pytest.mark.django_db
-def test_start_refuses_products_without_the_flag(upi_event, get_order_and_payment, stripe_calls):
+def test_start_refuses_products_without_a_rupee_price(upi_event, get_order_and_payment, stripe_calls):
     order, card_payment = get_order_and_payment(payment_kwargs={'provider': 'walletconnect', 'state': OrderPayment.PAYMENT_STATE_CREATED})
-    _with_position(upi_event, order, flagged=False)
+    _priced_position(upi_event, order, priced=False)
     response = _start(upi_event, order)
     assert response.status_code == 302
     assert f'/order/{order.code}/{order.secret}/' in response['Location']
@@ -443,6 +471,19 @@ def test_start_with_a_wrong_secret_is_a_404(upi_event, get_order_and_payment, st
     order, _ = get_order_and_payment(payment_kwargs={'provider': 'walletconnect', 'state': OrderPayment.PAYMENT_STATE_CREATED})
     with pytest.raises(Http404):
         _start(upi_event, order, secret='nope')
+
+
+@pytest.mark.django_db
+def test_refunds_go_out_in_rupees_as_the_same_share(upi_event, upi_payment):
+    from types import SimpleNamespace
+    _, payment = upi_payment(info_data={'session_id': 'cs_test_1', 'payment_intent': 'pi_test_1',
+                                        'inr_amount': '2250.00', 'currency': 'INR'},
+                             state=OrderPayment.PAYMENT_STATE_CONFIRMED)
+    provider = StripeCheckoutUPI(upi_event)
+    with scope(organizer=upi_event.organizer):
+        assert provider.refund_minor_units(SimpleNamespace(payment=payment, amount=Decimal('100.00'))) == 225000
+        assert provider.refund_minor_units(SimpleNamespace(payment=payment, amount=Decimal('40.00'))) == 90000
+        assert provider.refund_minor_units(SimpleNamespace(payment=payment, amount=Decimal('33.33'))) == 74993
 
 
 @pytest.mark.django_db

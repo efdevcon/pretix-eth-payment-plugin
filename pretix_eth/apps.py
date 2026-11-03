@@ -11,9 +11,9 @@ _log = logging.getLogger(__name__)
 # Items > Edit > Metadata). Truthy values: "true", "yes", "1".
 #   fiat_disabled    crypto-only item: every non-crypto rail is hidden
 #   crypto_disabled  card-only item: the crypto rail is hidden
+#   upi_price_inr    rupee price: the item may be paid by UPI (payment_upi.py)
 FIAT_DISABLED_FLAG = 'fiat_disabled'
 CRYPTO_DISABLED_FLAG = 'crypto_disabled'
-UPI_ENABLED_FLAG = 'upi_enabled'       # allow-list for the UPI rail (payment_upi.py)
 
 
 def _is_truthy_meta(v):
@@ -40,12 +40,6 @@ def _items_with_flag(event, item_ids, flag):
     return hits
 
 
-def _all_flagged(event, item_ids, flag):
-    """True when every one of `item_ids` is flagged `flag` (and there is at least one)."""
-    ids = set(item_ids)
-    return bool(ids) and set(_items_with_flag(event, ids, flag)) == ids
-
-
 def _order_main_item_ids(order):
     from pretix.base.models import OrderPosition
     return list(OrderPosition.objects.filter(
@@ -58,20 +52,12 @@ def _order_has_item_flag(order, flag):
     return bool(_items_with_flag(order.event, _order_main_item_ids(order), flag))
 
 
-def _order_items_all_flagged(order, flag):
-    """True when every main position of `order` is an item flagged `flag`."""
-    return _all_flagged(order.event, _order_main_item_ids(order), flag)
-
-
-def _cart_or_order_main_item_ids(event, request):
-    """Item ids of the main positions of the buyer's current cart plus, in
-    the re-pay flow, of the order named in the request URL.
-
-    Only main positions count: add-ons follow their parent's payment
-    treatment, so a flagged add-on under an unflagged ticket changes nothing.
-    """
+def _cart_or_order_positions(event, request):
+    """Positions of the buyer's current cart plus, in the re-pay flow, of the
+    order named in the request URL: CartPosition and OrderPosition objects
+    with item and variation loaded, add-ons included."""
     from pretix.base.models import CartPosition, OrderPosition
-    item_ids = []
+    positions = []
 
     # Cart flow: buyer is in checkout, no order yet.
     cart_id = None
@@ -86,9 +72,9 @@ def _cart_or_order_main_item_ids(event, request):
         except Exception:
             cart_id = None
     if cart_id:
-        item_ids += list(CartPosition.objects.filter(
-            cart_id=cart_id, event=event, addon_to__isnull=True,
-        ).values_list('item_id', flat=True))
+        positions += list(CartPosition.objects.filter(
+            cart_id=cart_id, event=event,
+        ).select_related('item', 'variation'))
 
     # Order re-pay flow: the order code lives in the URL kwargs.
     try:
@@ -97,11 +83,21 @@ def _cart_or_order_main_item_ids(event, request):
     except Exception:
         order_code = None
     if order_code:
-        item_ids += list(OrderPosition.objects.filter(
-            order__code=order_code, order__event=event, addon_to__isnull=True,
-        ).values_list('item_id', flat=True))
+        positions += list(OrderPosition.objects.filter(
+            order__code=order_code, order__event=event,
+        ).select_related('item', 'variation'))
 
-    return item_ids
+    return positions
+
+
+def _cart_or_order_main_item_ids(event, request):
+    """Item ids of the main positions of the buyer's current cart plus, in
+    the re-pay flow, of the order named in the request URL.
+
+    Only main positions count: add-ons follow their parent's payment
+    treatment, so a flagged add-on under an unflagged ticket changes nothing.
+    """
+    return [p.item_id for p in _cart_or_order_positions(event, request) if p.addon_to_id is None]
 
 
 def _cart_or_order_has_item_flag(event, request, flag):
@@ -109,13 +105,6 @@ def _cart_or_order_has_item_flag(event, request, flag):
     named in the request URL (re-pay flow), is an item flagged `flag`.
     """
     return bool(_items_with_flag(event, _cart_or_order_main_item_ids(event, request), flag))
-
-
-def _cart_or_order_items_all_flagged(event, request, flag):
-    """True when every main position of the cart (and of the order being
-    re-paid) is an item flagged `flag`. Nothing resolvable counts as False.
-    """
-    return _all_flagged(event, _cart_or_order_main_item_ids(event, request), flag)
 
 
 def _warn_if_no_rail_left(event):

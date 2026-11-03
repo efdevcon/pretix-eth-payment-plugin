@@ -1,9 +1,13 @@
 """UPI via Stripe Checkout (prototype).
 
-Stripe's hosted Checkout page with Adaptive Pricing shows a buyer in India
-the order in rupees and offers UPI. The Checkout Session itself is created
-in the event currency, so Pretix records, refunds and reports the usual
-amount; Stripe keeps the rupee figure in the session's `presentment_details`.
+Each product that may be paid by UPI carries a rupee price in the item meta
+property `upi_price_inr` (Items > Edit > Metadata). The rupee prices of the
+main products in an order set the order's exchange rate, so vouchers, add-ons
+without a rupee price and payment fees are converted at that same rate. The
+Checkout Session is created in INR for that amount and limited to UPI;
+Pretix keeps recording the order in the event currency, and Stripe converts
+the rupees to the account's settlement currency at payout (that conversion
+fee is on the business, not the buyer).
 
 Flow: the buyer picks "UPI" in checkout; once the order is placed,
 `execute_payment` creates a Checkout Session and redirects to it. Stripe
@@ -12,17 +16,17 @@ from the API and confirms the payment when it is paid. The optional webhook
 (`views_upi.upi_webhook`) does the same for buyers who closed the tab, and
 the order page links to the same return URL as a "check the payment status"
 action (no Stripe call while rendering, so an outage cannot stall the page).
+A storefront can start the payment in one click through `views_upi.upi_start`.
 
-Needs, on the Stripe account: UPI enabled, Adaptive Pricing enabled, and
-the event currency among the settlement currencies. The API version is
-pinned per request because the Stripe plugin shipped with Pretix pins the
-process-wide `stripe.api_version` to a release that predates
-`adaptive_pricing` and `allowed_payment_method_types`.
+Needs, on the Stripe account: UPI enabled, and INR accepted as a presentment
+currency. The API version is pinned per request because the Stripe plugin
+shipped with Pretix pins the process-wide `stripe.api_version` to a release
+that predates `allowed_payment_method_types`.
 """
 import logging
 import time
 from collections import OrderedDict
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 from django import forms
 from django.conf import settings as dj_settings
@@ -38,32 +42,80 @@ SECRET_TAG = 'plugins:pretix_eth:upi'
 STRIPE_API_VERSION = '2026-10-28.endive'
 SESSION_TTL = 35 * 60      # Stripe requires `expires_at` at least 30 minutes after creation
 PAID_STATUSES = ('paid', 'no_payment_required')
-# `allowed_payment_method_types` is validated against the session currency
-# before Adaptive Pricing converts it, and UPI only exists in INR, so a
-# USD session filtered to UPI alone is refused ("must include at least one
-# payment method supported by the default currency"). Card keeps the
-# filter valid; UPI is added for buyers Stripe places in India.
-DEFAULT_METHODS = 'upi,card'
-CARD_REQUIRED_MSG = _('Keep "card" in the list: Stripe validates it against the event currency before '
-                      'Adaptive Pricing converts, and UPI alone is refused for a USD session.')
+UPI_PRICE_META = 'upi_price_inr'   # item meta property: the product's rupee price
+UPI_CURRENCY = 'INR'
+# The session is in rupees, so UPI alone is a valid filter; card buyers use
+# the Stripe plugin's own rail.
+DEFAULT_METHODS = 'upi'
+PLACES = Decimal('0.01')
 
 
 def _split_methods(value):
     return [m.strip() for m in str(value or '').split(',') if m.strip()]
 
 
-def _validate_methods(value):
-    methods = _split_methods(value)
-    if methods and 'card' not in methods:
-        raise forms.ValidationError(CARD_REQUIRED_MSG)
-
-
-def _minor_units(event, amount: Decimal) -> int:
-    places = dj_settings.CURRENCY_PLACES.get(event.currency, 2)
+def _minor_units(currency: str, amount: Decimal) -> int:
+    places = dj_settings.CURRENCY_PLACES.get(currency.upper(), 2)
     return int((Decimal(amount) * (10 ** places)).quantize(Decimal('1'), rounding=ROUND_HALF_UP))
 
 
-def _presentment(session):
+def _positive_decimal(value):
+    """A rupee price or card price from item metadata; None when unset or unusable."""
+    try:
+        d = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError, TypeError, AttributeError):
+        return None
+    return d if d > 0 else None
+
+
+def _fiat_list_price(position):
+    """The event-currency list price a product's rupee price is paired with:
+    the card price override when the product has one, else the product's (or
+    variation's) own price."""
+    override = _positive_decimal(position.item.meta_data.get('fiat_price_usd'))
+    if override is not None:
+        return override
+    if position.variation_id and position.variation.default_price is not None:
+        return Decimal(position.variation.default_price)
+    return Decimal(position.item.default_price or 0)
+
+
+def inr_rate(positions):
+    """Rupees per unit of the event currency, implied by the rupee prices of
+    the main products among `positions` (cart or order positions).
+
+    Every charged main product needs a rupee price, or UPI is not offered:
+    the rail is an allow-list and the rupee price is the switch. Add-ons
+    follow their parent and free positions carry no rate. None when nothing
+    is priced.
+    """
+    inr_sum = usd_sum = Decimal('0')
+    for pos in positions:
+        if pos.addon_to_id is not None or Decimal(pos.price or 0) <= 0:
+            continue
+        inr = _positive_decimal(pos.item.meta_data.get(UPI_PRICE_META))
+        if inr is None:
+            return None
+        usd = _fiat_list_price(pos)
+        if usd <= 0:
+            return None
+        inr_sum += inr
+        usd_sum += usd
+    return (inr_sum / usd_sum) if usd_sum > 0 else None
+
+
+def inr_amount(amount, rate) -> Decimal:
+    return (Decimal(amount) * Decimal(rate)).quantize(PLACES, rounding=ROUND_HALF_UP)
+
+
+def _presentment(session, event_currency):
+    """What the buyer was charged, as Stripe minor units plus currency: the
+    session's own amount when it was created in another currency than the
+    event's (the rupee session), else Adaptive Pricing's `presentment_details`
+    from older sessions."""
+    currency = (session.get('currency') or '').lower() if hasattr(session, 'get') else ''
+    if currency and currency != event_currency.lower():
+        return {'amount': session.get('amount_total'), 'currency': currency}
     details = session.get('presentment_details') if hasattr(session, 'get') else None
     if not details:
         return None
@@ -74,8 +126,8 @@ def _presentment(session):
 
 
 def _presentment_parts(info):
-    """What Stripe charged the buyer, as ('8850.00', 'INR'); (None, None) when
-    the session was never paid or Adaptive Pricing did not convert."""
+    """What Stripe charged the buyer, as ('2250.00', 'INR'); (None, None) when
+    the session was never paid."""
     pres = (info or {}).get('presentment') or {}
     amount, currency = pres.get('amount'), pres.get('currency')
     if amount is None or not currency:
@@ -92,7 +144,7 @@ def _format_presentment(info) -> str:
 class StripeCheckoutUPI(BasePaymentProvider):
     identifier = 'stripe_checkout_upi'
     verbose_name = _('UPI via Stripe Checkout')
-    public_name = _('UPI')
+    public_name = _('UPI via Stripe (Google Pay, PhonePe, Paytm, BHIM)')
     abort_pending_allowed = True
     execute_payment_needs_user = True
 
@@ -104,23 +156,14 @@ class StripeCheckoutUPI(BasePaymentProvider):
             required=False,
             help_text=_('Leave empty to use the key configured in the Stripe plugin of this event.'),
         )
-        fields['restrict_to_flagged_items'] = forms.BooleanField(
-            label=_('Only for products flagged "upi_enabled"'),
-            required=False,
-            initial=True,
-            help_text=_('Offer UPI only when every main product in the cart (or in the order being re-paid) '
-                        'has the item meta property "upi_enabled" set to 1. Create the property once under '
-                        'the organizer\'s item meta properties, then set it on the products. Add-ons follow '
-                        'their parent product. Switch this off to offer UPI for every product.'),
-        )
         fields['payment_methods'] = forms.CharField(
             label=_('Payment methods on the Stripe page'),
             required=False,
             initial=DEFAULT_METHODS,
-            validators=[_validate_methods],
-            help_text=_('Comma-separated Stripe method types. Keep "card" in the list: Stripe validates it '
-                        'against the event currency before Adaptive Pricing converts, and UPI alone is '
-                        'refused for a USD session. Empty shows everything enabled in the Stripe dashboard.'),
+            help_text=_('Comma-separated Stripe method types for the rupee session, "upi" by default. '
+                        'Empty shows everything enabled for INR in the Stripe dashboard (cards included). '
+                        'UPI is offered only for products with a rupee price in the item meta property '
+                        '"upi_price_inr"; that price also sets the rate for vouchers, fees and add-ons.'),
         )
         return fields
 
@@ -133,35 +176,24 @@ class StripeCheckoutUPI(BasePaymentProvider):
         raw = self.settings.get('payment_methods', default=DEFAULT_METHODS)
         if raw is None:
             raw = DEFAULT_METHODS
-        methods = _split_methods(raw)
-        if methods and 'card' not in methods:
-            # A list saved before the form validated it: repair it instead of
-            # letting every session creation fail with a Stripe 400.
-            log.warning('[upi] payment_methods %r lacks "card"; adding it', raw)
-            methods.append('card')
-        return methods
+        return _split_methods(raw)
 
     def _stripe_kwargs(self):
         return {'api_key': self.api_key(), 'stripe_version': STRIPE_API_VERSION}
 
-    def _restricted_to_flagged_items(self) -> bool:
-        return self.settings.get('restrict_to_flagged_items', as_type=bool, default=True)
-
     def is_allowed(self, request, total=None):
         if not self.api_key() or not super().is_allowed(request, total):
             return False
-        if not self._restricted_to_flagged_items():
-            return True
-        from pretix_eth.apps import UPI_ENABLED_FLAG, _cart_or_order_items_all_flagged
-        return _cart_or_order_items_all_flagged(self.event, request, UPI_ENABLED_FLAG)
+        from pretix_eth.apps import _cart_or_order_positions
+        return inr_rate(_cart_or_order_positions(self.event, request)) is not None
 
     def order_change_allowed(self, order, request=None):
         if not self.api_key() or not super().order_change_allowed(order, request=request):
             return False
-        if not self._restricted_to_flagged_items():
-            return True
-        from pretix_eth.apps import UPI_ENABLED_FLAG, _order_items_all_flagged
-        return _order_items_all_flagged(order, UPI_ENABLED_FLAG)
+        return self.order_rate(order) is not None
+
+    def order_rate(self, order):
+        return inr_rate(order.positions.select_related('item', 'variation'))
 
     # ----- checkout screens --------------------------------------------------
 
@@ -198,7 +230,14 @@ class StripeCheckoutUPI(BasePaymentProvider):
     def _order_url(self, order):
         return eventreverse(self.event, 'presale:event.order', kwargs={'order': order.code, 'secret': order.secret})
 
-    def create_session(self, payment):
+    def quote(self, payment):
+        """(rate, rupee amount) for this payment, from the order's products."""
+        rate = self.order_rate(payment.order)
+        if rate is None:
+            raise PaymentException(_('This order has no rupee price, so it cannot be paid by UPI.'))
+        return rate, inr_amount(payment.amount, rate)
+
+    def create_session(self, payment, rupees):
         import stripe
         order = payment.order
         return_url = self._return_url(payment)
@@ -207,12 +246,11 @@ class StripeCheckoutUPI(BasePaymentProvider):
             'line_items': [{
                 'quantity': 1,
                 'price_data': {
-                    'currency': self.event.currency.lower(),
-                    'unit_amount': _minor_units(self.event, payment.amount),
+                    'currency': UPI_CURRENCY.lower(),
+                    'unit_amount': _minor_units(UPI_CURRENCY, rupees),
                     'product_data': {'name': f'{self.event.name}: order {order.code}'},
                 },
             }],
-            'adaptive_pricing': {'enabled': True},
             'client_reference_id': order.code,
             'metadata': self._metadata(payment),
             'payment_intent_data': {
@@ -257,7 +295,8 @@ class StripeCheckoutUPI(BasePaymentProvider):
             if session.status == 'open':
                 return session.url
             # Expired, or completed without a payment: start a fresh session below.
-        session = self.create_session(payment)
+        rate, rupees = self.quote(payment)
+        session = self.create_session(payment, rupees)
         payment.info_data = {
             'session_id': session.id,
             'session_url': session.url,
@@ -265,11 +304,21 @@ class StripeCheckoutUPI(BasePaymentProvider):
             'session_status': session.status,
             'payment_status': session.payment_status,
             'amount': str(payment.amount),
-            'currency': self.event.currency,
+            'currency': UPI_CURRENCY,
+            'inr_amount': str(rupees),
+            'inr_rate': str(rate.quantize(Decimal('0.000001'))),
         }
         payment.state = OrderPayment.PAYMENT_STATE_CREATED
         payment.save(update_fields=['info', 'state'])
         return session.url
+
+    def _charged(self, payment):
+        """(currency, amount) the session was created for: rupees, or the event
+        currency for sessions from before the rupee prices."""
+        info = payment.info_data or {}
+        if info.get('inr_amount'):
+            return UPI_CURRENCY, Decimal(info['inr_amount'])
+        return self.event.currency, Decimal(str(payment.amount))
 
     def apply_session(self, payment, session):
         """Move the payment along to match what Stripe says about its session.
@@ -282,22 +331,25 @@ class StripeCheckoutUPI(BasePaymentProvider):
             'session_status': session.status,
             'payment_status': session.payment_status,
             'payment_intent': intent if isinstance(intent, str) else getattr(intent, 'id', None),
-            'presentment': _presentment(session),
+            'presentment': _presentment(session, self.event.currency),
             'checked_at': int(time.time()),
         })
         if session.payment_status in PAID_STATUSES:
             if payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED:
                 return
-            expected = _minor_units(self.event, payment.amount)
-            got, currency = int(session.get('amount_total') or 0), (session.get('currency') or '').lower()
+            currency, amount = self._charged(payment)
+            expected = _minor_units(currency, amount)
+            got, got_currency = int(session.get('amount_total') or 0), (session.get('currency') or '').lower()
             payment.info_data = info
             payment.save(update_fields=['info'])
-            if got != expected or currency != self.event.currency.lower():
-                log.error('[upi] amount mismatch on order %s: Stripe says %s %s, order needs %s %s',
-                          payment.order.code, got, currency, expected, self.event.currency.lower())
+            if got != expected or got_currency != currency.lower():
+                log.error('[upi] amount mismatch on order %s: Stripe says %s %s, payment expects %s %s',
+                          payment.order.code, got, got_currency, expected, currency.lower())
                 raise PaymentException(_('Stripe reported a different amount than this order. Please contact support.'))
             try:
-                payment.confirm()
+                # The recap is passed explicitly: the plugin's confirm() wrapper
+                # would otherwise build it while the payment still reads "created".
+                payment.confirm(mail_text='\n\n'.join(self._paid_recap_lines(payment)))
             except Quota.QuotaExceededException as e:
                 raise PaymentException(str(e))
             payment.refresh_from_db()
@@ -344,6 +396,12 @@ class StripeCheckoutUPI(BasePaymentProvider):
             'dashboard_url': f'https://dashboard.stripe.com/payments/{intent}' if intent else None,
         })
 
+    def _is_paid(self, payment) -> bool:
+        """Confirmed, or about to be: `apply_session` saves Stripe's "paid"
+        answer before `confirm()`, and the mail text is built inside it."""
+        return payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED \
+            or (payment.info_data or {}).get('payment_status') in PAID_STATUSES
+
     def _paid_recap_lines(self, payment):
         from pretix.base.templatetags.money import money_filter
         info = payment.info_data or {}
@@ -362,13 +420,13 @@ class StripeCheckoutUPI(BasePaymentProvider):
         # The plugin also fills {payment_info} of the "payment received" email
         # from this text (apps._install_payment_info_autofill), so it follows
         # the payment's state: a recap once paid, instructions before.
-        if payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED:
+        if self._is_paid(payment):
             return '\n\n'.join(self._paid_recap_lines(payment))
         return str(_('Open your order page and choose "Continue with UPI" to complete the payment.'))
 
     def render_invoice_text(self, order, payment) -> str:
         text = str(super().render_invoice_text(order, payment))
-        charged = _format_presentment(payment.info_data) if payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED else ''
+        charged = _format_presentment(payment.info_data) if self._is_paid(payment) else ''
         if charged:
             text = '{} {}'.format(text, _('Paid by UPI via Stripe, charged as {amount}.').format(amount=charged)).strip()
         return text
@@ -394,6 +452,15 @@ class StripeCheckoutUPI(BasePaymentProvider):
     def payment_partial_refund_supported(self, payment):
         return self.payment_refund_supported(payment)
 
+    def refund_minor_units(self, refund) -> int:
+        """The refund in the session's currency: the whole charge for a full
+        refund, else the same share of the rupees as of the event-currency amount."""
+        currency, charged = self._charged(refund.payment)
+        paid = Decimal(str(refund.payment.amount))
+        if Decimal(refund.amount) >= paid:
+            return _minor_units(currency, charged)
+        return _minor_units(currency, (charged * Decimal(refund.amount) / paid).quantize(PLACES, rounding=ROUND_HALF_UP))
+
     def execute_refund(self, refund):
         import stripe
         intent = (refund.payment.info_data or {}).get('payment_intent')
@@ -402,7 +469,7 @@ class StripeCheckoutUPI(BasePaymentProvider):
         try:
             result = stripe.Refund.create(
                 payment_intent=intent,
-                amount=_minor_units(self.event, refund.amount),
+                amount=self.refund_minor_units(refund),
                 metadata={'order': refund.order.code, 'refund': str(refund.pk)},
                 **self._stripe_kwargs(),
             )

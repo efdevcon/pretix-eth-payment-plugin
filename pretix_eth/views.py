@@ -1475,8 +1475,9 @@ class _VoucherPriceShim:
 @require_http_methods(['GET'])
 def item_pricing(request, **kwargs):
     """Per-event item pricing map: `{items: [{id, default_price,
-    fiat_price_usd, fiat_after_voucher, fiat_disabled, crypto_disabled}, ...],
-    cart_lines: [...], crypto_available: bool, cart_crypto_blocked: bool}`.
+    fiat_price_usd, fiat_after_voucher, fiat_disabled, crypto_disabled,
+    upi_price_inr}, ...], cart_lines: [...], crypto_available: bool,
+    cart_crypto_blocked: bool, upi_available: bool}`.
 
     Used by the buyer-side price script to render dual prices ("$499 crypto /
     $999 fiat") on catalog and cart pages, since Pretix's stock templates
@@ -1626,6 +1627,12 @@ def item_pricing(request, **kwargs):
                     'fiat_after_voucher': str(eff),
                 })
 
+    from pretix_eth.payment_upi import _positive_decimal
+
+    def _rupee_price(value):
+        d = _positive_decimal(value)
+        return str(d) if d is not None else None
+
     out = []
     for it in items:
         meta = per_item_meta.get(it['id'], {})
@@ -1637,6 +1644,9 @@ def item_pricing(request, **kwargs):
             'fiat_after_voucher': fiat_after_by_id.get(it['id']),  # null unless a voucher discounts the card price
             'fiat_disabled': _truthy(meta.get('fiat_disabled')),
             'crypto_disabled': _truthy(meta.get('crypto_disabled')),
+            # The product's rupee price (UPI rail); the client shows a rupee
+            # row under the card price when `upi_available` is also true.
+            'upi_price_inr': _rupee_price(meta.get('upi_price_inr')),
         })
     # Whether the crypto rail is on offer at all right now: provider enabled
     # AND inside Pretix's "Available from / until" window (the day-1 cutoff).
@@ -1646,11 +1656,18 @@ def item_pricing(request, **kwargs):
         provider.settings.get('_enabled', as_type=bool, default=False)
         and provider._is_available_by_time(cart_id=cart_id)
     )
+    # UPI via Stripe Checkout: on when the provider is enabled and has a key.
+    from pretix_eth.payment_upi import StripeCheckoutUPI
+    upi_provider = StripeCheckoutUPI(event)
+    upi_available = bool(
+        upi_provider.settings.get('_enabled', as_type=bool, default=False) and upi_provider.api_key()
+    )
     response = JsonResponse({
         'items': out,
         'cart_lines': cart_lines,
         'crypto_available': crypto_available,
         'cart_crypto_blocked': cart_crypto_blocked,
+        'upi_available': upi_available,
     })
     # NEVER cache this response — not even the "generic" (empty-cart) variant.
     # `fiat_after_voucher` is cart-dependent (Source 2 reads the buyer's
@@ -1688,6 +1705,10 @@ def item_pricing(request, **kwargs):
 #       3. if delta ≥ max($50, 10% of crypto), append a green
 #          "Save $X with Ethereum" line.
 #   - Otherwise (no metadata, or fiat = crypto) → no change.
+#   - `upi_price_inr` set (and the UPI provider on) → a rupee row under the
+#     card price: the UPI mark plus the rupees the buyer pays on Stripe's
+#     page, scaled from the card unit price actually charged (vouchers
+#     included).
 #
 # The ETH glyph icon is embedded as a base64 data URI (~4.6 KB inline) so
 # the bundle is self-contained — avoids dependence on `collectstatic`
@@ -1738,6 +1759,215 @@ _ETH_ICON_PNG_BASE64 = (
 # Regenerate with `sips -Z 40 <src.png> --out eth-container-40.png`.
 _ETH_ICON_DATA_URI = 'data:image/png;base64,' + _ETH_ICON_PNG_BASE64
 
+# NPCI's UPI wordmark (the acceptance mark merchants display, shown as
+# published; NPCI owns it). Vector slimmed from the Inkscape export: editor
+# metadata dropped, drawing untouched. Rendered in a thin rounded frame, the
+# way Stripe's payment page shows it, so it sits at the tiles' height.
+_UPI_MARK_SVG_BASE64 = (
+    'PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZlcnNpb249IjEuMSIgdmll'
+    'd0JveD0iMCAwIDEzMC41NCA0Ni4xMTgiPjxkZWZzPjxjbGlwUGF0aCBjbGlwUGF0aFVuaXRzPSJ1'
+    'c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTSAwLDIxNiBIIDQzMiBWIDAgSCAwIFoiIC8+PC9jbGlw'
+    'UGF0aD48L2RlZnM+PGc+PGcgdHJhbnNmb3JtPSJtYXRyaXgoMC4zNTI3Nzc3NywwLDAsLTAuMzUy'
+    'Nzc3NzcsLTEwLjkyNjMyMSw2MS4xNTg2MzMpIj48ZyBjbGlwLXBhdGg9InVybCgjY2xpcFBhdGgy'
+    'OCkiPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDMzLjk3NjYsNjEuMDY3NCkiPjxwYXRoIGQ9Ik0g'
+    'MCwwIEggMi43NyBMIDAuMTk2LC0xMC43NTEgYyAtMC4zODIsLTEuNTk1IC0wLjMxLC0yLjc5NiAw'
+    'LjIxOCwtMy41OTcgMC41MjYsLTAuODAyIDEuNTA1LC0xLjIwMyAyLjkzNiwtMS4yMDMgMS40MjIs'
+    'MCAyLjU4OCwwLjQwMSAzLjQ5OSwxLjIwMyAwLjkxMiwwLjgwMSAxLjU1OSwyLjAwMiAxLjk0MSwz'
+    'LjU5NyBMIDExLjM2MywwIGggMi44MDYgbCAtMi42MzcsLTExLjAxNyBjIC0wLjU3MywtMi4zOTQg'
+    'LTEuNTk0LC00LjE4NiAtMy4wNTYsLTUuMzc0IC0xLjQ2MywtMS4xOSAtMy4zODEsLTEuNzg0IC01'
+    'Ljc1NCwtMS43ODQgLTIuMzc1LDAgLTQuMDA0LDAuNTkzIC00Ljg5MSwxLjc3OCAtMC44ODgsMS4x'
+    'ODQgLTEuMDQzLDIuOTc4IC0wLjQ2OCw1LjM4IHoiIHN0eWxlPSJmaWxsOiM2OTZhNmE7ZmlsbC1v'
+    'cGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnplcm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9y'
+    'bT0idHJhbnNsYXRlKDQ3Ljc3MzQsNDMuMzYzMykiPjxwYXRoIGQ9Ik0gMCwwIDQuNDA2LDE4LjQw'
+    'NSAxMi43NzgsNy41ODIgQyAxMy4wMDIsNy4yNzcgMTMuMjI4LDYuOTUgMTMuNDUxLDYuNjAzIDEz'
+    'LjY3NCw2LjI1NiAxMy45MDIsNS44NjYgMTQuMTM2LDUuNDMgbCAyLjkzOSwxMi4yNzQgaCAyLjU5'
+    'MyBMIDE1LjI2NSwtMC42ODcgNi43MTcsMTAuMzI5IEMgNi40ODgsMTAuNjI2IDYuMjc1LDEwLjk0'
+    'IDYuMDc2LDExLjI3MSA1Ljg3NSwxMS42MDIgNS42OTQsMTEuOTQ5IDUuNTI4LDEyLjMxMSBMIDIu'
+    'NTgxLDAgWiIgc3R5bGU9ImZpbGw6IzY5NmE2YTtmaWxsLW9wYWNpdHk6MTtmaWxsLXJ1bGU6bm9u'
+    'emVybztzdHJva2U6bm9uZSIgLz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNjcuMjExOSw0'
+    'My4zNjMzKSI+PHBhdGggZD0iTSAwLDAgNC4yMzgsMTcuNzA0IEggNy4wNDIgTCAyLjgwNSwwIFoi'
+    'IHN0eWxlPSJmaWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnplcm87c3Ry'
+    'b2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDc0LjA0ODgsNDMuMzYzMyki'
+    'PjxwYXRoIGQ9Im0gMCwwIDQuMjM4LDE3LjcwNCBoIDkuNjMgTCAxMy4yODMsMTUuMjYyIEggNi40'
+    'NTggTCA1LjQwMSwxMC44NDggaCA2LjgyNSBMIDExLjYyMiw4LjMyMSBIIDQuNzk2IEwgMi44MDUs'
+    'MCBaIiBzdHlsZT0iZmlsbDojNjk2YTZhO2ZpbGwtb3BhY2l0eToxO2ZpbGwtcnVsZTpub256ZXJv'
+    'O3N0cm9rZTpub25lIiAvPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSg4Ni43Njg2LDQzLjM2'
+    'MzMpIj48cGF0aCBkPSJNIDAsMCA0LjIzOCwxNy43MDQgSCA3LjA0MiBMIDIuODA1LDAgWiIgc3R5'
+    'bGU9ImZpbGw6IzY5NmE2YTtmaWxsLW9wYWNpdHk6MTtmaWxsLXJ1bGU6bm9uemVybztzdHJva2U6'
+    'bm9uZSIgLz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoOTMuNjA1NSw0My4zNjMzKSI+PHBh'
+    'dGggZD0ibSAwLDAgNC4yMzgsMTcuNzA0IGggOS42MyBMIDEzLjI4MywxNS4yNjIgSCA2LjQ1OCBM'
+    'IDUuMzk1LDEwLjgyNCBIIDEyLjIyIEwgMTEuNjE2LDguMjk2IEggNC43OTEgbCAtMS4zNywtNS43'
+    'MiBoIDYuODI1IEwgOS42MywwIFoiIHN0eWxlPSJmaWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7'
+    'ZmlsbC1ydWxlOm5vbnplcm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNs'
+    'YXRlKDEwOS44ODE4LDQ1Ljk2MzkpIj48cGF0aCBkPSJtIDAsMCBoIDIuMzU4IGMgMS4yOTYsMCAy'
+    'LjI5LDAuMDg5IDIuOTgxLDAuMjY2IDAuNjkxLDAuMTc3IDEuMzI1LDAuNDc2IDEuOTA2LDAuODk1'
+    'IDAuNzg5LDAuNTcxIDEuNDQ4LDEuMjgzIDEuOTc4LDIuMTM0IDAuNTI5LDAuODUgMC45MywxLjg0'
+    'MSAxLjIsMi45NyAwLjI2OSwxLjEyOSAwLjM0MywyLjExNyAwLjIyMSwyLjk2NiAtMC4xMjMsMC44'
+    'NTIgLTAuNDQxLDEuNTYzIC0wLjk1NiwyLjEzNiAtMC4zODcsMC40MTggLTAuODk4LDAuNzE4IC0x'
+    'LjUzNiwwLjg5NiAtMC42MzksMC4xNzYgLTEuNjc5LDAuMjY1IC0zLjEyNSwwLjI2NSBIIDQuMDEz'
+    'IDIuOTk5IFogbSAtMy40MjcsLTIuNjAxIDQuMjM4LDE3LjcwNSBoIDMuNzgzIGMgMi40NiwwIDQu'
+    'MTYsLTAuMTI2IDUuMTAyLC0wLjM4IDAuOTQsLTAuMjU1IDEuNzE3LC0wLjY4MSAyLjMyOCwtMS4y'
+    'NzcgMC44MTEsLTAuNzgyIDEuMzI3LC0xLjc4NiAxLjU0OSwtMy4wMSBDIDEzLjc5NCw5LjIxMSAx'
+    'My43MTYsNy44MTIgMTMuMzQsNi4yNCAxMi45NjQsNC42NjggMTIuMzczLDMuMjc1IDExLjU2Nywy'
+    'LjA2MiAxMC43NjMsMC44NDggOS43NjYsLTAuMTUzIDguNTgsLTAuOTQzIDcuNjgzLC0xLjU0IDYu'
+    'NzIxLC0xLjk2NSA1LjY5OSwtMi4yMiA0LjY3NCwtMi40NzMgMy4xNDYsLTIuNjAxIDEuMTEsLTIu'
+    'NjAxIEggMC4zNTUgWiIgc3R5bGU9ImZpbGw6IzY5NmE2YTtmaWxsLW9wYWNpdHk6MTtmaWxsLXJ1'
+    'bGU6bm9uemVybztzdHJva2U6bm9uZSIgLz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMTM2'
+    'Ljg3OTksNTMuNjY2KSI+PHBhdGggZD0iTSAwLDAgSCAwLjcyIEMgMi4yNzUsMCAzLjM1NCwwLjE3'
+    'NSAzLjk1NiwwLjUyMSA0LjU1OSwwLjg2NyA0Ljk2NCwxLjQ4IDUuMTc0LDIuMzU5IDUuNCwzLjMw'
+    'MiA1LjI4MywzLjk2OCA0LjgyMSw0LjM1NCA0LjM1OSw0Ljc0MSAzLjM4Nyw0LjkzNiAxLjkwMiw0'
+    'LjkzNiBoIC0wLjcyIHogbSAtMC43NDEsLTIuMzU2IC0xLjkwMiwtNy45NDcgSCAtNS4yNzEgTCAt'
+    'MS4wMzIsNy40MDEgSCAzLjIxMSBDIDQuNDY4LDcuNDAxIDUuMzc3LDcuMzMxIDUuOTM3LDcuMTkg'
+    'Ni40OTUsNy4wNSA2Ljk1Niw2LjgxNyA3LjMyLDYuNDk0IDcuNzYzLDYuMDgzIDguMDU0LDUuNTI5'
+    'IDguMTk0LDQuODMyIDguMzMzLDQuMTM0IDguMzAzLDMuMzY2IDguMTAzLDIuNTI5IDcuOTAxLDEu'
+    'NjkgNy41NjMsMC45MTYgNy4wODcsMC4yMDYgNi42MTEsLTAuNTAzIDYuMDUzLC0xLjA2IDUuNDE1'
+    'LC0xLjQ2MiA0Ljg5NywtMS43ODUgNC4zMjYsLTIuMDE1IDMuNywtMi4xNTEgMy4wNzMsLTIuMjg5'
+    'IDIuMTMyLC0yLjM1NiAwLjg3NSwtMi4zNTYgSCAwLjMyMiBaIiBzdHlsZT0iZmlsbDojNjk2YTZh'
+    'O2ZpbGwtb3BhY2l0eToxO2ZpbGwtcnVsZTpub256ZXJvO3N0cm9rZTpub25lIiAvPjwvZz48ZyB0'
+    'cmFuc2Zvcm09InRyYW5zbGF0ZSgxNDguNDQ1OCw1MC4zMTY0KSI+PHBhdGggZD0iTSAwLDAgSCA0'
+    'LjgwOSBMIDQuMDA2LDQuMDQgQyAzLjk2OCw0LjI5NyAzLjkzMiw0LjU5MyAzLjkwMSw0LjkyOCAz'
+    'Ljg3Miw1LjI2MyAzLjg1Miw1LjYzNiAzLjgzOSw2LjA0NyAzLjY1Myw1LjY2IDMuNDY2LDUuMjk5'
+    'IDMuMjc5LDQuOTY0IDMuMDkzLDQuNjMgMi45MTIsNC4zMjIgMi43MzQsNC4wNCBaIE0gNi4wOTIs'
+    'LTYuOTUzIDUuMjI1LC0yLjM5NCBIIC0xLjYxMiBMIC00LjcwNywtNi45NTMgSCAtNy42NTIgTCA1'
+    'LjEwOSwxMS40NTIgOS4wNSwtNi45NTMgWiIgc3R5bGU9ImZpbGw6IzY5NmE2YTtmaWxsLW9wYWNp'
+    'dHk6MTtmaWxsLXJ1bGU6bm9uemVybztzdHJva2U6bm9uZSIgLz48L2c+PGcgdHJhbnNmb3JtPSJ0'
+    'cmFuc2xhdGUoMTYxLjUxNjEsNDMuMzYzMykiPjxwYXRoIGQ9Im0gMCwwIDEuOTM4LDguMTAzIC0z'
+    'LjUxMiw5LjYwMSBoIDIuOTQ3IGwgMi4xOCwtNi4wMSBjIDAuMDUsLTAuMTU0IDAuMTEsLTAuMzU1'
+    'IDAuMTc5LC0wLjYwNSAwLjA3LC0wLjI1IDAuMTM4LC0wLjUxOSAwLjIwMiwtMC44MSAwLjE3Niww'
+    'LjI4MiAwLjM1NywwLjU1IDAuNTM4LDAuNzk5IDAuMTgxLDAuMjUgMC4zNjQsMC40NzkgMC41NDks'
+    'MC42ODkgbCA1LjEzMyw1LjkzNyBIIDEyLjk2IEwgNC43Miw4LjEwMyAyLjc4MSwwIFoiIHN0eWxl'
+    'PSJmaWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnplcm87c3Ryb2tlOm5v'
+    'bmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDE4OC4yODAzLDUyLjEwNzQpIj48cGF0'
+    'aCBkPSJNIDAsMCBDIDAuMDAxLDAuMTM3IDAuMDQxLDAuNTE1IDAuMTE5LDEuMTM2IDAuMTc5LDEu'
+    'NjUyIDAuMjI2LDIuMDggMC4yNiwyLjQxOSAwLjA5MywyLjAxNSAtMC4xMDQsMS42MTEgLTAuMzMs'
+    'MS4yMDkgLTAuNTU3LDAuODA2IC0wLjgxNywwLjM5NSAtMS4xMTQsLTAuMDI1IGwgLTYuNzczLC05'
+    'LjQzMyAtMi4yMSw5LjYyNiBjIC0wLjA5NCwwLjM5NiAtMC4xNjYsMC43NzkgLTAuMjE0LDEuMTQ5'
+    'IC0wLjA0OCwwLjM3MSAtMC4wODEsMC43MzggLTAuMDk3LDEuMTAyIC0wLjA5NiwtMC4zNzIgLTAu'
+    'MjE4LC0wLjc2IC0wLjM2NywtMS4xNjggLTAuMTQ5LC0wLjQwNyAtMC4zMjcsLTAuODMzIC0wLjUz'
+    'NiwtMS4yNzYgbCAtMy45MzgsLTguNzE5IGggLTIuNTggbCA4LjQ5NSwxOC40NTUgMi40MTgsLTEx'
+    'LjE3NSBjIDAuMDM1LC0wLjE3NyAwLjA4NiwtMC40NzIgMC4xNDgsLTAuODgzIDAuMDYyLC0wLjQx'
+    'MSAwLjEzNSwtMC45MTkgMC4yMiwtMS41MjMgMC4yODYsMC41MDggMC42OTgsMS4xNTIgMS4yNCwx'
+    'LjkzNCAwLjE0NCwwLjIxIDAuMjU0LDAuMzcxIDAuMzI4LDAuNDg0IEwgMi42NjcsOS43MTEgMi40'
+    'MjIsLTguNzQ0IGggLTIuNjA2IHoiIHN0eWxlPSJmaWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7'
+    'ZmlsbC1ydWxlOm5vbnplcm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNs'
+    'YXRlKDE5Mi45NDE5LDQzLjM2MzMpIj48cGF0aCBkPSJtIDAsMCA0LjIzOSwxNy43MDQgaCA5LjYz'
+    'IEwgMTMuMjg0LDE1LjI2MiBIIDYuNDU4IEwgNS4zOTYsMTAuODI0IGggNi44MjUgTCAxMS42MTcs'
+    'OC4yOTYgSCA0Ljc5MSBMIDMuNDIyLDIuNTc2IGggNi44MjUgTCA5LjYyOSwwIFoiIHN0eWxlPSJm'
+    'aWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnplcm87c3Ryb2tlOm5vbmUi'
+    'IC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIwNS43OTEsNDMuMzYzMykiPjxwYXRoIGQ9'
+    'Ik0gMCwwIDQuNDA2LDE4LjQwNSAxMi43NzgsNy41ODIgQyAxMy4wMDIsNy4yNzcgMTMuMjI4LDYu'
+    'OTUgMTMuNDUxLDYuNjAzIDEzLjY3NCw2LjI1NiAxMy45MDIsNS44NjYgMTQuMTM2LDUuNDMgbCAy'
+    'LjkzOSwxMi4yNzQgaCAyLjU5NCBMIDE1LjI2NSwtMC42ODcgNi43MTcsMTAuMzI5IEMgNi40ODgs'
+    'MTAuNjI2IDYuMjc1LDEwLjk0IDYuMDc2LDExLjI3MSA1Ljg3NSwxMS42MDIgNS42OTQsMTEuOTQ5'
+    'IDUuNTI4LDEyLjMxMSBMIDIuNTgxLDAgWiIgc3R5bGU9ImZpbGw6IzY5NmE2YTtmaWxsLW9wYWNp'
+    'dHk6MTtmaWxsLXJ1bGU6bm9uemVybztzdHJva2U6bm9uZSIgLz48L2c+PGcgdHJhbnNmb3JtPSJ0'
+    'cmFuc2xhdGUoMjM0LjQxMDIsNTguNjI1KSI+PHBhdGggZD0iTSAwLDAgLTMuNjUzLC0xNS4yNjIg'
+    'SCAtNi40NTggTCAtMi44MDYsMCBoIC00LjU4NSBsIDAuNTg1LDIuNDQyIEggNS4xNDYgTCA0LjU2'
+    'MiwwIFoiIHN0eWxlPSJmaWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnpl'
+    'cm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDIzNy4zMjEzLDQ2'
+    'LjkwNzIpIj48cGF0aCBkPSJNIDAsMCAyLjQ5NCwxLjA2MyBDIDIuNTE5LDAuMjc0IDIuNzYzLC0w'
+    'LjMyOSAzLjIyOSwtMC43NDQgMy42OTUsLTEuMTYgNC4zNjgsLTEuMzY3IDUuMjUsLTEuMzY3IGMg'
+    'MC44MzIsMCAxLjU1MiwwLjIzOCAyLjE1NiwwLjcxNCAwLjYwNSwwLjQ3NSAxLjAwNCwxLjExMiAx'
+    'LjE5NSwxLjkxIEMgOC44NSwyLjI5OCA4LjIyOSwzLjIyNSA2Ljc0NCw0LjAzOCA2LjUzNiw0LjE1'
+    'OSA2LjM3Niw0LjI0OCA2LjI2Niw0LjMwNSA0LjU5MSw1LjI1NiAzLjUyOSw2LjExNyAzLjA4MSw2'
+    'Ljg4NyAyLjYzNCw3LjY1NyAyLjU0Miw4LjU5OCAyLjgwOCw5LjcxIGMgMC4zNDUsMS40NDMgMS4x'
+    'MDMsMi42MTIgMi4yNzIsMy41MDcgMS4xNjksMC44OTUgMi41MjcsMS4zNDMgNC4wNzYsMS4zNDMg'
+    'MS4yNzMsMCAyLjI3OCwtMC4yNTIgMy4wMTMsLTAuNzU2IDAuNzM2LC0wLjUwNSAxLjE1NiwtMS4y'
+    'MjggMS4yNiwtMi4xNzEgTCAxMC45NiwxMC40NzIgYyAtMC4yMTQsMC41NTYgLTAuNDk2LDAuOTYz'
+    'IC0wLjg0NiwxLjIyMiAtMC4zNTEsMC4yNTggLTAuNzk1LDAuMzg3IC0xLjMyOCwwLjM4NyAtMC43'
+    'NTQsMCAtMS40MDIsLTAuMjAzIC0xLjk0MywtMC42MDQgQyA2LjMwNSwxMS4wNzMgNS45NTIsMTAu'
+    'NTMzIDUuNzg5LDkuODU1IDUuNTM1LDguNzkxIDYuMjcyLDcuOCA4LjAwMSw2Ljg4MSA4LjEzNCw2'
+    'LjgwOSA4LjIzOCw2Ljc1MSA4LjMxMyw2LjcxMSA5LjgyNiw1LjkwNiAxMC44MSw1LjExNyAxMS4y'
+    'NjEsNC4zNDcgMTEuNzEzLDMuNTc2IDExLjgwMiwyLjYxNSAxMS41MjUsMS40NjMgMTEuMTI0LC0w'
+    'LjIxNSAxMC4yOTEsLTEuNTQ3IDkuMDI1LC0yLjUzNCA3Ljc1OSwtMy41MjEgNi4yNDksLTQuMDE1'
+    'IDQuNDk4LC00LjAxNSBjIC0xLjQ3MSwwIC0yLjU5MiwwLjM0NiAtMy4zNjQsMS4wNCBDIDAuMzYs'
+    'LTIuMjgyIC0wLjAxOCwtMS4yOTEgMCwwIiBzdHlsZT0iZmlsbDojNjk2YTZhO2ZpbGwtb3BhY2l0'
+    'eToxO2ZpbGwtcnVsZTpub256ZXJvO3N0cm9rZTpub25lIiAvPjwvZz48ZyB0cmFuc2Zvcm09InRy'
+    'YW5zbGF0ZSgyNTguMDQ1OSw0My4zNjMzKSI+PHBhdGggZD0iTSAwLDAgNC4yMzgsMTcuNzA0IEgg'
+    'Ny4wNDMgTCAyLjgwNSwwIFoiIHN0eWxlPSJmaWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7Zmls'
+    'bC1ydWxlOm5vbnplcm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRl'
+    'KDI2NC44ODI4LDQzLjM2MzMpIj48cGF0aCBkPSJNIDAsMCA0LjQwNiwxOC40MDUgMTIuNzc4LDcu'
+    'NTgyIEMgMTMuMDAyLDcuMjc3IDEzLjIyOCw2Ljk1IDEzLjQ1MSw2LjYwMyAxMy42NzQsNi4yNTYg'
+    'MTMuOTAyLDUuODY2IDE0LjEzNiw1LjQzIGwgMi45MzksMTIuMjc0IGggMi41OTMgTCAxNS4yNjUs'
+    'LTAuNjg3IDYuNzE3LDEwLjMyOSBjIC0wLjIyOSwwLjI5NyAtMC40NDMsMC42MTEgLTAuNjQyLDAu'
+    'OTQyIC0wLjIsMC4zMzEgLTAuMzgyLDAuNjc4IC0wLjU0OCwxLjA0IEwgMi41ODEsMCBaIiBzdHls'
+    'ZT0iZmlsbDojNjk2YTZhO2ZpbGwtb3BhY2l0eToxO2ZpbGwtcnVsZTpub256ZXJvO3N0cm9rZTpu'
+    'b25lIiAvPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgyOTMuNTAyLDU4LjYyNSkiPjxwYXRo'
+    'IGQ9Ik0gMCwwIC0zLjY1NCwtMTUuMjYyIEggLTYuNDU4IEwgLTIuODA2LDAgaCAtNC41ODUgbCAw'
+    'LjU4NSwyLjQ0MiBIIDUuMTQ2IEwgNC41NjIsMCBaIiBzdHlsZT0iZmlsbDojNjk2YTZhO2ZpbGwt'
+    'b3BhY2l0eToxO2ZpbGwtcnVsZTpub256ZXJvO3N0cm9rZTpub25lIiAvPjwvZz48ZyB0cmFuc2Zv'
+    'cm09InRyYW5zbGF0ZSgyOTYuNTU1Nyw0My4zNjMzKSI+PHBhdGggZD0ibSAwLDAgNC4yMzgsMTcu'
+    'NzA0IGggOS42MyBMIDEzLjI4NCwxNS4yNjIgSCA2LjQ1OSBMIDUuMzk2LDEwLjgyNCBoIDYuODI1'
+    'IEwgMTEuNjE2LDguMjk2IEggNC43OTEgTCAzLjQyMiwyLjU3NiBoIDYuODI1IEwgOS42MywwIFoi'
+    'IHN0eWxlPSJmaWxsOiM2OTZhNmE7ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnplcm87c3Ry'
+    'b2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDMxNC42NDE2LDUzLjUyMjUp'
+    'Ij48cGF0aCBkPSJNIDAsMCBIIDAuNTA4IEMgMS45OTIsMCAzLjAyMSwwLjE3NiAzLjU5MywwLjUz'
+    'MSA0LjE2NSwwLjg4NiA0LjU2MSwxLjUxNCA0Ljc3NSwyLjQxOCA1LjAwOSwzLjM5MyA0LjkxMyw0'
+    'LjA4MSA0LjQ4NCw0LjQ3OSA0LjA1OSw0Ljg4IDMuMTM4LDUuMDc5IDEuNzI0LDUuMDc5IEggMS4y'
+    'MTYgWiBtIC0wLjcxMiwtMi4yMzcgLTEuODk3LC03LjkyMiBoIC0yLjYyOCBsIDQuMjM5LDE3Ljcw'
+    'NCBoIDMuOTEzIGMgMS4xNDcsMCAyLjAxOSwtMC4wNzYgMi42MTQsLTAuMjMgQyA2LjEyNSw3LjE2'
+    'MiA2LjYwNSw2LjkwOSA2Ljk2OCw2LjU1MyA3LjQsNi4xMjcgNy42OCw1LjU3MyA3LjgxLDQuODk2'
+    'IDcuOTM3LDQuMjIgNy45MDQsMy40NzggNy43MTIsMi42NzMgNy4zNzMsMS4yNTQgNi43NzMsMC4x'
+    'NDMgNS45MTMsLTAuNjYgNS4wNTMsLTEuNDYxIDMuOTUxLC0xLjk0NCAyLjYwOCwtMi4xMDQgbCA0'
+    'LjAxNCwtOC4wNTUgSCAzLjQ1IGwgLTMuODQ0LDcuOTIyIHoiIHN0eWxlPSJmaWxsOiM2OTZhNmE7'
+    'ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnplcm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxnIHRy'
+    'YW5zZm9ybT0idHJhbnNsYXRlKDMyMi45MjU4LDQzLjM2MzMpIj48cGF0aCBkPSJtIDAsMCA0LjIz'
+    'OCwxNy43MDQgaCA5LjYzIEwgMTMuMjg0LDE1LjI2MiBIIDYuNDU4IEwgNS40MDEsMTAuODQ4IGgg'
+    'Ni44MjYgTCAxMS42MjIsOC4zMjEgSCA0Ljc5NyBMIDIuODA1LDAgWiIgc3R5bGU9ImZpbGw6IzY5'
+    'NmE2YTtmaWxsLW9wYWNpdHk6MTtmaWxsLXJ1bGU6bm9uemVybztzdHJva2U6bm9uZSIgLz48L2c+'
+    'PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMzQwLjA0NDksNTAuMzE2NCkiPjxwYXRoIGQ9Ik0gMCww'
+    'IEggNC44MSBMIDQuMDA3LDQuMDQgQyAzLjk2OCw0LjI5NyAzLjkzMyw0LjU5MyAzLjkwMiw0Ljky'
+    'OCAzLjg3Myw1LjI2MyAzLjg1Myw1LjYzNiAzLjg0LDYuMDQ3IDMuNjUzLDUuNjYgMy40NjYsNS4y'
+    'OTkgMy4yOCw0Ljk2NCAzLjA5NCw0LjYzIDIuOTEyLDQuMzIyIDIuNzM0LDQuMDQgWiBNIDYuMDkz'
+    'LC02Ljk1MyA1LjIyNiwtMi4zOTQgSCAtMS42MTEgTCAtNC43MDYsLTYuOTUzIEggLTcuNjUyIEwg'
+    'NS4xMDksMTEuNDUyIDkuMDUxLC02Ljk1MyBaIiBzdHlsZT0iZmlsbDojNjk2YTZhO2ZpbGwtb3Bh'
+    'Y2l0eToxO2ZpbGwtcnVsZTpub256ZXJvO3N0cm9rZTpub25lIiAvPjwvZz48ZyB0cmFuc2Zvcm09'
+    'InRyYW5zbGF0ZSgzNjcuMzU1NSw1Ni43NjI3KSI+PHBhdGggZD0ibSAwLDAgYyAtMC42MjcsMC42'
+    'OTMgLTEuMzQxLDEuMjEzIC0yLjE0MywxLjU2IC0wLjgsMC4zNDUgLTEuNjg4LDAuNTIgLTIuNjYz'
+    'LDAuNTIgLTEuODg1LDAgLTMuNTY5LC0wLjYyMSAtNS4wNDgsLTEuODYyIC0xLjQ4MSwtMS4yNDIg'
+    'LTIuNDU3LC0yLjg1IC0yLjkzLC00LjgyNiAtMC40NTcsLTEuOTExIC0wLjI1OCwtMy40ODYgMC41'
+    'OTYsLTQuNzI3IDAuODU0LC0xLjI0MiAyLjE1OCwtMS44NjQgMy45MDksLTEuODY0IDEuMDIzLDAg'
+    'Mi4wMzksMC4xODYgMy4wNTEsMC41NTcgMS4wMTIsMC4zNzEgMi4wMzMsMC45MzEgMy4wNiwxLjY4'
+    'MiBsIC0wLjc3OSwtMy4yNTQgYyAtMC44ODcsLTAuNTU2IC0xLjgwOCwtMC45NzIgLTIuNzYxLC0x'
+    'LjI0NSAtMC45NTQsLTAuMjc0IC0xLjk0OSwtMC40MTEgLTIuOTg2LC0wLjQxMSAtMS4zMiwwIC0y'
+    'LjQ4OCwwLjIyMSAtMy41MDEsMC42NjUgLTEuMDE0LDAuNDQzIC0xLjg0MywxLjA5NSAtMi40ODQs'
+    'MS45NTkgLTAuNjM4LDAuODQ2IC0xLjA0NywxLjg0MyAtMS4yMjIsMi45OTMgLTAuMTc4LDEuMTQ4'
+    'IC0wLjExMSwyLjM3MiAwLjE5OSwzLjY3MSAwLjMxMSwxLjI5NyAwLjgzLDIuNTE2IDEuNTU1LDMu'
+    'NjU3IDAuNzI0LDEuMTQxIDEuNjE5LDIuMTQzIDIuNjgxLDMuMDA1IDEuMDY2LDAuODcxIDIuMjA2'
+    'LDEuNTI5IDMuNDIsMS45NzggMS4yMTUsMC40NDYgMi40NjgsMC42NzEgMy43NTcsMC42NzEgMS4w'
+    'MTQsMCAxLjk0NCwtMC4xNTIgMi43OTEsLTAuNDU1IEMgLTAuNjUxLDMuOTczIDAuMTMxLDMuNTE2'
+    'IDAuODUsMi45MDEgWiIgc3R5bGU9ImZpbGw6IzY5NmE2YTtmaWxsLW9wYWNpdHk6MTtmaWxsLXJ1'
+    'bGU6bm9uemVybztzdHJva2U6bm9uZSIgLz48L2c+PGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMzY3'
+    'LjYyNyw0My4zNjMzKSI+PHBhdGggZD0ibSAwLDAgNC4yMzgsMTcuNzA0IGggOS42MyBMIDEzLjI4'
+    'MywxNS4yNjIgSCA2LjQ1OSBMIDUuMzk2LDEwLjgyNCBoIDYuODI1IEwgMTEuNjE2LDguMjk2IEgg'
+    'NC43OTEgTCAzLjQyMiwyLjU3NiBoIDYuODI1IEwgOS42MywwIFoiIHN0eWxlPSJmaWxsOiM2OTZh'
+    'NmE7ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5vbnplcm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxn'
+    'IHRyYW5zZm9ybT0idHJhbnNsYXRlKDMxNi40NjI5LDc2LjQ5NTEpIj48cGF0aCBkPSJNIDAsMCBI'
+    'IC0xOS4yODMgTCA3LjUzNSw5Ni44NTUgaCAxOS4yODQgeiIgc3R5bGU9ImZpbGw6IzY2Njg2Yztm'
+    'aWxsLW9wYWNpdHk6MTtmaWxsLXJ1bGU6bm9uemVybztzdHJva2U6bm9uZSIgLz48L2c+PGcgdHJh'
+    'bnNmb3JtPSJ0cmFuc2xhdGUoMzA2LjQ1MjEsMTcwLjI4ODEpIj48cGF0aCBkPSJtIDAsMCBjIC0x'
+    'LjMzNywxLjg0MyAtMy4zOTksMi43NzMgLTYuMiwyLjc3MyBoIC0xMDYuMDM2IGwgLTUuMjUyLC0x'
+    'OC45NyBoIDE5LjI5NCB2IDAuMDExIGggNzcuMTY5IGwgLTUuNjE0LC0yMC4yNzIgaCAtNzcuMTcx'
+    'IGwgMC4wMDcsMC4wNDIgaCAtMTkuMjg2IGwgLTE2LjAwNywtNTcuNzg3IGggMTkuMjk2IGwgMTAu'
+    'NzQyLDM4Ljc4NiBoIDg2Ljc0NiBjIDIuNzA5LDAgNS4yNTksMC45MjQgNy42NTcsMi43NzIgMi4z'
+    'OTMsMS44NSAzLjk2OCw0LjEzMSA0LjcyMyw2Ljg1NSBMIDAuODA5LC02Ljk5NiBDIDEuNTkzLC00'
+    'LjE4MSAxLjMyMiwtMS44NDUgMCwwIiBzdHlsZT0iZmlsbDojNjY2ODZjO2ZpbGwtb3BhY2l0eTox'
+    'O2ZpbGwtcnVsZTpub256ZXJvO3N0cm9rZTpub25lIiAvPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5z'
+    'bGF0ZSgxNTYuMTE5Niw4Mi41NDEpIj48cGF0aCBkPSJtIDAsMCBjIC0xLjA2NSwtMy44MzUgLTQu'
+    'NTU3LC02LjQ4OCAtOC41MzgsLTYuNDg4IGggLTk5LjQ5MSBjIC0yLjcxMSwwIC00LjcyNiwwLjky'
+    'NCAtNi4wNTEsMi43NyAtMS4zMjQsMS44NDggLTEuNjA4LDQuMTM0IC0wLjg1MSw2Ljg1NyBsIDI0'
+    'LjI3Niw4Ny4zODcgaCAxOS4zMDEgbCAtMjEuNjgzLC03OC4wNSBoIDc3LjIwNiBsIDIxLjY4Myw3'
+    'OC4wNSBoIDE5LjI5NyB6IiBzdHlsZT0iZmlsbDojNjY2ODZjO2ZpbGwtb3BhY2l0eToxO2ZpbGwt'
+    'cnVsZTpub256ZXJvO3N0cm9rZTpub25lIiAvPjwvZz48ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgz'
+    'NzYuNTg1OSwxNzMuMTY4OSkiPjxwYXRoIGQ9Im0gMCwwIDI0LjQxNCwtNDguNTUzIC01MS4zMjIs'
+    'LTQ4LjU0IHoiIHN0eWxlPSJmaWxsOiMyNzgwM2I7ZmlsbC1vcGFjaXR5OjE7ZmlsbC1ydWxlOm5v'
+    'bnplcm87c3Ryb2tlOm5vbmUiIC8+PC9nPjxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDM1OS40NzE3'
+    'LDE3My4xNjg5KSI+PHBhdGggZD0ibSAwLDAgMjQuMzk2LC00OC41NTMgLTUxLjM0MywtNDguNTQg'
+    'eiIgc3R5bGU9ImZpbGw6I2U5NjYxYztmaWxsLW9wYWNpdHk6MTtmaWxsLXJ1bGU6bm9uemVybztz'
+    'dHJva2U6bm9uZSIgLz48L2c+PC9nPjwvZz48L2c+PC9zdmc+'
+)
+_UPI_MARK_DATA_URI = 'data:image/svg+xml;base64,' + _UPI_MARK_SVG_BASE64
+
 # Body uses sentinel placeholders that the view substitutes with
 # JSON-encoded values at request time. Avoids Python f-string brace
 # escaping in the JS body, keeping the JS readable.
@@ -1746,7 +1976,10 @@ _ITEM_PRICING_JS_BODY = r"""
   'use strict';
   var ENDPOINT = __PED_ENDPOINT__;
   var ETH_ICON = __PED_ETH_ICON__;
+  var UPI_ICON = __PED_UPI_ICON__;
   if (!ENDPOINT) return;
+  // Set from the pricing feed before any row is annotated.
+  var UPI_AVAILABLE = false;
 
   // Design tokens from the Devcon Figma file (node 5111:7166): purple
   // tint for the ETH pill, neutral gray for the Fiat pill. Stacked
@@ -1807,12 +2040,21 @@ _ITEM_PRICING_JS_BODY = r"""
       'flex-shrink:0;width:20px;height:20px}' +
     '.ped-icon img,.ped-icon svg{width:20px;height:20px;display:block;' +
       'border-radius:1px}' +
+    // UPI wordmark: wider than the square tiles, framed like Stripe does
+    // it so it reads at the same 20px height. The frame is ours, the mark
+    // inside is NPCI\'s as published.
+    '.ped-icon.ped-upi-mark{width:auto;padding:0 4px;box-sizing:border-box;' +
+      'border:1.5px solid #8a8a8a;border-radius:4px;background:#fff}' +
+    '.ped-icon.ped-upi-mark img{width:auto;height:11px;border-radius:0}' +
     // Fiat amount uses Devcon\'s muted-foreground token (#594d73) per
     // the Figma design — signals "secondary payment method" against
     // the ETH row\'s highlighted accent-foreground. Same 18px/bold
     // weight as the ETH price so buyers still read them as directly
     // comparable, just with different chromatic emphasis.
     '.ped-fiat-amount{color:#594d73;font-size:18px;font-weight:bold;' +
+      'line-height:1.2;font-variant-numeric:tabular-nums}' +
+    // Rupee row (UPI): same secondary weight as the card amount.
+    '.ped-upi-amount{color:#594d73;font-size:18px;font-weight:bold;' +
       'line-height:1.2;font-variant-numeric:tabular-nums}' +
     // Relocated tax notice at the bottom (see moveTaxNoticeToBottom).
     '.ped-tax-line{text-align:right;margin-top:4px;line-height:1.2}' +
@@ -1924,6 +2166,7 @@ _ITEM_PRICING_JS_BODY = r"""
   // Icon builder — glyph only, no label. `kind` selects the asset:
   //   'eth'  → embedded Ethereum diamond PNG (data URI)
   //   'fiat' → inline dollar-sign-in-tile SVG (dark bg baked in)
+  //   'upi'  → NPCI\'s UPI wordmark (embedded SVG data URI) in a thin frame
   // The consumer wraps this icon inside a `.ped-row` next to the
   // matching price; the row itself carries the "which method?" signal
   // via its class (`.ped-eth-row` gets the green highlight).
@@ -1935,10 +2178,43 @@ _ITEM_PRICING_JS_BODY = r"""
       img.src = ETH_ICON;
       img.alt = '';
       iconEl.appendChild(img);
+    } else if (kind === 'upi') {
+      iconEl.className += ' ped-upi-mark';
+      var mark = document.createElement('img');
+      mark.src = UPI_ICON;
+      mark.alt = 'UPI';
+      iconEl.appendChild(mark);
     } else {  // 'fiat'
       iconEl.innerHTML = FIAT_SVG;
     }
     return iconEl;
+  }
+
+  // Rupees as Pretix would print them for INR: Indian grouping, no ".00".
+  function fmtRupees(v) {
+    var n = Math.round(v * 100) / 100;
+    var s = n.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return '\u20B9' + s.replace(/\.00$/, '');
+  }
+
+  // Rupee row for a product with a rupee price while the UPI rail is on:
+  // the UPI tile and the rupees the buyer pays on Stripe\'s page. The rupee
+  // price pairs with the card list price, so a voucher or a card override
+  // scales it the same way (`cardUnit` is the card amount actually charged).
+  function rupeeRow(info, cardUnit) {
+    if (!UPI_AVAILABLE || info.upi_price_inr == null) return null;
+    var inr = parseFloat(info.upi_price_inr);
+    var list = info.fiat_price_usd != null ? parseFloat(info.fiat_price_usd) : parseFloat(info.default_price);
+    if (!isFinite(inr) || !isFinite(list) || list <= 0) return null;
+    var unit = isFinite(cardUnit) && cardUnit > 0 ? cardUnit : list;
+    var row = document.createElement('div');
+    row.className = 'ped-row ped-upi-row';
+    row.appendChild(buildIcon('upi'));
+    var amt = document.createElement('span');
+    amt.className = 'ped-upi-amount';
+    amt.textContent = fmtRupees(inr * unit / list);
+    row.appendChild(amt);
+    return row;
   }
 
   // Locate Pretix\'s native price element inside the .price column:
@@ -2049,6 +2325,8 @@ _ITEM_PRICING_JS_BODY = r"""
     // Same-price add-ons stay icon-free, as in dual mode.
     if (!isAddon || override != null) row.appendChild(buildIcon('fiat'));
     row.appendChild(priceEl);
+    var rupees = rupeeRow(info, parseFloat(elem.dataset.pedCardUnit));
+    if (rupees) elem.appendChild(rupees);
     dropOrphanBrs(elem);
     moveTaxNoticeToBottom(elem);
   }
@@ -2177,14 +2455,19 @@ _ITEM_PRICING_JS_BODY = r"""
     // Skipped for add-ons: the dual-icon hint would just clutter secondary
     // rows (shirts, chess sets, etc.) — leave them at Pretix\'s plain price.
     if (samePrice) {
-      if (isAddon) return;
-      var bothRow = document.createElement('div');
-      bothRow.className = 'ped-row ped-both-row';
-      priceEl.parentNode.insertBefore(bothRow, priceEl);
-      bothRow.appendChild(buildIcon('eth'));
-      bothRow.appendChild(buildIcon('fiat'));
-      prependStruckList(bothRow);
-      bothRow.appendChild(priceEl);
+      var unitPaid = nativeAmount(priceEl);
+      if (!isAddon) {
+        var bothRow = document.createElement('div');
+        bothRow.className = 'ped-row ped-both-row';
+        priceEl.parentNode.insertBefore(bothRow, priceEl);
+        bothRow.appendChild(buildIcon('eth'));
+        bothRow.appendChild(buildIcon('fiat'));
+        prependStruckList(bothRow);
+        bothRow.appendChild(priceEl);
+      }
+      // An add-on gets a rupee row only when it carries its own rupee price.
+      var sameRupees = rupeeRow(info, unitPaid);
+      if (sameRupees) elem.appendChild(sameRupees);
       dropOrphanBrs(elem);
       moveTaxNoticeToBottom(elem);
       return;
@@ -2224,6 +2507,8 @@ _ITEM_PRICING_JS_BODY = r"""
         fiatRow.appendChild(amt);
       }
       elem.appendChild(fiatRow);
+      var dualRupees = rupeeRow(info, isFinite(fiatAfter) ? fiatAfter : fiat);
+      if (dualRupees) elem.appendChild(dualRupees);
     }
 
     dropOrphanBrs(elem);
@@ -2411,6 +2696,7 @@ _ITEM_PRICING_JS_BODY = r"""
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data || !data.items) return;
+        UPI_AVAILABLE = data.upi_available === true;
         var byId = {};
         data.items.forEach(function (it) { byId[it.id] = it; });
         // Per-cart-line discounts, keyed "<itemId>\n<voucherCode>" so a cart
@@ -2448,7 +2734,7 @@ def item_pricing_js(request, **kwargs):
     "Save $X with Ethereum" callout for items with a meaningful fiat
     markup.
 
-    Both the endpoint URL and the ETH icon data URI are substituted into
+    The endpoint URL and the ETH and UPI icon data URIs are substituted into
     the JS body at request time so the JS body itself is a static string
     constant (no Python f-string brace escaping needed).
     """
@@ -2465,6 +2751,7 @@ def item_pricing_js(request, **kwargs):
         _ITEM_PRICING_JS_BODY
         .replace('__PED_ENDPOINT__', json.dumps(endpoint_url))
         .replace('__PED_ETH_ICON__', json.dumps(_ETH_ICON_DATA_URI))
+        .replace('__PED_UPI_ICON__', json.dumps(_UPI_MARK_DATA_URI))
     )
     return HttpResponse(js, content_type='application/javascript; charset=utf-8')
 
