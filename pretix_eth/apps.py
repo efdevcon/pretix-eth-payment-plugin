@@ -13,6 +13,7 @@ _log = logging.getLogger(__name__)
 #   crypto_disabled  card-only item: the crypto rail is hidden
 FIAT_DISABLED_FLAG = 'fiat_disabled'
 CRYPTO_DISABLED_FLAG = 'crypto_disabled'
+UPI_ENABLED_FLAG = 'upi_enabled'       # allow-list for the UPI rail (payment_upi.py)
 
 
 def _is_truthy_meta(v):
@@ -39,23 +40,38 @@ def _items_with_flag(event, item_ids, flag):
     return hits
 
 
-def _order_has_item_flag(order, flag):
-    """True when a main position of `order` is an item flagged `flag`."""
+def _all_flagged(event, item_ids, flag):
+    """True when every one of `item_ids` is flagged `flag` (and there is at least one)."""
+    ids = set(item_ids)
+    return bool(ids) and set(_items_with_flag(event, ids, flag)) == ids
+
+
+def _order_main_item_ids(order):
     from pretix.base.models import OrderPosition
-    item_ids = list(OrderPosition.objects.filter(
+    return list(OrderPosition.objects.filter(
         order=order, addon_to__isnull=True,
     ).values_list('item_id', flat=True))
-    return bool(_items_with_flag(order.event, item_ids, flag))
 
 
-def _cart_or_order_has_item_flag(event, request, flag):
-    """True when a main position of the buyer's current cart, or of the order
-    named in the request URL (re-pay flow), is an item flagged `flag`.
+def _order_has_item_flag(order, flag):
+    """True when a main position of `order` is an item flagged `flag`."""
+    return bool(_items_with_flag(order.event, _order_main_item_ids(order), flag))
+
+
+def _order_items_all_flagged(order, flag):
+    """True when every main position of `order` is an item flagged `flag`."""
+    return _all_flagged(order.event, _order_main_item_ids(order), flag)
+
+
+def _cart_or_order_main_item_ids(event, request):
+    """Item ids of the main positions of the buyer's current cart plus, in
+    the re-pay flow, of the order named in the request URL.
 
     Only main positions count: add-ons follow their parent's payment
     treatment, so a flagged add-on under an unflagged ticket changes nothing.
     """
     from pretix.base.models import CartPosition, OrderPosition
+    item_ids = []
 
     # Cart flow: buyer is in checkout, no order yet.
     cart_id = None
@@ -70,11 +86,9 @@ def _cart_or_order_has_item_flag(event, request, flag):
         except Exception:
             cart_id = None
     if cart_id:
-        cart_item_ids = list(CartPosition.objects.filter(
+        item_ids += list(CartPosition.objects.filter(
             cart_id=cart_id, event=event, addon_to__isnull=True,
         ).values_list('item_id', flat=True))
-        if _items_with_flag(event, cart_item_ids, flag):
-            return True
 
     # Order re-pay flow: the order code lives in the URL kwargs.
     try:
@@ -83,13 +97,25 @@ def _cart_or_order_has_item_flag(event, request, flag):
     except Exception:
         order_code = None
     if order_code:
-        order_item_ids = list(OrderPosition.objects.filter(
+        item_ids += list(OrderPosition.objects.filter(
             order__code=order_code, order__event=event, addon_to__isnull=True,
         ).values_list('item_id', flat=True))
-        if _items_with_flag(event, order_item_ids, flag):
-            return True
 
-    return False
+    return item_ids
+
+
+def _cart_or_order_has_item_flag(event, request, flag):
+    """True when a main position of the buyer's current cart, or of the order
+    named in the request URL (re-pay flow), is an item flagged `flag`.
+    """
+    return bool(_items_with_flag(event, _cart_or_order_main_item_ids(event, request), flag))
+
+
+def _cart_or_order_items_all_flagged(event, request, flag):
+    """True when every main position of the cart (and of the order being
+    re-paid) is an item flagged `flag`. Nothing resolvable counts as False.
+    """
+    return _all_flagged(event, _cart_or_order_main_item_ids(event, request), flag)
 
 
 def _warn_if_no_rail_left(event):

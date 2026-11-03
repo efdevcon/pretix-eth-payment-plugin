@@ -97,6 +97,15 @@ class StripeCheckoutUPI(BasePaymentProvider):
             required=False,
             help_text=_('Leave empty to use the key configured in the Stripe plugin of this event.'),
         )
+        fields['restrict_to_flagged_items'] = forms.BooleanField(
+            label=_('Only for products flagged "upi_enabled"'),
+            required=False,
+            initial=True,
+            help_text=_('Offer UPI only when every main product in the cart (or in the order being re-paid) '
+                        'has the item meta property "upi_enabled" set to 1. Create the property once under '
+                        'the organizer\'s item meta properties, then set it on the products. Add-ons follow '
+                        'their parent product. Switch this off to offer UPI for every product.'),
+        )
         fields['payment_methods'] = forms.CharField(
             label=_('Payment methods on the Stripe page'),
             required=False,
@@ -128,11 +137,24 @@ class StripeCheckoutUPI(BasePaymentProvider):
     def _stripe_kwargs(self):
         return {'api_key': self.api_key(), 'stripe_version': STRIPE_API_VERSION}
 
+    def _restricted_to_flagged_items(self) -> bool:
+        return self.settings.get('restrict_to_flagged_items', as_type=bool, default=True)
+
     def is_allowed(self, request, total=None):
-        return bool(self.api_key()) and super().is_allowed(request, total)
+        if not self.api_key() or not super().is_allowed(request, total):
+            return False
+        if not self._restricted_to_flagged_items():
+            return True
+        from pretix_eth.apps import UPI_ENABLED_FLAG, _cart_or_order_items_all_flagged
+        return _cart_or_order_items_all_flagged(self.event, request, UPI_ENABLED_FLAG)
 
     def order_change_allowed(self, order, request=None):
-        return bool(self.api_key()) and super().order_change_allowed(order, request=request)
+        if not self.api_key() or not super().order_change_allowed(order, request=request):
+            return False
+        if not self._restricted_to_flagged_items():
+            return True
+        from pretix_eth.apps import UPI_ENABLED_FLAG, _order_items_all_flagged
+        return _order_items_all_flagged(order, UPI_ENABLED_FLAG)
 
     # ----- checkout screens --------------------------------------------------
 

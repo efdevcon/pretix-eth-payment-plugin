@@ -82,6 +82,7 @@ def stripe_calls(monkeypatch):
 
 @pytest.mark.django_db
 def test_offered_only_with_a_stripe_key(event):
+    event.settings.set('payment_stripe_checkout_upi_restrict_to_flagged_items', False)  # product rule tested elsewhere
     with scope(organizer=event.organizer):
         request = _request(event)
         assert StripeCheckoutUPI(event).is_allowed(request, total=Decimal('100')) is False
