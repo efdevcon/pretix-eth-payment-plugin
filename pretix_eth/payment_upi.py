@@ -38,6 +38,12 @@ STRIPE_API_VERSION = '2026-10-28.endive'
 SESSION_TTL = 35 * 60      # Stripe requires `expires_at` at least 30 minutes after creation
 RECHECK_INTERVAL = 30      # seconds between order-page re-reads of an open session
 PAID_STATUSES = ('paid', 'no_payment_required')
+# `allowed_payment_method_types` is validated against the session currency
+# before Adaptive Pricing converts it, and UPI only exists in INR, so a
+# USD session filtered to UPI alone is refused ("must include at least one
+# payment method supported by the default currency"). Card keeps the
+# filter valid; UPI is added for buyers Stripe places in India.
+DEFAULT_METHODS = 'upi,card'
 
 
 def _minor_units(event, amount: Decimal) -> int:
@@ -82,9 +88,10 @@ class StripeCheckoutUPI(BasePaymentProvider):
         fields['payment_methods'] = forms.CharField(
             label=_('Payment methods on the Stripe page'),
             required=False,
-            initial='upi',
-            help_text=_('Comma-separated Stripe method types, for example "upi" or "upi,card". '
-                        'Empty shows everything enabled in the Stripe dashboard.'),
+            initial=DEFAULT_METHODS,
+            help_text=_('Comma-separated Stripe method types. Keep "card" in the list: Stripe validates it '
+                        'against the event currency before Adaptive Pricing converts, and UPI alone is '
+                        'refused for a USD session. Empty shows everything enabled in the Stripe dashboard.'),
         )
         return fields
 
@@ -94,9 +101,9 @@ class StripeCheckoutUPI(BasePaymentProvider):
         return self.settings.get('secret_key') or self.event.settings.get('payment_stripe_secret_key') or ''
 
     def allowed_methods(self):
-        raw = self.settings.get('payment_methods', default='upi')
+        raw = self.settings.get('payment_methods', default=DEFAULT_METHODS)
         if raw is None:
-            raw = 'upi'
+            raw = DEFAULT_METHODS
         return [m.strip() for m in str(raw).split(',') if m.strip()]
 
     def _stripe_kwargs(self):

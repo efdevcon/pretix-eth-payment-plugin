@@ -99,7 +99,7 @@ def test_session_is_created_in_the_event_currency_with_adaptive_pricing(upi_even
     assert kwargs['api_key'] == KEY
     assert kwargs['stripe_version'] == STRIPE_API_VERSION
     assert kwargs['adaptive_pricing'] == {'enabled': True}
-    assert kwargs['allowed_payment_method_types'] == ['upi']
+    assert kwargs['allowed_payment_method_types'] == ['upi', 'card']  # UPI alone is refused on a USD session
     (item,) = kwargs['line_items']
     assert item['price_data']['currency'] == 'usd'
     assert item['price_data']['unit_amount'] == 10000
