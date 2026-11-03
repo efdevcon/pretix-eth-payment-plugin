@@ -126,6 +126,34 @@ def test_methods_setting_controls_the_stripe_page(upi_event, upi_payment, stripe
         StripeCheckoutUPI(upi_event).execute_payment(_request(upi_event), payment)
     assert 'allowed_payment_method_types' not in stripe_calls['create'][1]
 
+    # A list saved without card (before the form validated it) is repaired, not sent as is.
+    upi_event.settings.set('payment_stripe_checkout_upi_payment_methods', 'upi')
+    _, payment = upi_payment()
+    with scope(organizer=upi_event.organizer):
+        StripeCheckoutUPI(upi_event).execute_payment(_request(upi_event), payment)
+    assert stripe_calls['create'][2]['allowed_payment_method_types'] == ['upi', 'card']
+
+
+def test_methods_field_refuses_a_list_without_card():
+    from django.core.exceptions import ValidationError
+    from pretix_eth.payment_upi import _validate_methods
+    for ok in ('', 'card', 'upi,card', 'upi, card, link'):
+        _validate_methods(ok)
+    with pytest.raises(ValidationError):
+        _validate_methods('upi')
+
+
+@pytest.mark.django_db
+def test_stripe_400_is_reported_as_a_setup_problem_not_an_outage(upi_event, upi_payment, monkeypatch):
+    def rejected(**kwargs):
+        raise stripe.error.InvalidRequestError('`payment_method_types` must include ...', 'payment_method_types')
+    monkeypatch.setattr(stripe.checkout.Session, 'create', rejected)
+    _, payment = upi_payment()
+    with scope(organizer=upi_event.organizer), pytest.raises(PaymentException) as exc:
+        StripeCheckoutUPI(upi_event).execute_payment(_request(upi_event), payment)
+    assert 'rejected the payment setup' in str(exc.value)
+    assert 'trouble reaching' not in str(exc.value)
+
 
 @pytest.mark.django_db
 def test_retry_reuses_an_open_session(upi_event, upi_payment, stripe_calls):
@@ -239,22 +267,38 @@ def test_webhook_ignores_unknown_or_mismatched_sessions(upi_event, upi_payment, 
 
 
 @pytest.mark.django_db
-def test_order_page_offers_the_open_session_and_rechecks_it(upi_event, upi_payment, stripe_calls):
-    _, payment = upi_payment(info_data={'session_id': 'cs_test_1', 'session_url': 'https://checkout.stripe.com/c/pay/cs_test_1'})
+def test_order_page_links_to_the_open_session_and_the_status_check(upi_event, upi_payment, stripe_calls):
+    import time
+    order, payment = upi_payment(info_data={
+        'session_id': 'cs_test_1', 'session_url': 'https://checkout.stripe.com/c/pay/cs_test_1',
+        'session_status': 'open', 'expires_at': int(time.time()) + 600,
+    })
     with scope(organizer=upi_event.organizer):
         html = StripeCheckoutUPI(upi_event).payment_pending_render(_request(upi_event), payment)
     assert 'Continue with UPI' in html
     assert 'https://checkout.stripe.com/c/pay/cs_test_1' in html
-    assert stripe_calls['retrieve'][0][0] == 'cs_test_1'
+    assert f'/plugin/upi/return/{order.code}/' in html  # "check the payment status" goes through the return view
+    assert stripe_calls['retrieve'] == []  # rendering never calls Stripe
 
-    stripe_calls['next'] = _session(**PAID)
-    payment.info_data = {**payment.info_data, 'checked_at': 0}
+    payment.info_data = {**payment.info_data, 'expires_at': int(time.time()) - 1}
     payment.save(update_fields=['info'])
     with scope(organizer=upi_event.organizer):
         html = StripeCheckoutUPI(upi_event).payment_pending_render(_request(upi_event), payment)
     assert 'Continue with UPI' not in html
+    assert f'/plugin/upi/return/{order.code}/' in html
+
+
+@pytest.mark.django_db
+def test_webhook_records_a_mismatch_without_asking_stripe_to_retry(upi_event, upi_payment, stripe_calls):
+    order, payment = upi_payment(info_data={'session_id': 'cs_test_1'})
+    stripe_calls['next'] = _session(**PAID, amount_total=9000)
+    body = {'data': {'object': {'object': 'checkout.session', 'id': 'cs_test_1',
+                                'metadata': {'order': order.code, 'payment': str(payment.pk)}}}}
+    with scope(organizer=upi_event.organizer):
+        response = upi_webhook(_request(upi_event, '/plugin/upi/webhook/', 'post', body))
+    assert response.status_code == 200
     payment.refresh_from_db()
-    assert payment.state == OrderPayment.PAYMENT_STATE_CONFIRMED
+    assert payment.state == OrderPayment.PAYMENT_STATE_CREATED
 
 
 @pytest.mark.django_db

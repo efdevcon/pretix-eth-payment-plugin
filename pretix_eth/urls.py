@@ -132,12 +132,14 @@ def _upi_routes():
     return from Stripe's page and the Stripe webhook. Event-scoped only: the
     return URL is built with `build_absolute_uri`, which resolves to the
     event domain, and the webhook URL is configured per event in Stripe.
-    `require_live=False` on the webhook: Stripe keeps posting while the shop
-    is offline, and a 403 there would make it retry for days.
+    `require_live=False` on both: a buyer coming back from Stripe's page
+    must still get their payment confirmed while the shop is offline, and
+    Stripe keeps posting to the webhook meanwhile (a 403 there would make
+    it retry for days).
     """
     return [
-        path('plugin/upi/return/<str:order>/<str:secret_hash>/<int:payment>/',
-             views_upi.upi_return, name='upi_return'),
+        event_path('plugin/upi/return/<str:order>/<str:secret_hash>/<int:payment>/',
+                   views_upi.upi_return, name='upi_return', require_live=False),
         event_path('plugin/upi/webhook/', views_upi.upi_webhook, name='upi_webhook', require_live=False),
     ]
 

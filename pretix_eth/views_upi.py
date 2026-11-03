@@ -95,6 +95,11 @@ def upi_webhook(request, **kwargs):
             return HttpResponse('session mismatch')
         try:
             StripeCheckoutUPI(event).sync_payment(payment)
+        except PaymentException as e:
+            # Recorded on the payment (an amount mismatch, for instance): a
+            # Stripe retry would change nothing, so no 5xx.
+            log.warning('[upi] webhook: %s (order %s)', e, payment.order.code)
+            return HttpResponse('recorded')
         except Exception:
             log.exception('[upi] webhook check failed for order %s', payment.order.code)
             return HttpResponse('check failed', status=500)

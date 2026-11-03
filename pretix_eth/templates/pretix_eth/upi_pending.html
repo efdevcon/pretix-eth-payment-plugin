@@ -6,3 +6,6 @@
 {% else %}
 <p>{% trans "Use the button below to start the payment again." %}</p>
 {% endif %}
+{% if check_url %}
+<p>{% trans "Already paid on Stripe's page?" %} <a href="{{ check_url }}">{% trans "Check the payment status" %}</a></p>
+{% endif %}

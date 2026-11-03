@@ -10,7 +10,8 @@ Flow: the buyer picks "UPI" in checkout; once the order is placed,
 sends the buyer back to `views_upi.upi_return`, which re-reads the session
 from the API and confirms the payment when it is paid. The optional webhook
 (`views_upi.upi_webhook`) does the same for buyers who closed the tab, and
-the order page re-checks an open session when it renders.
+the order page links to the same return URL as a "check the payment status"
+action (no Stripe call while rendering, so an outage cannot stall the page).
 
 Needs, on the Stripe account: UPI enabled, Adaptive Pricing enabled, and
 the event currency among the settlement currencies. The API version is
@@ -36,7 +37,6 @@ log = logging.getLogger(__name__)
 SECRET_TAG = 'plugins:pretix_eth:upi'
 STRIPE_API_VERSION = '2026-10-28.endive'
 SESSION_TTL = 35 * 60      # Stripe requires `expires_at` at least 30 minutes after creation
-RECHECK_INTERVAL = 30      # seconds between order-page re-reads of an open session
 PAID_STATUSES = ('paid', 'no_payment_required')
 # `allowed_payment_method_types` is validated against the session currency
 # before Adaptive Pricing converts it, and UPI only exists in INR, so a
@@ -44,6 +44,18 @@ PAID_STATUSES = ('paid', 'no_payment_required')
 # payment method supported by the default currency"). Card keeps the
 # filter valid; UPI is added for buyers Stripe places in India.
 DEFAULT_METHODS = 'upi,card'
+CARD_REQUIRED_MSG = _('Keep "card" in the list: Stripe validates it against the event currency before '
+                      'Adaptive Pricing converts, and UPI alone is refused for a USD session.')
+
+
+def _split_methods(value):
+    return [m.strip() for m in str(value or '').split(',') if m.strip()]
+
+
+def _validate_methods(value):
+    methods = _split_methods(value)
+    if methods and 'card' not in methods:
+        raise forms.ValidationError(CARD_REQUIRED_MSG)
 
 
 def _minor_units(event, amount: Decimal) -> int:
@@ -89,6 +101,7 @@ class StripeCheckoutUPI(BasePaymentProvider):
             label=_('Payment methods on the Stripe page'),
             required=False,
             initial=DEFAULT_METHODS,
+            validators=[_validate_methods],
             help_text=_('Comma-separated Stripe method types. Keep "card" in the list: Stripe validates it '
                         'against the event currency before Adaptive Pricing converts, and UPI alone is '
                         'refused for a USD session. Empty shows everything enabled in the Stripe dashboard.'),
@@ -104,7 +117,13 @@ class StripeCheckoutUPI(BasePaymentProvider):
         raw = self.settings.get('payment_methods', default=DEFAULT_METHODS)
         if raw is None:
             raw = DEFAULT_METHODS
-        return [m.strip() for m in str(raw).split(',') if m.strip()]
+        methods = _split_methods(raw)
+        if methods and 'card' not in methods:
+            # A list saved before the form validated it: repair it instead of
+            # letting every session creation fail with a Stripe 400.
+            log.warning('[upi] payment_methods %r lacks "card"; adding it', raw)
+            methods.append('card')
+        return methods
 
     def _stripe_kwargs(self):
         return {'api_key': self.api_key(), 'stripe_version': STRIPE_API_VERSION}
@@ -182,6 +201,11 @@ class StripeCheckoutUPI(BasePaymentProvider):
             kwargs['allowed_payment_method_types'] = methods
         try:
             return stripe.checkout.Session.create(**kwargs, **self._stripe_kwargs())
+        except stripe.error.InvalidRequestError as e:
+            # A 400 is our configuration or Stripe's account setup, not an outage:
+            # retrying will not help the buyer, support has to look at the log.
+            log.exception('[upi] Checkout Session create rejected for order %s: %s', order.code, e)
+            raise PaymentException(_('Stripe rejected the payment setup for this order. Please contact support.'))
         except stripe.error.StripeError as e:
             log.exception('[upi] Checkout Session create failed for order %s: %s', order.code, e)
             raise PaymentException(_('We had trouble reaching Stripe. Please try again in a moment.'))
@@ -271,19 +295,16 @@ class StripeCheckoutUPI(BasePaymentProvider):
     def payment_pending_render(self, request, payment):
         info = payment.info_data or {}
         open_states = (OrderPayment.PAYMENT_STATE_CREATED, OrderPayment.PAYMENT_STATE_PENDING)
-        pay_url = None
+        pay_url = check_url = None
         if payment.state in open_states and info.get('session_id'):
-            # A buyer who paid and closed the Stripe tab never hit the return
-            # URL; re-reading here keeps the order page right without the webhook.
-            if time.time() - int(info.get('checked_at') or 0) > RECHECK_INTERVAL:
-                try:
-                    self.sync_payment(payment)
-                    info = payment.info_data or {}
-                except Exception as e:
-                    log.warning('[upi] re-check failed for order %s: %s', payment.order.code, e)
-            if payment.state in open_states and info.get('session_status') == 'open' and info.get('session_url'):
+            # No Stripe call while rendering: an outage would stall every pending
+            # order page. A buyer who paid and closed the Stripe tab re-checks
+            # through the return URL, which re-reads the session and confirms.
+            check_url = self._return_url(payment)
+            still_open = info.get('session_status') == 'open' and int(info.get('expires_at') or 0) > time.time()
+            if still_open and info.get('session_url'):
                 pay_url = info['session_url']
-        return get_template('pretix_eth/upi_pending.html').render({'pay_url': pay_url, 'payment': payment})
+        return get_template('pretix_eth/upi_pending.html').render({'pay_url': pay_url, 'check_url': check_url})
 
     def payment_control_render(self, request, payment):
         info = payment.info_data or {}
