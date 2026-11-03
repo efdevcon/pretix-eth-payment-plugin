@@ -1,0 +1,13 @@
+{% load i18n %}
+<dl class="dl-horizontal">
+  <dt>{% trans "Checkout Session" %}</dt>
+  <dd>{{ info.session_id|default:"-" }} ({{ info.session_status|default:"?" }} / {{ info.payment_status|default:"?" }})</dd>
+  {% if dashboard_url %}
+  <dt>{% trans "Stripe payment" %}</dt>
+  <dd><a href="{{ dashboard_url }}" target="_blank" rel="noopener">{{ info.payment_intent }}</a></dd>
+  {% endif %}
+  {% if presentment %}
+  <dt>{% trans "Paid by the buyer as" %}</dt>
+  <dd>{{ presentment }}</dd>
+  {% endif %}
+</dl>

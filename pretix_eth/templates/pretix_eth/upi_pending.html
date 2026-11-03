@@ -1,0 +1,8 @@
+{% load i18n %}
+<p>{% trans "The UPI payment for this order has not been completed yet." %}</p>
+{% if pay_url %}
+<p><a href="{{ pay_url }}" class="btn btn-primary">{% trans "Continue with UPI" %}</a></p>
+<p class="text-muted">{% trans "The Stripe payment page stays open for about 30 minutes. Once it has closed, use the button below to start again." %}</p>
+{% else %}
+<p>{% trans "Use the button below to start the payment again." %}</p>
+{% endif %}

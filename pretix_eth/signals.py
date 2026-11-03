@@ -63,7 +63,8 @@ def add_wc_csp(sender, request, response, **kwargs):
 @receiver(register_payment_providers, dispatch_uid='wc_register_payment')
 def register_payment_provider(sender, **kwargs):
     from .payment import WalletConnectPayment
-    return WalletConnectPayment
+    from .payment_upi import StripeCheckoutUPI
+    return [WalletConnectPayment, StripeCheckoutUPI]
 
 
 @receiver(register_text_placeholders, dispatch_uid='wc_secret_placeholder')

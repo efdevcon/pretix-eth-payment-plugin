@@ -44,7 +44,7 @@ tools, not x402-only; the devcon-next proxies were updated to match).
 """
 from django.urls import path
 from pretix.multidomain import event_path
-from pretix_eth import views, views_x402, views_admin  # noqa: F401 (views_x402 kept for the commented-out x402 routes below)
+from pretix_eth import views, views_x402, views_admin, views_upi  # noqa: F401 (views_x402 kept for the commented-out x402 routes below)
 
 
 # Routes — registered twice with fresh URLPattern instances per registration.
@@ -127,5 +127,20 @@ def _x402_routes():
     ]
 
 
-event_patterns = _wc_routes() + _admin_routes() + _x402_routes()
+def _upi_routes():
+    """UPI via Stripe Checkout (prototype, `payment_upi.py`): the buyer's
+    return from Stripe's page and the Stripe webhook. Event-scoped only: the
+    return URL is built with `build_absolute_uri`, which resolves to the
+    event domain, and the webhook URL is configured per event in Stripe.
+    `require_live=False` on the webhook: Stripe keeps posting while the shop
+    is offline, and a 403 there would make it retry for days.
+    """
+    return [
+        path('plugin/upi/return/<str:order>/<str:secret_hash>/<int:payment>/',
+             views_upi.upi_return, name='upi_return'),
+        event_path('plugin/upi/webhook/', views_upi.upi_webhook, name='upi_webhook', require_live=False),
+    ]
+
+
+event_patterns = _wc_routes() + _admin_routes() + _x402_routes() + _upi_routes()
 urlpatterns = _wc_routes() + _admin_routes() + _x402_routes()
